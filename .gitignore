@@ -39,3 +39,9 @@ Thumbs.db
 # Logs
 *.log
 
+# User data
+wiki/
+raw/
+
+# Jupyter
+.ipynb_checkpoints/

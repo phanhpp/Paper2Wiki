@@ -86,50 +86,69 @@ DAYTONA_API_KEY=...          # from daytona.io dashboard
 ```
 paper2wiki/
 ├── README.md
-├── AGENTS.md                    # wiki schema loaded at agent startup
 ├── pyproject.toml
+├── langgraph.json              ← LangSmith deployment config
 ├── .env
 ├── .env.example
+├── .gitignore
+│
+├── memories/
+│   └── AGENTS.md               ← pre-created by you
+│                                  preferences.md created by agent
 │
 ├── src/
-│   ├── supervisor.py            # main agent
-│   ├── ingest.py                # ingest subagent
-│   ├── code.py                  # code subagent
-│   ├── query.py                 # query subagent
+│   ├── supervisor.py
+│   ├── ingest.py
+│   ├── code.py
+│   ├── query.py
 │   └── middleware/
 │       ├── loop_detection.py
 │       ├── precomplete_checklist.py
 │       └── local_context.py
 │
 ├── skills/
-│   ├── paper-ingestion/SKILL.md
-│   ├── wiki-maintenance/SKILL.md
-│   ├── citation/SKILL.md
-│   ├── mermaid/SKILL.md
+│   ├── paper-ingestion/
+│   │   ├── SKILL.md
+│   │   └── fetch_arxiv.py
+│   ├── wiki-maintenance/
+│   │   ├── SKILL.md
+│   │   └── lint.py
+│   ├── citation/
+│   │   ├── SKILL.md
+│   │   └── parse_citations.py
+│   ├── mermaid/
+│   │   ├── SKILL.md
+│   │   └── validate.sh
+│   ├── trace-analyzer/
+│   │   ├── SKILL.md
+│   │   └── analyze.py
+│   ├── wiki-health/
+│   │   └── SKILL.md
 │   ├── plotting/SKILL.md
 │   ├── paper-impl/SKILL.md
 │   ├── data-verify/SKILL.md
-│   ├── marp/SKILL.md
-│   ├── trace-analyzer/SKILL.md
-│   └── wiki-health/SKILL.md
+│   └── marp/SKILL.md
 │
-├── scripts/
-│   ├── lint.py                  # wiki health check (Type 1)
-│   └── fetch_arxiv.py           # fetch papers by URL/DOI
-│
-├── wiki/                        # LLM-maintained (gitignored initially)
+├── wiki/                       ← gitignored
 │   ├── index.md
 │   ├── log.md
 │   ├── papers/
 │   ├── concepts/
 │   ├── entities/
 │   ├── comparisons/
-│   └── graph/
+│   ├── syntheses/
+│   ├── graph/
+│   ├── outputs/
+│   └── health/
 │
-├── raw/                         # your source papers (immutable)
+├── raw/                        ← gitignored
 │
-└── notebooks/
-    └── explore.ipynb
+├── notebooks/
+│   └── explore.ipynb
+│
+└── tests/
+    ├── test_lint.py
+    └── test_skill_format.py
 ```
 
 ---
