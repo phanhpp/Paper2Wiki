@@ -1,0 +1,25 @@
+# core
+deepagents
+langchain[openai]
+langchain[anthropic]
+
+# deployment and tracing
+langsmith
+
+# sandbox
+langchain-daytona
+# Notebook
+ipykernel
+jupyter
+
+# Dev
+python-dotenv
+pytest
+
+# ArXiv fetching
+arxiv>=2.0.0
+requests
+
+# PDF processing
+pypdf>=4.0.0
+pymupdf
