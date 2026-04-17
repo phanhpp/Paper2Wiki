@@ -94,7 +94,7 @@ paper2wiki/
 │
 ├── memories/
 │   └── AGENTS.md               ← pre-created by you
-│                                  preferences.md created by agent
+│                               preferences.md created by agent
 │
 ├── src/
 │   ├── supervisor.py
@@ -110,11 +110,7 @@ paper2wiki/
 │   ├── paper-ingestion/
 │   │   ├── SKILL.md
 │   │   └── fetch_arxiv.py
-│   ├── wiki-maintenance/
-│   │   ├── SKILL.md
 │   │   └── lint.py
-│   ├── citation/
-│   │   ├── SKILL.md
 │   │   └── parse_citations.py
 │   ├── mermaid/
 │   │   ├── SKILL.md
@@ -125,8 +121,6 @@ paper2wiki/
 │   ├── wiki-health/
 │   │   └── SKILL.md
 │   ├── plotting/SKILL.md
-│   ├── paper-impl/SKILL.md
-│   ├── data-verify/SKILL.md
 │   └── marp/SKILL.md
 │
 ├── wiki/                       ← gitignored
@@ -152,73 +146,6 @@ paper2wiki/
 ```
 
 ---
-
-## Usage
-
-### Ingest a paper
-
-```python
-from src.supervisor import agent
-
-# From local PDF
-result = agent.invoke({
-    "messages": [{"role": "user", "content": "Ingest raw/attention_is_all_you_need.pdf"}]
-}, config={"configurable": {"thread_id": "session-1"}})
-
-# From arXiv
-result = agent.invoke({
-    "messages": [{"role": "user", "content": "Ingest https://arxiv.org/abs/1706.03762"}]
-}, config={"configurable": {"thread_id": "session-1"}})
-```
-
-### Query the wiki
-
-```python
-result = agent.invoke({
-    "messages": [{"role": "user", "content": "How did attention mechanisms evolve from 2017 to 2022?"}]
-}, config={"configurable": {"thread_id": "session-2"}})
-```
-
-### Request coding task (triggers HITL + sandbox)
-
-```python
-result = agent.invoke({
-    "messages": [{"role": "user", "content": "Generate a mermaid diagram of the transformer architecture from bert.md"}]
-}, config={"configurable": {"thread_id": "session-3"}}, version="v2")
-
-# Check for HITL interrupt
-if result.interrupts:
-    # Review proposed code/command, then resume
-    from langgraph.types import Command
-    result = agent.invoke(
-        Command(resume={"decisions": [{"type": "approve"}]}),
-        config={"configurable": {"thread_id": "session-3"}},
-        version="v2"
-    )
-```
-
-### Run self-improvement (manual)
-
-```python
-# Analyze traces and improve skills
-result = agent.invoke({
-    "messages": [{"role": "user", "content": "Run trace analyzer and improve skills based on recent failures"}]
-}, config={"configurable": {"thread_id": "improve-1"}})
-
-# Wiki health check
-result = agent.invoke({
-    "messages": [{"role": "user", "content": "Run wiki health check"}]
-}, config={"configurable": {"thread_id": "health-1"}})
-```
-
-### Run lint manually
-
-```bash
-python scripts/lint.py --wiki-dir wiki/
-```
-
----
-
 ## How The Wiki Works (Karpathy Pattern)
 
 ```

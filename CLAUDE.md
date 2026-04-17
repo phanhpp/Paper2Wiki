@@ -35,9 +35,9 @@ Required `.env` vars: `ANTHROPIC_API_KEY`, `LANGSMITH_API_KEY`, `LANGSMITH_TRACI
 ### Agent Hierarchy
 ```
 Supervisor Agent (src/supervisor.py)
-├── Ingest Subagent  (src/ingest.py)   → PDF/arXiv → wiki pages
+├── Ingest Subagent  (src/ingest.py)   → PDF / arXiv URL / DOI / web article / topic → wiki pages
 ├── Code Subagent    (src/code.py)     → coding tasks in Daytona sandbox + HITL
-└── Query Subagent   (src/query.py)    → questions → answers → filed back to wiki
+└── Query Subagent   (src/query.py)    → questions → web + wiki → answers → filed back to wiki
 ```
 
 ### Middleware (src/middleware/)
@@ -46,25 +46,34 @@ Supervisor Agent (src/supervisor.py)
 - `local_context.py` — injects local filesystem context
 
 ### Skills (skills/<name>/SKILL.md)
-On-demand capabilities loaded by agents: `paper-ingestion`, `wiki-maintenance`, `citation`, `mermaid`, `plotting`, `paper-impl`, `data-verify`, `marp`, `trace-analyzer`, `wiki-health`. The `trace-analyzer` skill reads LangSmith failure traces and rewrites other skill files (self-improvement). All skill edits require HITL approval.
+
+| Subagent | Skills |
+|---|---|
+| Ingest | `paper-ingestion` — all input types, wiki page creation, wikilinks, index, log, lint, git, image handling, citation graph |
+| Code | `mermaid`, `plotting`, `marp` |
+| Supervisor (manual) | `trace-analyzer`, `wiki-health` |
+
+The `trace-analyzer` skill reads LangSmith failure traces and rewrites other skill files (self-improvement). All skill edits require HITL approval.
 
 ### Storage Layout
 ```
-raw/        ← source papers (IMMUTABLE — never modify)
-wiki/       ← agent-maintained knowledge base
-  index.md      ← catalog of all pages (updated every ingest)
-  log.md        ← append-only chronological record
-  overview.md   ← evolving synthesis
-  papers/       ← one .md per paper
-  concepts/     ← cross-paper concept pages
-  entities/     ← authors, institutions
-  comparisons/  ← synthesized comparisons
-  syntheses/    ← query answers filed back as pages
-  graph/        ← citation graph edges (JSON)
-  outputs/      ← generated artifacts
-  health/       ← lint reports
-skills/     ← self-improving skill files
-memories/   ← AGENTS.md (wiki schema) + preferences.md
+raw/                ← source papers (IMMUTABLE — never modify)
+wiki/               ← agent-maintained knowledge base
+  index.md              ← catalog of all pages (updated every ingest)
+  log.md                ← append-only chronological record
+  overview.md           ← evolving synthesis
+  papers/               ← one .md per paper
+  concepts/             ← cross-paper concept pages
+  entities/             ← authors, institutions
+  comparisons/          ← synthesized comparisons
+  syntheses/            ← query answers filed back as pages
+  graph/                ← citation graph edges (JSON)
+  outputs/              ← generated artifacts
+  health/               ← lint reports
+skills/             ← self-improving skill files
+memories/           ← AGENTS.md (wiki schema) + preferences.md
+workspace/          ← ephemeral scratch (StateBackend)
+sandbox/            ← Daytona, thread-scoped (Code subagent only)
 ```
 
 ## Wiki Page Conventions
@@ -84,11 +93,22 @@ tags: [tag1, tag2]
 
 Wikilinks use `[[slug]]` format (slug = filename without `.md`, lowercase, underscores). Every page must have outbound wikilinks — a page without them is incomplete.
 
+## HITL Gates
+
+```
+Ingest:   git_commit_and_push         → approve / reject
+Code:     write_file                  → approve / edit / reject
+          edit_file                   → approve / edit / reject
+          execute                     → approve / edit / reject
+Improve:  edit_file  on skills/       → approve / reject
+          write_file on skills/       → approve / reject
+```
+
 ## Key Invariants
 
 - `raw/` is read-only — never write to it
 - After every ingest: run lint, update `wiki/index.md`, append to `wiki/log.md`
-- Git commits go through `git_commit_and_push` tool with HITL approval
+- All HITL gates must be respected — see table above
 - Valuable query answers get filed back into `wiki/comparisons/` or `wiki/syntheses/`
 - Contradictions between pages → flag in health report, never auto-resolve
-- `AGENTS.md` is loaded at agent startup and defines the authoritative wiki schema
+- `AGENTS.md` defines the authoritative wiki schema and is loaded at agent startup
