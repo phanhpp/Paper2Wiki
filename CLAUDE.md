@@ -30,6 +30,12 @@ python scripts/lint.py --wiki-dir wiki/
 
 Required `.env` vars: `ANTHROPIC_API_KEY`, `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT`, `DAYTONA_API_KEY`.
 
+## PDF Parsing Notes
+
+- **Default**: Prefer the in-repo PyMuPDF parser (`src/tools/parsers/pdf.py`) for dependable, fast text extraction.
+- **Avoid `marker-pdf`**: Often **very slow** (model download/load on first run, CPU-only performance) and can be impractical for routine ingestion.
+- **Avoid `pdfplumber`**: Frequently produces **poor reading order/structure** on academic PDFs; treat as unreliable for primary parsing.
+
 ## Architecture
 
 ### Agent Hierarchy
@@ -93,7 +99,7 @@ tags: [tag1, tag2]
 
 Wikilinks use `[[slug]]` format (slug = filename without `.md`, lowercase, underscores). Every page must have outbound wikilinks — a page without them is incomplete.
 
-## HITL Gates
+## HITL Gates(Implement later, not relevant in current scope)
 
 ```
 Ingest:   git_commit_and_push         → approve / reject

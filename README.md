@@ -95,7 +95,6 @@ paper2wiki/
 ├── memories/
 │   └── AGENTS.md               ← pre-created by you
 │                               preferences.md created by agent
-│
 ├── src/
 │   ├── supervisor.py
 │   ├── ingest.py

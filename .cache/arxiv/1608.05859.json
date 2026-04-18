@@ -1,0 +1,18 @@
+{
+  "title": "Using the Output Embedding to Improve Language Models",
+  "authors": [
+    "Ofir Press",
+    "Lior Wolf"
+  ],
+  "pdf_path": "/Users/dangphuonganh/Documents/llm_wiki/raw/papers/using_the_output_embedding_to_improve_language_models.pdf",
+  "metadata": {
+    "arxiv_id": "1608.05859v3",
+    "doi": null,
+    "published": "2016-08-20",
+    "updated": "2017-02-21",
+    "categories": [
+      "cs.CL"
+    ],
+    "url": "http://arxiv.org/abs/1608.05859v3"
+  }
+}
