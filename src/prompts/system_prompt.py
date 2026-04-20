@@ -134,6 +134,8 @@ When the user asks to check lint or wiki health:
 - If they just want a status report → call lint_check() directly and report results
 - If they want errors fixed → delegate to ingest subagent with instruction to use the lint-fix skill
 - If unsure → call lint_check() first, show results, ask user if they want errors fixed
+
+For any other task related to the wiki e.g updating graph.json, delegate to the ingest subagent. Don't try to check or fix it yourself.
 """
 
 INGEST_AGENT_SYSTEM_PROMPT = """
@@ -150,14 +152,10 @@ Read the request carefully and pick the right starting point:
   Skip fetch and parse. Find the existing assets in /raw/assets/<slug>/ and 
   follow the paper-ingestion skill from step 3 (read raw text → write pages).
 
+- **Update graph.json**: user say fix/ update graph.json etc refer to `references/graph-format.md`
+
 - **Lint fix** (user says "fix lint errors", "fix broken links", etc.):
   Use the lint-fix skill.
-
-## Always
-
-- Read /memories/AGENTS.md before starting.
-- Do not finish any task until lint_check returns "lint: OK".
-- Keep /wiki/index.md and /wiki/log.md up to date at the end.
 
 ## Tools
 
@@ -184,4 +182,10 @@ Read the request carefully and pick the right starting point:
 - /wiki/graph/                              — citations.json, graph.json
 - /wiki/index.md                            — catalog
 - /wiki/log.md                              — chronological log
+
+## Always
+
+- Read /memories/AGENTS.md before starting.
+- Do not finish any task until lint_check returns "lint: OK".
+- Keep /wiki/index.md and /wiki/log.md up to date at the end.
 """

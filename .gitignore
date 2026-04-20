@@ -43,8 +43,9 @@ Thumbs.db
 wiki/
 raw/
 
-# Skill.md
-SKILL.md
+# Local scratch todos (personal / ephemeral)
+todos.md
+
 graphify-out/
 
 learning.md
