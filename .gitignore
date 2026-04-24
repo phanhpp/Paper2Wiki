@@ -45,7 +45,8 @@ raw/
 
 # Local scratch todos (personal / ephemeral)
 todos.md
-
 graphify-out/
-
+notebooks/
 learning.md*.ipynb
+.aws/
+skills/deprecated/

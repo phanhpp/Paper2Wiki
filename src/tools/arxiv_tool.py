@@ -2,10 +2,8 @@ import json
 import re
 from difflib import SequenceMatcher
 from pathlib import Path
-
 import arxiv
 from langchain_core.tools import tool
-
 from src.tools.utils import get_wiki_root, norm_title, title_score
 
 WIKI_ROOT = get_wiki_root()

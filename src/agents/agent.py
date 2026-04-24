@@ -7,29 +7,19 @@ from src.tools.lint import lint_check
 from src.prompts.system_prompt import INGEST_AGENT_SYSTEM_PROMPT, PHASE_1_SUPERVISOR_PROMPT
 from langchain_anthropic import ChatAnthropic
 import os
-
+from langgraph.store.memory import InMemoryStore
+from langgraph.checkpoint.memory import MemorySaver
+from src.agents.backend_wrapper import SecretGuardWrapper
+#Human-in-the-loop requires a checkpointer to persist agent state between the interrupt and resume
+checkpointer = MemorySaver()
 # 1. Check if user set a specific path in their .env
 # 2. If not, default to the folder inside the repo
 # src/agents/agent.py → parents[2] = repo root
-repo_root    = Path(__file__).resolve().parents[2]
-WIKI_PATH = os.getenv("WIKI_PATH", repo_root / "wiki")
+REPO_ROOT    = Path(__file__).resolve().parents[2] 
+WIKI_PATH = os.getenv("WIKI_PATH", REPO_ROOT / "wiki")
 
-# skills_dir   = repo_root / "skills"
-# raw_dir      = repo_root / "raw"
-# memories_dir = repo_root / "memories"
-
-print(f"repo_root: {repo_root}")
-print(f"wiki_dir:  {WIKI_PATH}")
-
-
-# TODO: put the args in config file
-subagent_llm = ChatAnthropic(
-    model="claude-haiku-4-5-20251001", # Fastest latency
-    max_retries=8,
-    timeout=120.0
-    # not support adaptive thinking but does support extended thinking
-    # only Opus and Sonnet 4.5+ support effort parameter
-)
+print(f"REPO_ROOT: {REPO_ROOT}")
+print(f"WIKI_PATH:  {WIKI_PATH}")
 
 supervisor_llm = ChatAnthropic(
     model="claude-sonnet-4-6",
@@ -40,6 +30,42 @@ supervisor_llm = ChatAnthropic(
     # temperature=0.0,
     max_tokens=8000,
 )
+
+inner_backend = LocalShellBackend(root_dir=str(REPO_ROOT))
+backend = SecretGuardWrapper(inner_backend)
+
+agent = create_deep_agent(
+    model=supervisor_llm,
+    skills=["/skills/"],
+    memory=["/memories/AGENTS.md"],
+    system_prompt=PHASE_1_SUPERVISOR_PROMPT,
+    backend=backend,
+    # subagents=[ingest_subagent],
+    tools=all_tools, # custom tools plus built-in: read_file, write_file, edit_file, ls, glob, grep, execute
+    store=InMemoryStore(),
+    checkpointer=checkpointer,  # Required!
+    interrupt_on={
+        "execute": {"allowed_decisions": ["approve", "edit", "reject"]},
+        # Also gate destructive filesystem ops
+        "write_file": True,
+        "edit_file": True,
+        "ls": True, 
+        "read_file": {"allowed_decisions": ["approve", "reject"]},
+    },
+)
+
+
+
+# # TODO: put the args in config file
+# subagent_llm = ChatAnthropic(
+#     model="claude-haiku-4-5-20251001", # Fastest latency
+#     max_retries=8,
+#     timeout=120.0
+#     # not support adaptive thinking but does support extended thinking
+#     # only Opus and Sonnet 4.5+ support effort parameter
+# )
+
+print(PHASE_1_SUPERVISOR_PROMPT)
 
 # ingest_subagent = {
 #     "name": "ingest",
@@ -66,13 +92,3 @@ supervisor_llm = ChatAnthropic(
 #             "/memories/": FilesystemBackend(root_dir=str(memories_dir), virtual_mode=True),
 #         },
 #     )
-agent = create_deep_agent(
-    model=supervisor_llm,
-    skills=["/skills/"],
-    memory=["/memories/AGENTS.md"],
-    system_prompt=PHASE_1_SUPERVISOR_PROMPT,
-    backend=LocalShellBackend(root_dir=str(repo_root)),
-    # subagents=[ingest_subagent],
-    # tools=[lint_check],
-)
-print(PHASE_1_SUPERVISOR_PROMPT)

@@ -1,4 +1,5 @@
 import re
+import shutil
 from pathlib import Path
 from langchain_core.tools import tool
 from src.tools.utils import get_wiki_root
@@ -219,8 +220,8 @@ def parse_pdf_docling(
         tables_dir.mkdir(parents=True, exist_ok=True)
 
     # ``save_as_markdown(REFERENCED)`` writes ``<slug>_artifacts/*.png`` next to
-    # ``<slug>.md`` under ``raw/assets/<slug>/``. Rewrite absolute ``![](...)`` URLs
-    # to paths relative to that directory for Markdown previews.
+    # ``<slug>.md`` under ``raw/assets/<slug>/``. We normalize this to ``images/``
+    # for stable downstream paths and rewrite markdown links accordingly.
 
     result = converter.convert(str(pdf_path))
     doc = result.document
@@ -228,12 +229,26 @@ def parse_pdf_docling(
     markdown_path: Path | None = None
     if parse_images:
         markdown_path = slug_dir / f"{slug}.md"
+        legacy_artifacts_dir = slug_dir / f"{slug}_artifacts"
+        images_dir = slug_dir / "images"
         doc.save_as_markdown(
             str(markdown_path.resolve()),
             image_mode=ImageRefMode.REFERENCED,
         )
         md = markdown_path.read_text(encoding="utf-8")
         md = _rewrite_markdown_local_images_to_relative(md, markdown_path)
+        md = md.replace(f"{slug}_artifacts/", "images/")
+
+        # Normalize Docling's `<slug>_artifacts/` output directory to `images/`.
+        if legacy_artifacts_dir.exists():
+            images_dir.mkdir(parents=True, exist_ok=True)
+            for img in legacy_artifacts_dir.glob("*.png"):
+                shutil.move(str(img), str(images_dir / img.name))
+            try:
+                legacy_artifacts_dir.rmdir()
+            except OSError:
+                # Leave non-empty dirs untouched (defensive for future Docling changes).
+                pass
     else:
         md = doc.export_to_markdown()
 
@@ -280,10 +295,10 @@ def parse_pdf_docling(
     }
 
     if parse_images and markdown_path is not None:
-        artifacts_dir = markdown_path.parent / "images"
-        image_count = len(list(artifacts_dir.glob("*.png")))
+        images_dir = markdown_path.parent / "images"
+        image_count = len(list(images_dir.glob("*.png")))
         result_dict["markdown_path"] = str(markdown_path.resolve())
-        result_dict["images_dir"] = str(artifacts_dir.resolve())
+        result_dict["images_dir"] = str(images_dir.resolve())
         result_dict["images"] = image_count
 
     if save_table_images:

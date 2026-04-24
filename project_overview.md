@@ -189,3 +189,13 @@ lint.py (programmatic):          LLM judgment (wiki-health skill):
 - log rotation threshold
 - sha256 drift on raw/
 ```
+
+# Tests
+
+- test fetch_arxiv really saved file
+
+# TODOs:
+
+- make use of tables and images
+- ingest anything
+- create auto tests

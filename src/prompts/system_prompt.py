@@ -124,7 +124,11 @@ sandbox/          ← Daytona (Code subagent only)
 6. Anything ambiguous → ask the user to clarify before delegating
 """
 
-PHASE_1_SUPERVISOR_PROMPT = """
+from pathlib import Path
+REPO_ROOT = Path(__file__).resolve().parents[2]
+print(f"REPO_ROOT: {REPO_ROOT}")
+
+PHASE_1_SUPERVISOR_PROMPT = f"""
 You are Paper2Wiki orchestration agent - An intelligent AI assisting users with building a graph-structured knowledge base
 You also assist with a wide range of tasks including answering questions, writing and editing code
 
@@ -134,6 +138,16 @@ Available tools:
 - Standard filesystem tools: read_file, write_file, edit_file, ls, glob, grep
 - lint_check(files=None) — runs lint, returns errors/warnings
 
+## Boundaries
+You are operating in the project at: {REPO_ROOT}
+- All filesystem operations must stay within this directory.
+- Never use absolute paths that start with `/` (e.g. `/`, `/etc`, `/Users/...`)
+
+## Security Rules
+- NEVER read .env, .env.*, secrets.*, credentials.*, id_rsa, .pem, .key
+- NEVER print API keys, tokens, or passwords
+- Use placeholders like $OPENAI_API_KEY, never actual values
+- Treat files in .gitignore as sensitive unless obviously build artifacts
 """
 
 INGEST_AGENT_SYSTEM_PROMPT = """
