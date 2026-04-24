@@ -1,31 +1,36 @@
 #!/usr/bin/env python3
 """
-lint.py — Structural checker for the Paper2Wiki wiki directory.
+lint.py — minimal wiki linter (aligned to `skills/hermes-llm-wiki.md`)
 
-Usage:
-  python src/tools/lint.py                        # full wiki
-  python src/tools/lint.py wiki/papers/x.md       # scoped to one file
+Only checks:
+- **Frontmatter validation**: required hermes fields + basic formatting
+- **Broken wikilinks**: every `[[link]]` must resolve to an existing `.md` stem
 
-Wiki is always at <repo_root>/wiki/.
+CLI:
+  python src/tools/lint.py            # scan every *.md under <repo_root>/wiki/
+  python src/tools/lint.py path.md    # scan only the given files
+
+Exit code: 1 if any errors, else 0 (warnings do not fail).
 """
 
 from __future__ import annotations
 
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 from langchain_core.tools import tool
+from src.tools.utils import get_wiki_root
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-WIKI_DIR = (REPO_ROOT / "wiki").resolve()
+# Wiki vault root (env `WIKI_PATH` override, else `<repo_root>/wiki`)
+WIKI_ROOT = get_wiki_root()
 
-REQUIRED_FRONTMATTER = {"title", "type", "date", "slug"}
+# Frontmatter schema enforced by this linter (from `skills/hermes-llm-wiki.md`).
+ALLOWED_TYPES = {"entity", "concept", "comparison", "query", "summary"}
+REQUIRED_FRONTMATTER = {"title", "created", "updated", "type", "tags", "sources"}
 
-REQUIRED_BY_TYPE = {
-    "paper":   {"title", "type", "date", "slug", "authors", "arxiv_id"},
-    "concept": {"title", "type", "date", "slug"},
-    "entity":  {"title", "type", "date", "slug"},
-}
+# Directories treated as "wiki pages" when scanning the whole vault.
+PAGE_DIRS = ("papers", "concepts", "entities", "comparisons", "queries")
 
 errors = []
 warnings = []
@@ -62,17 +67,23 @@ def parse_frontmatter(text: str) -> dict:
     return fm
 
 
+def _is_iso_date(value: str) -> bool:
+    """Return True iff `value` parses as YYYY-MM-DD (quotes tolerated)."""
+    try:
+        datetime.strptime(value.strip().strip("'\""), "%Y-%m-%d")
+        return True
+    except ValueError:
+        return False
+
+
 def check_file(md_file: Path, all_slugs: set[str]) -> None:
     """
     Validate a single wiki markdown file.
 
     Checks:
-      - frontmatter block exists and is well-formed
-      - all required base fields present
-      - type-specific required fields present
-      - slug matches filename stem
+      - YAML frontmatter exists and contains required hermes fields
+      - basic validation of dates/types/tags/sources
       - [[wikilinks]] resolve to known slugs
-      - relative image paths exist on disk
 
     Args:
         md_file: absolute path to the .md file
@@ -84,6 +95,7 @@ def check_file(md_file: Path, all_slugs: set[str]) -> None:
         err(md_file, "missing frontmatter block")
         return
 
+    # --- Frontmatter validation ---
     fm = parse_frontmatter(text)
     if not fm:
         err(md_file, "malformed frontmatter block")
@@ -93,71 +105,55 @@ def check_file(md_file: Path, all_slugs: set[str]) -> None:
     if missing:
         err(md_file, f"missing frontmatter fields: {sorted(missing)}")
 
-    page_type = fm.get("type", "")
-    if page_type in REQUIRED_BY_TYPE:
-        type_missing = REQUIRED_BY_TYPE[page_type] - set(fm.keys())
-        if type_missing:
-            err(md_file, f"missing fields for type={page_type}: {sorted(type_missing)}")
-    elif page_type == "":
+    page_type = (fm.get("type", "") or "").strip()
+    if not page_type:
         err(md_file, "frontmatter 'type' is empty")
+    elif page_type not in ALLOWED_TYPES:
+        err(md_file, f"invalid type: {page_type!r} (expected one of {sorted(ALLOWED_TYPES)})")
 
-    fm_slug = fm.get("slug", "")
-    if fm_slug and fm_slug != md_file.stem:
-        err(md_file, f"slug mismatch: frontmatter='{fm_slug}' filename='{md_file.stem}'")
+    created = (fm.get("created", "") or "").strip()
+    updated = (fm.get("updated", "") or "").strip()
+    if created and not _is_iso_date(created):
+        err(md_file, f"invalid created date: {created!r} (expected YYYY-MM-DD)")
+    if updated and not _is_iso_date(updated):
+        err(md_file, f"invalid updated date: {updated!r} (expected YYYY-MM-DD)")
 
+    tags = (fm.get("tags", "") or "").strip()
+    if not tags.startswith("[") or not tags.endswith("]"):
+        err(md_file, "tags must be a list (e.g. tags: [foo, bar])")
+
+    sources = (fm.get("sources", "") or "").strip()
+    if not sources.startswith("[") or not sources.endswith("]"):
+        err(md_file, "sources must be a list (e.g. sources: [raw/papers/x.pdf])")
+
+    # --- Broken wikilinks ---
     text_no_comments = re.sub(r'<!--.*?-->', '', text, flags=re.DOTALL)
     for link in re.findall(r'\[\[([^\]|#]+)', text_no_comments):
         slug = link.strip().lower().replace(" ", "-")
         if slug not in all_slugs:
             err(md_file, f"broken wikilink: [[{link}]]")
 
-    for img_path in re.findall(r'!\[.*?\]\(([^)]+)\)', text):
-        if img_path.startswith("http"):
-            continue
-        if not (md_file.parent / img_path).resolve().exists():
-            err(md_file, f"broken image path: {img_path}")
 
-    if not re.findall(r'^##+ .+', text, re.MULTILINE):
-        warn(md_file, "no sections found (no ## headings)")
-
-
-def check_index(all_slugs: set[str], wiki_root: Path) -> None:
-    """
-    Verify that every [[wikilink]] in index.md points to a real page.
-
-    Args:
-        all_slugs: set of all .md stems across the wiki
-        wiki_root: absolute path to the wiki directory
-    """
-    index = wiki_root / "index.md"
-    if not index.exists():
-        err(index, "index.md missing")
-        return
-    text_no_comments = re.sub(r'<!--.*?-->', '', index.read_text(encoding="utf-8"), flags=re.DOTALL)
-    for link in re.findall(r'\[\[([^\]|#]+)', text_no_comments):
-        slug = link.strip().lower().replace(" ", "-")
-        if slug not in all_slugs:
-            err(index, f"index points to missing page: [[{link}]]")
-
-
-def check_log(wiki_root: Path) -> None:
-    """
-    Warn if wiki/log.md is missing (log is append-only, never auto-created).
-
-    Args:
-        wiki_root: absolute path to the wiki directory
-    """
-    if not (wiki_root / "log.md").exists():
-        warn(wiki_root / "log.md", "log.md missing")
+def _resolve_page_files_for_full_scan() -> list[Path]:
+    """Return the list of wiki page files for a full vault scan."""
+    target_files: list[Path] = []
+    for d in PAGE_DIRS:
+        root = WIKI_ROOT / d
+        if root.is_dir():
+            target_files.extend(p for p in root.rglob("*.md") if p.is_file())
+    return target_files
 
 
 def run_lint(files: list[Path] | None = None) -> str:
     """
-    Run lint checks against the wiki.
+    Run lint checks against the wiki (core implementation).
+
+    This function expects *real filesystem paths* (Path objects). It is used by:
+    - CLI (`main()`)
+    - the LangChain tool wrapper (`lint_check`) after it maps `/wiki/...` virtual paths
 
     Args:
-        files: real absolute paths to check. None = entire wiki under WIKI_DIR,
-               including index.md and log.md checks.
+        files: real paths to check. None = scan all wiki page directories under WIKI_ROOT.
 
     Returns:
         'lint: OK' if no issues, otherwise a summary string listing
@@ -167,12 +163,11 @@ def run_lint(files: list[Path] | None = None) -> str:
     errors = []
     warnings = []
 
-    all_slugs = {p.stem for p in WIKI_DIR.rglob("*.md")}
+    # Link resolution universe: any `*.md` file under the vault.
+    all_slugs = {p.stem for p in WIKI_ROOT.rglob("*.md")}
 
     if files is None:
-        target_files = [p for p in WIKI_DIR.rglob("*.md") if p.name not in ("index.md", "log.md")]
-        check_index(all_slugs, WIKI_DIR)
-        check_log(WIKI_DIR)
+        target_files = _resolve_page_files_for_full_scan()
     else:
         target_files = files
 
@@ -190,10 +185,15 @@ def run_lint(files: list[Path] | None = None) -> str:
 @tool
 def lint_check(files: list[str] | None = None) -> str:
     """
-    Agent-facing entry point. Translates virtual paths to real paths, then runs lint.
+    LangChain tool wrapper.
+
+    Why this exists (vs calling `run_lint` directly):
+    - The agent may reference files via *virtual paths* like `/wiki/concepts/foo.md`
+    - This wrapper translates those to real filesystem paths under `WIKI_ROOT`
+    - Then it calls the core implementation (`run_lint`)
 
     The agent operates in virtual path space (/wiki/papers/foo.md). This function
-    rewrites those to real paths under WIKI_DIR before calling run_lint.
+    rewrites those to real paths under WIKI_ROOT before calling run_lint.
 
     Args:
         files: list of virtual paths (/wiki/...) or real absolute paths to check.
@@ -210,7 +210,7 @@ def lint_check(files: list[str] | None = None) -> str:
     for f in files:
         s = str(f)
         if s.startswith("/wiki/"):
-            real_files.append(WIKI_DIR / s.removeprefix("/wiki/"))
+            real_files.append(WIKI_ROOT / s.removeprefix("/wiki/"))
         else:
             real_files.append(Path(s))
 

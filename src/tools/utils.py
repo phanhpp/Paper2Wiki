@@ -7,8 +7,10 @@ anywhere without creating dependency cycles.
 
 from __future__ import annotations
 
+import os
 import re
 from difflib import SequenceMatcher
+from pathlib import Path
 
 
 def norm_title(s: str) -> str:
@@ -46,4 +48,20 @@ def title_score(query: str, candidate_title: str) -> float:
     contains_bonus = 0.15 if q in t else 0.0
 
     return 100.0 * (0.65 * ratio + 0.35 * overlap + contains_bonus)
+
+
+def get_repo_root() -> Path:
+    """Return the repository root (this file lives under `src/tools/`)."""
+    return Path(__file__).resolve().parents[2]
+
+
+def get_wiki_root() -> Path:
+    """
+    Resolve the wiki vault root directory.
+
+    Priority:
+    - `WIKI_PATH` environment variable (supports `~`)
+    - `<repo_root>/wiki`
+    """
+    return Path(os.environ.get("WIKI_PATH", get_repo_root() / "wiki")).expanduser().resolve()
 

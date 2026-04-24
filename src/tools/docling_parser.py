@@ -1,8 +1,9 @@
 import re
 from pathlib import Path
 from langchain_core.tools import tool
+from src.tools.utils import get_wiki_root
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+WIKI_ROOT = get_wiki_root()
 
 # Some arXiv/Google PDFs lead with this paragraph before the paper title.
 _BOILERPLATE_LEAD_RE = re.compile(
@@ -175,7 +176,7 @@ def parse_pdf_docling(
           - body_chars (int): character count of main text (abstract + references stripped)
           - table_blocks (int): number of GFM table blocks in the markdown export
           - markdown_path (str): absolute path to raw/assets/<slug>/<slug>.md
-          - images_dir (str): absolute path to raw/assets/<slug>/<slug>_artifacts/
+          - images_dir (str): absolute path to raw/assets/<slug>/images/
           - images (int): number of figure PNGs saved in images_dir
           - tables_dir (str): absolute path to raw/assets/<slug>/tables/
           - table_images (int): number of table PNGs saved in tables_dir
@@ -210,7 +211,7 @@ def parse_pdf_docling(
 
     pdf_path = Path(path)
     slug = pdf_path.stem
-    slug_dir = REPO_ROOT / "raw" / "assets" / slug
+    slug_dir = WIKI_ROOT / "raw" / "assets" / slug
     tables_dir = slug_dir / "tables"
     if parse_images or save_table_images:
         slug_dir.mkdir(parents=True, exist_ok=True)
@@ -279,7 +280,7 @@ def parse_pdf_docling(
     }
 
     if parse_images and markdown_path is not None:
-        artifacts_dir = markdown_path.parent / f"{markdown_path.stem}_artifacts"
+        artifacts_dir = markdown_path.parent / "images"
         image_count = len(list(artifacts_dir.glob("*.png")))
         result_dict["markdown_path"] = str(markdown_path.resolve())
         result_dict["images_dir"] = str(artifacts_dir.resolve())

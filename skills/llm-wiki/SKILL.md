@@ -1,31 +1,28 @@
 ---
 name: llm-wiki
 description: "Karpathy's LLM Wiki — build and maintain a persistent, interlinked markdown knowledge base. Ingest sources, query compiled knowledge, and lint for consistency."
-version: 2.1.0
-author: Hermes Agent
+version: 0
+author: Hermes Agent - modified by Phanhpp
 license: MIT
 metadata:
-  hermes:
+  Paper2Wiki:
     tags: [wiki, knowledge-base, research, notes, markdown, rag-alternative]
     category: research
-    related_skills: [obsidian, arxiv]
 ---
+
+<!-- markdownlint-disable MD013 -->
 
 # Karpathy's LLM Wiki
 
 Build and maintain a persistent, compounding knowledge base as interlinked markdown files.
 Based on [Andrej Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f).
 
-Unlike traditional RAG (which rediscovers knowledge from scratch per query), the wiki
-compiles knowledge once and keeps it current. Cross-references are already there.
-Contradictions have already been flagged. Synthesis reflects everything ingested.
-
-**Division of labor:** The human curates sources and directs analysis. The agent
-summarizes, cross-references, files, and maintains consistency.
+Unlike traditional RAG (which rediscovers knowledge from scratch per query), the wiki compiles knowledge once and keeps it current. Cross-references are already there. Contradictions have already been flagged. Synthesis reflects everything ingested.
 
 ## When This Skill Activates
 
 Use this skill when the user:
+
 - Asks to create, build, or start a wiki or knowledge base
 - Asks to ingest, add, or process a source into their wiki
 - Asks a question and an existing wiki is present at the configured path
@@ -34,12 +31,13 @@ Use this skill when the user:
 
 ## Wiki Location
 
-**Location:** Set via `WIKI_PATH` environment variable (e.g. in `~/.hermes/.env`).
+**Location:** Set via `WIKI_PATH` environment variable (e.g., in the project's `.env` file).
 
-If unset, defaults to `~/wiki`.
+If unset, defaults to the `wiki` folder within the project root.
 
 ```bash
-WIKI="${WIKI_PATH:-$HOME/wiki}"
+# Logic to find the project root and default the path
+WIKI="${WIKI_PATH:-$(pwd)/wiki}"
 ```
 
 The wiki is just a directory of markdown files — open it in Obsidian, VS Code, or
@@ -47,7 +45,7 @@ any editor. No database, no special tooling required.
 
 ## Architecture: Three Layers
 
-```
+```text
 wiki/
 ├── SCHEMA.md           # Conventions, structure rules, domain config
 ├── index.md            # Sectioned content catalog with one-line summaries
@@ -56,7 +54,7 @@ wiki/
 │   ├── articles/       # Web articles, clippings
 │   ├── papers/         # PDFs, arxiv papers
 │   ├── transcripts/    # Meeting notes, interviews
-│   └── assets/         # Images, diagrams referenced by sources
+│   └── assets/         # each assets/<slug> contains Images, diagrams referenced by sources, parsed .md file related to the slug
 ├── entities/           # Layer 2: Entity pages (people, orgs, products, models)
 ├── concepts/           # Layer 2: Concept/topic pages
 ├── comparisons/        # Layer 2: Side-by-side analyses
@@ -77,7 +75,7 @@ When the user has an existing wiki, **always orient yourself before doing anythi
 ③ **Scan recent `log.md`** — read the last 20-30 entries to understand recent activity.
 
 ```bash
-WIKI="${WIKI_PATH:-$HOME/wiki}"
+WIKI="${WIKI_PATH:-$(pwd)/wiki}"
 # Orientation reads at session start
 read_file "$WIKI/SCHEMA.md"
 read_file "$WIKI/index.md"
@@ -85,19 +83,19 @@ read_file "$WIKI/log.md" offset=<last 30 lines>
 ```
 
 Only after orientation should you ingest, query, or lint. This prevents:
+
 - Creating duplicate pages for entities that already exist
 - Missing cross-references to existing content
 - Contradicting the schema's conventions
 - Repeating work already logged
 
-For large wikis (100+ pages), also run a quick `search_files` for the topic
-at hand before creating anything new.
+For large wikis (100+ pages), also run a quick `grep` (grep tool) for the topic at hand before creating anything new.
 
 ## Initializing a New Wiki
 
 When the user asks to create or start a wiki:
 
-1. Determine the wiki path (from `$WIKI_PATH` env var, or ask the user; default `~/wiki`)
+1. Determine the wiki path (from `$WIKI_PATH` env var, or ask the user; default `WIKI="${WIKI_PATH:-$(pwd)/wiki}"`)
 2. Create the directory structure above
 3. Ask the user what domain the wiki covers — be specific
 4. Write `SCHEMA.md` customized to the domain (see template below)
@@ -122,10 +120,7 @@ Adapt to the user's domain. The schema constrains agent behavior and ensures con
 - When updating a page, always bump the `updated` date
 - Every new page must be added to `index.md` under the correct section
 - Every action must be appended to `log.md`
-- **Provenance markers:** On pages that synthesize 3+ sources, append `^[raw/articles/source-file.md]`
-  at the end of paragraphs whose claims come from a specific source. This lets a reader trace each
-  claim back without re-reading the whole raw file. Optional on single-source pages where the
-  `sources:` frontmatter is enough.
+- **Provenance markers:** On pages that synthesize 3+ sources, append `^[raw/articles/source-file.md]` at the end of paragraphs whose claims come from a specific source. This lets a reader trace each claim back without re-reading the whole raw file. Optional on single-source pages where the `sources:` frontmatter is enough.
 
 ## Frontmatter
   ```yaml
@@ -135,7 +130,9 @@ Adapt to the user's domain. The schema constrains agent behavior and ensures con
   updated: YYYY-MM-DD
   type: entity | concept | comparison | query | summary
   tags: [from taxonomy below]
-  sources: [raw/articles/source-name.md]
+  sources: [raw/papers/source-name.pdf]
+  # Optinal for arxiv papers:
+  authors: [Name1, Name2]
   # Optional quality signals:
   confidence: high | medium | low        # how well-supported the claims are
   contested: true                        # set when the page has unresolved contradictions
@@ -164,9 +161,11 @@ and flag drift when it has changed. Compute over the body only (everything after
 `---`), not the frontmatter itself.
 
 ## Tag Taxonomy
-[Define 10-20 top-level tags for the domain. Add new tags here BEFORE using them.]
+
+[Define 8-15 top-level tags for the domain. Add new tags here BEFORE using them.]
 
 Example for AI/ML:
+
 - Models: model, architecture, benchmark, training
 - People/Orgs: person, company, lab, open-source
 - Techniques: optimization, fine-tuning, inference, alignment, data
@@ -176,6 +175,7 @@ Rule: every tag on a page must appear in this taxonomy. If a new tag is needed,
 add it here first, then use it. This prevents tag sprawl.
 
 ## Page Thresholds
+
 - **Create a page** when an entity/concept appears in 2+ sources OR is central to one source
 - **Add to existing page** when a source mentions something already covered
 - **DON'T create a page** for passing mentions, minor details, or things outside the domain
@@ -183,33 +183,40 @@ add it here first, then use it. This prevents tag sprawl.
 - **Archive a page** when its content is fully superseded — move to `_archive/`, remove from index
 
 ## Entity Pages
+
 One page per notable entity. Include:
+
 - Overview / what it is
 - Key facts and dates
 - Relationships to other entities ([[wikilinks]])
 - Source references
 
 ## Concept Pages
+
 One page per concept or topic. Include:
+
 - Definition / explanation
 - Current state of knowledge
 - Open questions or debates
 - Related concepts ([[wikilinks]])
 
 ## Comparison Pages
+
 Side-by-side analyses. Include:
+
 - What is being compared and why
 - Dimensions of comparison (table format preferred)
 - Verdict or synthesis
 - Sources
 
 ## Update Policy
+
 When new information conflicts with existing content:
+
 1. Check the dates — newer sources generally supersede older ones
 2. If genuinely contradictory, note both positions with dates and sources
 3. Mark the contradiction in frontmatter: `contradictions: [page-name]`
 4. Flag for user review in the lint report
-```
 
 ### index.md Template
 
@@ -251,48 +258,57 @@ a `_meta/topic-map.md` that groups pages by theme for faster navigation.
 - Structure created with SCHEMA.md, index.md, log.md
 ```
 
+### Update graphs
+
+Update these after ingest:
+
+- `wiki/graph/graph.json`: node list (concepts, entities, comparisons, queries, summaries, and source-doc nodes) + directed edges between them (e.g. `introduces`, `uses`, `authored_by`) with `confidence: EXTRACTED|INFERRED`.
+- `wiki/graph/citations.json`: per source-doc citation metadata (`title`, `authors`, `year`, optional `arxiv_id`) + `references` and `cited_by` lists (by source-doc id).
+
 ## Core Operations
 
-### 1. Ingest
+### 1. Ingest - to fix
 
 When the user provides a source (URL, file, paste), integrate it into the wiki:
 
 ① **Capture the raw source:**
-   - URL → use `web_extract` to get markdown, save to `raw/articles/`
-   - PDF → use `web_extract` (handles PDFs), save to `raw/papers/`
-   - Pasted text → save to appropriate `raw/` subdirectory
-   - Name the file descriptively: `raw/articles/karpathy-llm-wiki-2026.md`
-   - **Add raw frontmatter** (`source_url`, `ingested`, `sha256` of the body).
-     On re-ingest of the same URL: recompute the sha256, compare to the stored value —
-     skip if identical, flag drift and update if different. This is cheap enough to
-     do on every re-ingest and catches silent source changes.
+
+- Upon getting user `query`:
+  - **Fetch** — use `fetch_arxiv(query)` tool to get `pdf_path` - where the raw pdf is saved (default to `raw/papers/`)
+  - **Parse** — use `parse_pdf_docling(pdf_path)` - All outputs (`markdown_path`, images and tables) go under `raw/assets/<slug>/`.
+- **Read raw text** — `read_file` on `markdown_path`
+- **Add raw frontmatter** (`source_url`, `ingested`, `sha256` of the body).
+  On re-ingest of the same URL: recompute the sha256, compare to the stored value — skip if identical, flag drift and update if different. This is cheap enough to
+  do on every re-ingest and catches silent source changes.
 
 ② **Discuss takeaways** with the user — what's interesting, what matters for
    the domain. (Skip this in automated/cron contexts — proceed directly.)
 
-③ **Check what already exists** — search index.md and use `search_files` to find
-   existing pages for mentioned entities/concepts. This is the difference between
-   a growing wiki and a pile of duplicates.
+③ **Check what already exists** — search index.md and use `grep` to find existing pages for mentioned entities/concepts e.g. `grep(pattern="attention mechanism", path="/wiki/", glob="**/*.md")`
+
+This is the difference between a growing wiki and a pile of duplicates.
 
 ④ **Write or update wiki pages:**
-   - **New entities/concepts:** Create pages only if they meet the Page Thresholds
-     in SCHEMA.md (2+ source mentions, or central to one source)
-   - **Existing pages:** Add new information, update facts, bump `updated` date.
-     When new info contradicts existing content, follow the Update Policy.
-   - **Cross-reference:** Every new or updated page must link to at least 2 other
-     pages via `[[wikilinks]]`. Check that existing pages link back.
-   - **Tags:** Only use tags from the taxonomy in SCHEMA.md
-   - **Provenance:** On pages synthesizing 3+ sources, append `^[raw/articles/source.md]`
-     markers to paragraphs whose claims trace to a specific source.
-   - **Confidence:** For opinion-heavy, fast-moving, or single-source claims, set
-     `confidence: medium` or `low` in frontmatter. Don't mark `high` unless the
-     claim is well-supported across multiple sources.
+
+- **New entities/concepts:** Create pages only if they meet the Page Thresholds
+  in SCHEMA.md (2+ source mentions, or central to one source)
+- **Existing pages:** Add new information, update facts, bump `updated` date.
+  When new info contradicts existing content, follow the Update Policy.
+- **Cross-reference:** Every new or updated page must link to at least 2 other
+  pages via `[[wikilinks]]`. Check that existing pages link back.
+- **Tags:** Only use tags from the taxonomy in SCHEMA.md
+- **Provenance:** On pages synthesizing 3+ sources, append `^[raw/articles/source.md]`
+  markers to paragraphs whose claims trace to a specific source.
+- **Confidence:** For opinion-heavy, fast-moving, or single-source claims, set
+  `confidence: medium` or `low` in frontmatter. Don't mark `high` unless the
+  claim is well-supported across multiple sources.
 
 ⑤ **Update navigation:**
-   - Add new pages to `index.md` under the correct section, alphabetically
-   - Update the "Total pages" count and "Last updated" date in index header
-   - Append to `log.md`: `## [YYYY-MM-DD] ingest | Source Title`
-   - List every file created or updated in the log entry
+
+- Add new pages to `index.md` under the correct section, alphabetically
+- Update the "Total pages" count and "Last updated" date in index header
+- Append to `log.md`: `## [YYYY-MM-DD] ingest | Source Title`
+- List every file created or updated in the log entry
 
 ⑥ **Report what changed** — list every file created or updated to the user.
 
@@ -304,7 +320,7 @@ and desired — it's the compounding effect.
 When the user asks a question about the wiki's domain:
 
 ① **Read `index.md`** to identify relevant pages.
-② **For wikis with 100+ pages**, also `search_files` across all `.md` files
+② **For wikis with 50+ pages**, also `grep` across all `.md` files
    for key terms — the index alone may miss relevant content.
 ③ **Read the relevant pages** using `read_file`.
 ④ **Synthesize an answer** from the compiled knowledge. Cite the wiki pages
@@ -314,11 +330,18 @@ When the user asks a question about the wiki's domain:
    Don't file trivial lookups — only answers that would be painful to re-derive.
 ⑥ **Update log.md** with the query and whether it was filed.
 
-### 3. Lint
+### 3. Lint - Health Check
 
 When the user asks to lint, health-check, or audit the wiki:
 
-① **Orphan pages:** Find pages with no inbound `[[wikilinks]]` from other pages.
+① Run `lint_check` tool to check:
+
+- **Broken wikilinks:** arg `files=None` for full wiki scan
+- **Frontmatter validation:** Every wiki page must have all required fields
+   (title, created, updated, type, tags, sources). Tags must be in the taxonomy.
+
+② **Orphan pages:** Find pages with no inbound `[[wikilinks]]` from other pages.
+
 ```python
 # Use execute_code for this — programmatic scan across all wiki pages
 import os, re
@@ -329,62 +352,63 @@ wiki = "<WIKI_PATH>"
 # Pages with zero inbound links are orphans
 ```
 
-② **Broken wikilinks:** Find `[[links]]` that point to pages that don't exist.
+③ **Index completeness:** Every wiki page should appear in `index.md`. Compare the filesystem against index entries.
 
-③ **Index completeness:** Every wiki page should appear in `index.md`. Compare
-   the filesystem against index entries.
-
-④ **Frontmatter validation:** Every wiki page must have all required fields
-   (title, created, updated, type, tags, sources). Tags must be in the taxonomy.
-
-⑤ **Stale content:** Pages whose `updated` date is >90 days older than the most
+④ **Stale content:** Pages whose `updated` date is >90 days older than the most
    recent source that mentions the same entities.
 
-⑥ **Contradictions:** Pages on the same topic with conflicting claims. Look for
+⑤ **Contradictions:** Pages on the same topic with conflicting claims. Look for
    pages that share tags/entities but state different facts. Surface all pages
    with `contested: true` or `contradictions:` frontmatter for user review.
 
-⑦ **Quality signals:** List pages with `confidence: low` and any page that cites
+⑥ **Quality signals:** List pages with `confidence: low` and any page that cites
    only a single source but has no confidence field set — these are candidates
    for either finding corroboration or demoting to `confidence: medium`.
 
-⑧ **Source drift:** For each file in `raw/` with a `sha256:` frontmatter, recompute
+⑦ **Source drift:** For each file in `raw/` with a `sha256:` frontmatter, recompute
    the hash and flag mismatches. Mismatches indicate the raw file was edited
    (shouldn't happen — raw/ is immutable) or ingested from a URL that has since
    changed. Not a hard error, but worth reporting.
 
-⑨ **Page size:** Flag pages over 200 lines — candidates for splitting.
+⑧ **Page size:** Flag pages over 200 lines — candidates for splitting.
 
-⑩ **Tag audit:** List all tags in use, flag any not in the SCHEMA.md taxonomy.
+⑨ **Tag audit:** List all tags in use, flag any not in the SCHEMA.md taxonomy.
 
-⑪ **Log rotation:** If log.md exceeds 500 entries, rotate it.
+⑩ **Log rotation:** If log.md exceeds 500 entries, rotate it.
 
-⑫ **Report findings** with specific file paths and suggested actions, grouped by
+⑪ **Report findings** with specific file paths and suggested actions, grouped by
    severity (broken links > orphans > source drift > contested pages > stale content > style issues).
 
-⑬ **Append to log.md:** `## [YYYY-MM-DD] lint | N issues found`
+⑫ **Append to log.md:** `## [YYYY-MM-DD] lint | N issues found`
 
 ## Working with the Wiki
 
 ### Searching
 
-```bash
+Use the built-in filesystem tools:
+
+```text
 # Find pages by content
-search_files "transformer" path="$WIKI" file_glob="*.md"
+grep(pattern="transformer", path="/wiki/", glob="*.md")
 
 # Find pages by filename
-search_files "*.md" target="files" path="$WIKI"
+glob(pattern="**/*.md", path="/wiki/")
 
 # Find pages by tag
-search_files "tags:.*alignment" path="$WIKI" file_glob="*.md"
+grep(pattern="tags:.*alignment", path="/wiki/", glob="*.md")
 
-# Recent activity
-read_file "$WIKI/log.md" offset=<last 20 lines>
+# Recent activity — read_file has offset + limit, both are line numbers
+# Step 1 — get total lines (read with high offset to find end)
+read_file(file_path="/wiki/log.md")  # check total_lines from result
+
+# Step 2 — read last 20
+read_file(file_path="/wiki/log.md", offset=<total_lines - 20>, limit=20)
 ```
 
 ### Bulk Ingest
 
 When ingesting multiple sources at once, batch the updates:
+
 1. Read all sources first
 2. Identify all entities and concepts across all sources
 3. Check existing pages for all of them (one search pass, not N)
@@ -395,83 +419,12 @@ When ingesting multiple sources at once, batch the updates:
 ### Archiving
 
 When content is fully superseded or the domain scope changes:
+
 1. Create `_archive/` directory if it doesn't exist
 2. Move the page to `_archive/` with its original path (e.g., `_archive/entities/old-page.md`)
 3. Remove from `index.md`
 4. Update any pages that linked to it — replace wikilink with plain text + "(archived)"
 5. Log the archive action
-
-### Obsidian Integration
-
-The wiki directory works as an Obsidian vault out of the box:
-- `[[wikilinks]]` render as clickable links
-- Graph View visualizes the knowledge network
-- YAML frontmatter powers Dataview queries
-- The `raw/assets/` folder holds images referenced via `![[image.png]]`
-
-For best results:
-- Set Obsidian's attachment folder to `raw/assets/`
-- Enable "Wikilinks" in Obsidian settings (usually on by default)
-- Install Dataview plugin for queries like `TABLE tags FROM "entities" WHERE contains(tags, "company")`
-
-If using the Obsidian skill alongside this one, set `OBSIDIAN_VAULT_PATH` to the
-same directory as the wiki path.
-
-### Obsidian Headless (servers and headless machines)
-
-On machines without a display, use `obsidian-headless` instead of the desktop app.
-It syncs vaults via Obsidian Sync without a GUI — perfect for agents running on
-servers that write to the wiki while Obsidian desktop reads it on another device.
-
-**Setup:**
-```bash
-# Requires Node.js 22+
-npm install -g obsidian-headless
-
-# Login (requires Obsidian account with Sync subscription)
-ob login --email <email> --password '<password>'
-
-# Create a remote vault for the wiki
-ob sync-create-remote --name "LLM Wiki"
-
-# Connect the wiki directory to the vault
-cd ~/wiki
-ob sync-setup --vault "<vault-id>"
-
-# Initial sync
-ob sync
-
-# Continuous sync (foreground — use systemd for background)
-ob sync --continuous
-```
-
-**Continuous background sync via systemd:**
-```ini
-# ~/.config/systemd/user/obsidian-wiki-sync.service
-[Unit]
-Description=Obsidian LLM Wiki Sync
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-ExecStart=/path/to/ob sync --continuous
-WorkingDirectory=/home/user/wiki
-Restart=on-failure
-RestartSec=10
-
-[Install]
-WantedBy=default.target
-```
-
-```bash
-systemctl --user daemon-reload
-systemctl --user enable --now obsidian-wiki-sync
-# Enable linger so sync survives logout:
-sudo loginctl enable-linger $USER
-```
-
-This lets the agent write to `~/wiki` on a server while you browse the same
-vault in Obsidian on your laptop/phone — changes appear within seconds.
 
 ## Pitfalls
 
@@ -482,25 +435,11 @@ vault in Obsidian on your laptop/phone — changes appear within seconds.
   navigational backbone.
 - **Don't create pages for passing mentions** — follow the Page Thresholds in SCHEMA.md. A name
   appearing once in a footnote doesn't warrant an entity page.
-- **Don't create pages without cross-references** — isolated pages are invisible. Every page must
-  link to at least 2 other pages.
+- **Don't create pages without cross-references** — isolated pages are invisible. Every page must link to at least 2 other pages.
 - **Frontmatter is required** — it enables search, filtering, and staleness detection.
-- **Tags must come from the taxonomy** — freeform tags decay into noise. Add new tags to SCHEMA.md
-  first, then use them.
-- **Keep pages scannable** — a wiki page should be readable in 30 seconds. Split pages over
-  200 lines. Move detailed analysis to dedicated deep-dive pages.
-- **Ask before mass-updating** — if an ingest would touch 10+ existing pages, confirm
-  the scope with the user first.
+- **Tags must come from the taxonomy** — freeform tags decay into noise. Add new tags to SCHEMA.md first, then use them.
+- **Keep pages scannable** — a wiki page should be readable in 30 seconds. Split pages over 200 lines. Move detailed analysis to dedicated deep-dive pages.
+- **Ask before mass-updating** — if an ingest would touch 5+ existing pages, confirm the scope with the user first.
 - **Rotate the log** — when log.md exceeds 500 entries, rename it `log-YYYY.md` and start fresh.
   The agent should check log size during lint.
-- **Handle contradictions explicitly** — don't silently overwrite. Note both claims with dates,
-  mark in frontmatter, flag for user review.
-
-## Related Tools
-
-[llm-wiki-compiler](https://github.com/atomicmemory/llm-wiki-compiler) is a Node.js CLI that
-compiles sources into a concept wiki with the same Karpathy inspiration. It's Obsidian-compatible,
-so users who want a scheduled/CLI-driven compile pipeline can point it at the same vault this
-skill maintains. Trade-offs: it owns page generation (replaces the agent's judgment on page
-creation) and is tuned for small corpora. Use this skill when you want agent-in-the-loop curation;
-use llmwiki when you want batch compile of a source directory.
+- **Handle contradictions explicitly** — don't silently overwrite. Note both claims with dates, mark in frontmatter, flag for user review.
