@@ -9,7 +9,7 @@ from langchain_anthropic import ChatAnthropic
 import os
 from langgraph.store.memory import InMemoryStore
 from langgraph.checkpoint.memory import MemorySaver
-from src.agents.backend_wrapper import SecretGuardWrapper
+from src.agents.backend_wrapper import GuardedLocalShellBackend
 #Human-in-the-loop requires a checkpointer to persist agent state between the interrupt and resume
 checkpointer = MemorySaver()
 # 1. Check if user set a specific path in their .env
@@ -32,7 +32,9 @@ supervisor_llm = ChatAnthropic(
 )
 
 inner_backend = LocalShellBackend(root_dir=str(REPO_ROOT))
-backend = SecretGuardWrapper(inner_backend)
+backend = GuardedLocalShellBackend(root_dir=str(REPO_ROOT))
+print(type(backend).__mro__)  # mro means method resolution order, show the inheritance hierarchy
+
 
 agent = create_deep_agent(
     model=supervisor_llm,

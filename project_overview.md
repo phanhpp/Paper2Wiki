@@ -196,6 +196,7 @@ lint.py (programmatic):          LLM judgment (wiki-health skill):
 
 # TODOs:
 
+- test custom tool flows
 - make use of tables and images
 - ingest anything
 - create auto tests
