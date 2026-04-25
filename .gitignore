@@ -50,3 +50,5 @@ notebooks/
 learning.md*.ipynb
 .aws/
 skills/deprecated/
+wiki_legacy_20260425/
+project_overview.md

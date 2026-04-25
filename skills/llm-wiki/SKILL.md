@@ -267,7 +267,7 @@ Update these after ingest:
 
 ## Core Operations
 
-### 1. Ingest - to fix
+### 1. Ingest
 
 When the user provides a source (URL, file, paste), integrate it into the wiki:
 
@@ -280,6 +280,8 @@ When the user provides a source (URL, file, paste), integrate it into the wiki:
 - **Add raw frontmatter** (`source_url`, `ingested`, `sha256` of the body).
   On re-ingest of the same URL: recompute the sha256, compare to the stored value — skip if identical, flag drift and update if different. This is cheap enough to
   do on every re-ingest and catches silent source changes.
+
+**IMPORTANT**: Check the wiki and confirm with user if the source has been partially ingested and skip unnecessary steps e.g if you find the paper and its artifacts in raw/ then you may skip fetch and parse steps.
 
 ② **Discuss takeaways** with the user — what's interesting, what matters for
    the domain. (Skip this in automated/cron contexts — proceed directly.)

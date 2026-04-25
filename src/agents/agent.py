@@ -21,6 +21,14 @@ WIKI_PATH = os.getenv("WIKI_PATH", REPO_ROOT / "wiki")
 print(f"REPO_ROOT: {REPO_ROOT}")
 print(f"WIKI_PATH:  {WIKI_PATH}")
 
+haiku_llm = ChatAnthropic(
+    model="claude-haiku-4-5-20251001", # Fastest latency
+    max_retries=8,
+    timeout=120.0
+    # not support adaptive thinking but does support extended thinking
+    # only Opus and Sonnet 4.5+ support effort parameter
+)
+
 supervisor_llm = ChatAnthropic(
     model="claude-sonnet-4-6",
     max_retries=8,
@@ -47,12 +55,11 @@ agent = create_deep_agent(
     store=InMemoryStore(),
     checkpointer=checkpointer,  # Required!
     interrupt_on={
-        "execute": {"allowed_decisions": ["approve", "edit", "reject"]},
-        # Also gate destructive filesystem ops
+        "execute": True,
         "write_file": True,
         "edit_file": True,
-        "ls": True, 
-        "read_file": {"allowed_decisions": ["approve", "reject"]},
+        # "ls": True, 
+        #"read_file": {"allowed_decisions": ["approve", "reject"]},
     },
 )
 
