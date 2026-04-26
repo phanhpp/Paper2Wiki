@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-lint.py — minimal wiki linter (aligned to `skills/hermes-llm-wiki.md`)
+wiki_integrity_check.py — quick wiki integrity checks.
 
 Only checks:
-- **Frontmatter validation**: required hermes fields + basic formatting
-- **Broken wikilinks**: every `[[link]]` must resolve to an existing `.md` stem
+- Frontmatter validation: required fields + basic formatting
+- Broken wikilinks: every `[[link]]` must resolve to an existing `.md` stem
 
 CLI:
-  python src/tools/lint.py            # scan every *.md under <repo_root>/wiki/
-  python src/tools/lint.py path.md    # scan only the given files
+  python src/tools/wiki_integrity_check.py            # scan every page under <repo_root>/wiki/
+  python src/tools/wiki_integrity_check.py path.md    # scan only the given files
 
 Exit code: 1 if any errors, else 0 (warnings do not fail).
 """
@@ -25,7 +25,6 @@ from src.tools.utils import get_wiki_root
 # Wiki vault root (env `WIKI_PATH` override, else `<repo_root>/wiki`)
 WIKI_ROOT = get_wiki_root()
 
-# Frontmatter schema enforced by this linter (from `skills/hermes-llm-wiki.md`).
 ALLOWED_TYPES = {"entity", "concept", "comparison", "query", "summary"}
 REQUIRED_FRONTMATTER = {"title", "created", "updated", "type", "tags", "sources"}
 
@@ -45,15 +44,7 @@ def warn(path, msg):
 
 
 def parse_frontmatter(text: str) -> dict:
-    """
-    Extract YAML frontmatter from markdown text.
-
-    Args:
-        text: full file contents, expected to start with '---'
-
-    Returns:
-        dict of key→value strings, or {} if no valid frontmatter block found
-    """
+    """Extract YAML frontmatter from markdown text."""
     if not text.startswith("---"):
         return {}
     end = text.find("---", 3)
@@ -81,13 +72,9 @@ def check_file(md_file: Path, all_slugs: set[str]) -> None:
     Validate a single wiki markdown file.
 
     Checks:
-      - YAML frontmatter exists and contains required hermes fields
+      - YAML frontmatter exists and contains required fields
       - basic validation of dates/types/tags/sources
       - [[wikilinks]] resolve to known slugs
-
-    Args:
-        md_file: absolute path to the .md file
-        all_slugs: set of all .md stems across the entire wiki (for wikilink resolution)
     """
     text = md_file.read_text(encoding="utf-8")
 
@@ -95,7 +82,6 @@ def check_file(md_file: Path, all_slugs: set[str]) -> None:
         err(md_file, "missing frontmatter block")
         return
 
-    # --- Frontmatter validation ---
     fm = parse_frontmatter(text)
     if not fm:
         err(md_file, "malformed frontmatter block")
@@ -126,16 +112,15 @@ def check_file(md_file: Path, all_slugs: set[str]) -> None:
     if not sources.startswith("[") or not sources.endswith("]"):
         err(md_file, "sources must be a list (e.g. sources: [raw/papers/x.pdf])")
 
-    # --- Broken wikilinks ---
-    text_no_comments = re.sub(r'<!--.*?-->', '', text, flags=re.DOTALL)
-    for link in re.findall(r'\[\[([^\]|#]+)', text_no_comments):
+    text_no_comments = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+    for link in re.findall(r"\[\[([^\]|#]+)", text_no_comments):
         slug = link.strip().lower().replace(" ", "-")
         if slug not in all_slugs:
             err(md_file, f"broken wikilink: [[{link}]]")
 
 
 def _resolve_page_files_for_full_scan() -> list[Path]:
-    """Return the list of wiki page files for a full vault scan."""
+    """Return the list of wiki page files for a whole-wiki scan."""
     target_files: list[Path] = []
     for d in PAGE_DIRS:
         root = WIKI_ROOT / d
@@ -144,26 +129,17 @@ def _resolve_page_files_for_full_scan() -> list[Path]:
     return target_files
 
 
-def run_lint(files: list[Path] | None = None) -> str:
+def run_wiki_integrity_check(files: list[Path] | None = None) -> str:
     """
-    Run lint checks against the wiki (core implementation).
-
-    This function expects *real filesystem paths* (Path objects). It is used by:
-    - CLI (`main()`)
-    - the LangChain tool wrapper (`lint_check`) after it maps `/wiki/...` virtual paths
+    Run quick integrity checks against the wiki (core implementation).
 
     Args:
         files: real paths to check. None = scan all wiki page directories under WIKI_ROOT.
-
-    Returns:
-        'lint: OK' if no issues, otherwise a summary string listing
-        error and warning counts with their messages.
     """
     global errors, warnings
     errors = []
     warnings = []
 
-    # Link resolution universe: any `*.md` file under the vault.
     all_slugs = {p.stem for p in WIKI_ROOT.rglob("*.md")}
 
     if files is None:
@@ -175,36 +151,25 @@ def run_lint(files: list[Path] | None = None) -> str:
         check_file(md_file, all_slugs)
 
     if not errors and not warnings:
-        return "lint: OK"
+        return "wiki-check: OK"
     if errors and not warnings:
-        return f"lint: {len(errors)} error(s): {errors}"
+        return f"wiki-check: {len(errors)} error(s): {errors}"
     if not errors and warnings:
-        return f"lint: {len(warnings)} warning(s): {warnings}"
-    return f"lint: {len(errors)} error(s): {errors}, {len(warnings)} warning(s): {warnings}"
+        return f"wiki-check: {len(warnings)} warning(s): {warnings}"
+    return f"wiki-check: {len(errors)} error(s): {errors}, {len(warnings)} warning(s): {warnings}"
+
 
 @tool
-def lint_check(files: list[str] | None = None) -> str:
+def quick_wiki_integrity_check(files: list[str] | None = None) -> str:
     """
-    LangChain tool wrapper.
-
-    Why this exists (vs calling `run_lint` directly):
-    - The agent may reference files via *virtual paths* like `/wiki/concepts/foo.md`
-    - This wrapper translates those to real filesystem paths under `WIKI_ROOT`
-    - Then it calls the core implementation (`run_lint`)
-
-    The agent operates in virtual path space (/wiki/papers/foo.md). This function
-    rewrites those to real paths under WIKI_ROOT before calling run_lint.
+    Quick check for broken wikilinks + frontmatter/tag errors after ingestion.
 
     Args:
         files: list of virtual paths (/wiki/...) or real absolute paths to check.
-               None = full wiki scan.
-
-    Returns:
-        'lint: OK' if no issues, otherwise a summary string listing
-        error and warning counts with their messages.
+               None (or omitted) = scan the whole wiki for these quick checks.
     """
     if files is None:
-        return run_lint()
+        return run_wiki_integrity_check()
 
     real_files = []
     for f in files:
@@ -214,13 +179,13 @@ def lint_check(files: list[str] | None = None) -> str:
         else:
             real_files.append(Path(s))
 
-    return run_lint(files=real_files)
+    return run_wiki_integrity_check(files=real_files)
 
 
 def main():
-    """CLI entry point: no args = full wiki, args = scoped file list."""
+    """CLI entry point: no args = whole wiki, args = scoped file list."""
     files = [Path(f) for f in sys.argv[1:]] if len(sys.argv) > 1 else None
-    summary = run_lint(files=files)
+    summary = run_wiki_integrity_check(files=files)
 
     for w in warnings:
         print(w)

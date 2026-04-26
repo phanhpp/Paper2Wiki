@@ -25,3 +25,7 @@ llm_wiki/                         # Paper2Wiki — repository root
 # Prefer .venv; fall back to venv if that's what your checkout has.
 source .venv/bin/activate   # or: source venv/bin/activate
 ```
+
+## Known pitfalls
+
+- sha256 re-computation needs `body.lstrip('\n')` to match the stored value - hashlib.sha256(body.lstrip('\n').encode('utf-8')).hexdigest() where body = everything after the closing --- delimiter

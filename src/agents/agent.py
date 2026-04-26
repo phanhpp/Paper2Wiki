@@ -3,7 +3,6 @@ from deepagents import create_deep_agent, FilesystemPermission
 from deepagents.backends import CompositeBackend, StateBackend, FilesystemBackend, LocalShellBackend
 from langchain.chat_models import init_chat_model
 from src.tools.ingest_tools import all_tools
-from src.tools.lint import lint_check
 from src.prompts.system_prompt import INGEST_AGENT_SYSTEM_PROMPT, PHASE_1_SUPERVISOR_PROMPT
 from langchain_anthropic import ChatAnthropic
 import os

@@ -182,6 +182,11 @@ add it here first, then use it. This prevents tag sprawl.
 - **Split a page** when it exceeds ~200 lines — break into sub-topics with cross-links
 - **Archive a page** when its content is fully superseded — move to `_archive/`, remove from index
 
+### Hard Limits
+
+- Max **5 concepts** created — pick the most central ones only
+- For research paper, max **3 entities** for first author and organization (if any)
+
 ## Entity Pages
 
 One page per notable entity. Include:
@@ -275,7 +280,11 @@ When the user provides a source (URL, file, paste), integrate it into the wiki:
 
 - Upon getting user `query`:
   - **Fetch** — use `fetch_arxiv(query)` tool to get `pdf_path` - where the raw pdf is saved (default to `raw/papers/`)
-  - **Parse** — use `parse_pdf_docling(pdf_path)` - All outputs (`markdown_path`, images and tables) go under `raw/assets/<slug>/`.
+  - **Parse** — use `parse_pdf_docling(pdf_path)` - All outputs  go under `raw/assets/<slug>/`:
+    - `raw/assets/<slug>/images/`: images (if any)
+    - `raw/assets/<slug>/tables/`: tables (if any)
+    - `raw/assets/<slug>/<slug>.md`: Markdown version of pdf
+
 - **Read raw text** — `read_file` on `markdown_path`
 - **Add raw frontmatter** (`source_url`, `ingested`, `sha256` of the body).
   On re-ingest of the same URL: recompute the sha256, compare to the stored value — skip if identical, flag drift and update if different. This is cheap enough to
@@ -312,7 +321,9 @@ This is the difference between a growing wiki and a pile of duplicates.
 - Append to `log.md`: `## [YYYY-MM-DD] ingest | Source Title`
 - List every file created or updated in the log entry
 
-⑥ **Report what changed** — list every file created or updated to the user.
+⑥ **Quick check (default after ingest):** Run `quick_wiki_integrity_check` which only catches broken `[[wikilinks]]` and frontmatter/tag issues. This is the standard post-ingest validation; do not run the full health check unless the user explicitly asks for a lint/audit.
+
+⑦ **Report what changed** — list every file created or updated to the user.
 
 A single source can trigger updates across 5-15 wiki pages. This is normal
 and desired — it's the compounding effect.
@@ -332,13 +343,14 @@ When the user asks a question about the wiki's domain:
    Don't file trivial lookups — only answers that would be painful to re-derive.
 ⑥ **Update log.md** with the query and whether it was filed.
 
-### 3. Lint - Health Check
+### 3. Lint - Full Health Check
 
-When the user asks to lint, health-check, or audit the wiki:
+Only run this section when the user explicitly asks to lint / health-check / audit the wiki.
+For normal ingest flows, `quick_wiki_integrity_check` is enough (see Ingest step ⑥).
 
-① Run `lint_check` tool to check:
+① Run `quick_wiki_integrity_check` tool which only checks:
 
-- **Broken wikilinks:** arg `files=None` for full wiki scan
+- **Broken wikilinks:** use `files=None` (or no args) to scan wikilinks in all files
 - **Frontmatter validation:** Every wiki page must have all required fields
    (title, created, updated, type, tags, sources). Tags must be in the taxonomy.
 
@@ -445,3 +457,4 @@ When content is fully superseded or the domain scope changes:
 - **Rotate the log** — when log.md exceeds 500 entries, rename it `log-YYYY.md` and start fresh.
   The agent should check log size during lint.
 - **Handle contradictions explicitly** — don't silently overwrite. Note both claims with dates, mark in frontmatter, flag for user review.
+- **Remember to add sha256**
