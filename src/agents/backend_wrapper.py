@@ -6,6 +6,9 @@ SENSITIVE_PATTERNS = [".env", "secrets.", "credentials.", "id_rsa", ".pem", ".ke
 class GuardedLocalShellBackend(LocalShellBackend):
     """LocalShellBackend that blocks reads/writes on sensitive files."""
     
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        
     def _is_sensitive(self, path: str) -> bool:
         name = path.rsplit("/", 1)[-1]
         return any(p in path or name.startswith(p) for p in SENSITIVE_PATTERNS)

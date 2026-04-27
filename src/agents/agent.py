@@ -3,14 +3,13 @@ from deepagents import create_deep_agent, FilesystemPermission
 from deepagents.backends import CompositeBackend, StateBackend, FilesystemBackend, LocalShellBackend
 from langchain.chat_models import init_chat_model
 from src.tools.ingest_tools import all_tools
-from src.prompts.system_prompt import INGEST_AGENT_SYSTEM_PROMPT, PHASE_1_SUPERVISOR_PROMPT
+from src.prompts.system_prompt import PHASE_1_SUPERVISOR_PROMPT
 from langchain_anthropic import ChatAnthropic
 import os
 from langgraph.store.memory import InMemoryStore
 from langgraph.checkpoint.memory import MemorySaver
 from src.agents.backend_wrapper import GuardedLocalShellBackend
-#Human-in-the-loop requires a checkpointer to persist agent state between the interrupt and resume
-checkpointer = MemorySaver()
+
 # 1. Check if user set a specific path in their .env
 # 2. If not, default to the folder inside the repo
 # src/agents/agent.py → parents[2] = repo root
@@ -38,17 +37,20 @@ supervisor_llm = ChatAnthropic(
     max_tokens=8000,
 )
 
-inner_backend = LocalShellBackend(root_dir=str(REPO_ROOT))
+#Human-in-the-loop requires a checkpointer to persist agent state between the interrupt and resume
+checkpointer = MemorySaver()
+
+# Backend
+inner_backend = LocalShellBackend(root_dir=str(REPO_ROOT)) 
 backend = GuardedLocalShellBackend(root_dir=str(REPO_ROOT))
 print(type(backend).__mro__)  # mro means method resolution order, show the inheritance hierarchy
 
-
 agent = create_deep_agent(
-    model=supervisor_llm,
-    skills=["/skills/"],
-    memory=["/memories/AGENTS.md"],
+    model=haiku_llm,
+    skills=[str(REPO_ROOT / "skills/")],
+    memory=[str(REPO_ROOT / "memories/AGENTS.md")],
     system_prompt=PHASE_1_SUPERVISOR_PROMPT,
-    backend=backend,
+    backend=inner_backend,
     # subagents=[ingest_subagent],
     tools=all_tools, # custom tools plus built-in: read_file, write_file, edit_file, ls, glob, grep, execute
     store=InMemoryStore(),
@@ -62,18 +64,9 @@ agent = create_deep_agent(
     },
 )
 
-
-
-# # TODO: put the args in config file
-# subagent_llm = ChatAnthropic(
-#     model="claude-haiku-4-5-20251001", # Fastest latency
-#     max_retries=8,
-#     timeout=120.0
-#     # not support adaptive thinking but does support extended thinking
-#     # only Opus and Sonnet 4.5+ support effort parameter
-# )
-
 print(PHASE_1_SUPERVISOR_PROMPT)
+# # Print system prompt
+# agent
 
 # ingest_subagent = {
 #     "name": "ingest",
