@@ -29,3 +29,11 @@ python scripts/lint.py --wiki-dir wiki/
 ```
 
 Required `.env` vars: `ANTHROPIC_API_KEY`, `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT`, `DAYTONA_API_KEY`
+
+## Pending Cleanup
+
+- `src/tools/trace_report.py` — remove dev-only pickle cache before production:
+  - remove `pickle` import
+  - remove `save_runs()`, `load_runs()`, `run_from_cache()`
+  - remove `--from-cache` CLI flag in `main()`
+  - keep `_log_fetch()` and `FETCH_LOG` (fetch log is useful in production)
