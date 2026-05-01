@@ -32,8 +32,6 @@ Required `.env` vars: `ANTHROPIC_API_KEY`, `LANGSMITH_API_KEY`, `LANGSMITH_TRACI
 
 ## Pending Cleanup
 
-- `src/tools/trace_report.py` — remove dev-only pickle cache before production:
-  - remove `pickle` import
-  - remove `save_runs()`, `load_runs()`, `run_from_cache()`
-  - remove `--from-cache` CLI flag in `main()`
-  - keep `_log_fetch()` and `FETCH_LOG` (fetch log is useful in production)
+- `src/tools/trace_report_pickle_cache.py` is dev-only. It uses pickle to replay
+  LangSmith runs locally and should not be used in production. `trace_report.py`
+  is the production path; keep `_log_fetch()` and `FETCH_LOG`.

@@ -132,3 +132,68 @@ def run_turn_stream(user_message: str, config: dict):
         decisions = _handle_interrupts(pending_interrupts)
         payload = Command(resume={"decisions": decisions})
         # Loop back, stream the resumed execution
+
+# TODO: make the code cleaner
+# async version
+async def run_turn_stream_async(user_message: str, config: dict):
+    """Async stream version: shows live progress + LLM tokens, handles interrupts."""
+
+    payload = {"messages": [{"role": "user", "content": user_message}]}
+
+    while True:
+        pending_interrupts = None
+
+        # Stream values (for interrupts) + messages (for token output)
+        async for chunk in agent.astream(
+            payload,
+            config=config,
+            version="v2",
+            stream_mode=["values", "messages", "updates"],
+        ):
+            if chunk["type"] == "values":  # Interrupts ride on values stream parts in v2
+                if chunk.get("interrupts"):
+                    pending_interrupts = chunk["interrupts"]
+                    break  # stop streaming, handle HITL
+
+            elif chunk["type"] == "updates":
+                for node_name, node_data in chunk["data"].items():
+                    if not isinstance(node_data, dict):
+                        continue
+                    messages = node_data.get("messages", [])
+
+                    # Handle Overwrite sentinel (extract underlying list) or skip
+                    if not isinstance(messages, list):
+                        messages = getattr(messages, "value", None) or []
+                        if not isinstance(messages, list):
+                            continue
+
+                    for msg in messages:
+                        if hasattr(msg, "tool_calls") and msg.tool_calls:
+                            for tc in msg.tool_calls:
+                                args_preview = str(tc["args"])[:80]
+                                print(f"\n🔧 {tc['name']}({args_preview})", flush=True)
+
+            elif chunk["type"] == "messages":
+                msg, metadata = chunk["data"]
+
+                if not msg.content:
+                    continue
+
+                if isinstance(msg.content, str):
+                    print(msg.content, end="", flush=True)
+                elif isinstance(msg.content, list):  # Message from AI by default is a list
+                    for block in msg.content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            text = block.get("text", "")
+                            if text:
+                                print(text, end="", flush=True)
+
+        if not pending_interrupts:
+            print()  # newline after streaming
+            break
+
+        # Handle interrupts and resume
+        print()  # newline before HITL prompt
+        decisions = _handle_interrupts(pending_interrupts)
+        payload = Command(resume={"decisions": decisions})
+        # Loop back, stream the resumed execution
