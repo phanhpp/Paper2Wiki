@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 import anthropic
 from src.tools.trace_report import TraceReport
@@ -12,7 +11,6 @@ from langchain.tools import tool
 import asyncio
 
 _ASYNC_CLIENT = anthropic.AsyncAnthropic()
-_SYNC_CLIENT = anthropic.Anthropic()
 _MODEL = "claude-haiku-4-5-20251001"
 _MAX_TOKENS = 1500
 _SYSTEM_PROMPT = (
@@ -77,11 +75,15 @@ def _build_messages(traces: dict[str, str], focus_query: str | None) -> str:
         parts.append("")
     return "\n".join(parts)
 
-@tool
-async def summarize_traces_async(
+async def _summarize_traces_async(
     report: TraceReport,
     focus_query: str | None = None,
 ) -> list[dict[str, Any]]:
+    """Summarize traces using the async Anthropic client.
+
+    This is the undecorated implementation. Tool wrappers call this function so
+    the sync wrapper does not call a decorated LangChain tool object.
+    """
     traces = _load_traces(report)
     traces = _filter_traces(traces, focus_query)
     prompt = _build_messages(traces, focus_query)
@@ -96,9 +98,28 @@ async def summarize_traces_async(
     )
     return [item.model_dump() for item in response.parsed_output.items]
 
+
+@tool
+async def summarize_traces_async(
+    report: TraceReport,
+    focus_query: str | None = None,
+) -> list[dict[str, Any]]:
+    """Async tool: summarize all traces in a TraceReport.
+
+    Prefer this inside async agent execution. Accepts the TraceReport returned
+    by run_trace_report_async() and returns one structured summary per trace.
+    """
+    return await _summarize_traces_async(report, focus_query)
+
+
 @tool
 def summarize_traces(
     report: TraceReport,
     focus_query: str | None = None,
 ) -> list[dict[str, Any]]:
-    return asyncio.run(summarize_traces_async(report, focus_query))
+    """Sync tool: summarize all traces in a TraceReport.
+
+    Convenience wrapper for synchronous callers. Do not call from an active
+    async event loop; use summarize_traces_async() there.
+    """
+    return asyncio.run(_summarize_traces_async(report, focus_query))

@@ -15,6 +15,12 @@ Fetch logging:
 - By default, formatted traces are returned inline in ``TraceReport["traces"]``.
 - With ``offload=True``, formatted traces are written to a JSON file and the
   returned report contains ``TraceReport["traces_path"]`` instead.
+
+Example usage:
+```python
+from src.tools.trace_report import run_trace_report_async
+r = await run_trace_report_async.ainvoke({"limit": 10, "days": 5})
+```
 """
 
 from __future__ import annotations
@@ -24,8 +30,10 @@ import json
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, NotRequired, TypedDict
-from langsmith import Client
+from typing_extensions import Any, NotRequired, TypedDict
+from langsmith import Client, AsyncClient
+from langchain.tools import tool
+import asyncio
 
 CACHE_DIR = Path(__file__).parent / "trace_cache"
 FETCH_LOG = CACHE_DIR / "fetch_log.jsonl"
@@ -104,7 +112,7 @@ _VERBOSE_TOOLS = {"read_file", "write_file"}
 def _maybe_redact(content: Any, tool_name: str) -> Any:
     """Apply smart redaction to tool content.
 
-    - If tool is verbose (e.g. read_file) AND content contains "error" (case-sensitive):
+    - If tool is verbose (e.g. read_file) AND content contains "error" (case-insensitive):
       keep full content, prepend [ERROR].
     - If tool is verbose and no error: replace with char/word count summary.
     - Otherwise: return content unchanged.
@@ -143,9 +151,18 @@ def non_system_messages(inputs: dict[str, Any]) -> list[dict[str, Any]]:
     return output
 
 
-def _format_trace(trace_id: str, trace_runs: list[Any], client: Client) -> str:
+async def _format_trace_async(trace_id: str, trace_runs: list[Any], client: AsyncClient) -> str:
     """Format a single trace's runs into a human-readable string."""
     lines: list[str] = [f"\n=== trace {trace_id} ({len(trace_runs)} runs) ==="]
+
+    # fetch all llm runs in parallel instead of sequentially
+    llm_runs = [run for run in trace_runs if run.run_type == "llm"]
+
+    #asyncio.gather(*coroutines) runs all coroutines concurrently and returns results in the same order as input
+    full_runs = await asyncio.gather(
+        *[client.read_run(str(run.id)) for run in llm_runs]
+    )
+    full_run_map = {str(run.id): full for run, full in zip(llm_runs, full_runs)} # [(run[0], full_runs[0]), (run[1], full_runs[1]), ...]
 
     for run in trace_runs:
         depth = len(run.dotted_order.split(".")) - 1
@@ -154,8 +171,8 @@ def _format_trace(trace_id: str, trace_runs: list[Any], client: Client) -> str:
 
         if run.run_type != "llm":
             continue
-
-        full_run = client.read_run(str(run.id))
+        
+        full_run = full_run_map[str(run.id)]
 
         lines.append(f"{indent}  non-system messages (system prompt identical across all runs):")
         messages = non_system_messages(full_run.inputs or {})
@@ -175,7 +192,7 @@ def _format_trace(trace_id: str, trace_runs: list[Any], client: Client) -> str:
     return "\n".join(lines)
 
 
-def build_trace_report(runs: list[Any], client: Client) -> dict[str, str]:
+async def build_trace_report_async(runs: list[Any], client: AsyncClient) -> dict[str, str]:
     """Group runs by trace and return {trace_id: formatted_string}.
 
     For llm runs, full inputs are fetched via client.read_run() because
@@ -185,10 +202,15 @@ def build_trace_report(runs: list[Any], client: Client) -> dict[str, str]:
     for run in runs:
         grouped[str(run.trace_id)].append(run)
 
-    return {
-        trace_id: _format_trace(trace_id, sorted(trace_runs, key=lambda r: r.dotted_order), client)
-        for trace_id, trace_runs in grouped.items()
-    }
+    # format all traces in parallel
+    trace_ids = list(grouped.keys())
+    sorted_traces = [
+        sorted(grouped[tid], key=lambda r: r.dotted_order) for tid in trace_ids
+    ]
+    results = await asyncio.gather(
+        *[_format_trace_async(tid, runs, client) for tid, runs in zip(trace_ids, sorted_traces)]
+    )
+    return dict(zip(trace_ids, results))
 
 
 def _log_fetch(meta: dict[str, Any]) -> None:
@@ -197,8 +219,7 @@ def _log_fetch(meta: dict[str, Any]) -> None:
     with FETCH_LOG.open("a") as f:
         f.write(json.dumps(meta) + "\n")
 
-
-def run_trace_report(
+async def _run_trace_report_async(
     project: str = "paper2wiki",
     days: int = 4,
     limit: int = 70,
@@ -215,22 +236,18 @@ def run_trace_report(
         offload:    If True, write traces to a JSON file instead of returning inline.
                     Useful when the report is too large to pass around in memory.
     """
-    client = Client()
+    client = AsyncClient()
 
     now = datetime.now(timezone.utc)
     timestamp = now.strftime("%Y%m%d_%H%M%S")
     start_time = now - timedelta(days=days)
 
-    runs = list(
-        client.list_runs(
+    runs = [
+        run async for run in client.list_runs(
             project_name=project,
             start_time=start_time,
             limit=limit,
         )
-    )
-    runs = [
-        run
-        for run in runs
         if ("KeyboardInterrupt" not in (run.error or ""))
         and ("GeneratorExit" not in (run.error or ""))
     ]
@@ -248,7 +265,7 @@ def run_trace_report(
         "offload": offload,
     })
 
-    traces = build_trace_report(runs, client)
+    traces = await build_trace_report_async(runs, client)
     error_count = sum(1 for r in runs if r.error)
     total_cost = sum(float(r.total_cost or 0) for r in runs)
 
@@ -272,6 +289,28 @@ def run_trace_report(
         report["traces"] = traces
 
     return report
+
+
+@tool
+async def run_trace_report_async(
+    project: str = "paper2wiki",
+    days: int = 4,
+    limit: int = 70,
+    offload: bool = False,
+) -> TraceReport:
+    """Async tool: fetch recent LangSmith runs and return a TraceReport."""
+    return await _run_trace_report_async(project, days, limit, offload)
+
+
+# sync wrapper for CLI
+def run_trace_report(
+    project: str = "paper2wiki",
+    days: int = 4,
+    limit: int = 70,
+    offload: bool = False,
+) -> TraceReport:
+    """Sync wrapper. Do not call from an active async event loop."""
+    return asyncio.run(_run_trace_report_async(project, days, limit, offload))
 
 
 def main() -> None:
