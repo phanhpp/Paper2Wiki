@@ -15,7 +15,7 @@ from typing import Any
 
 from langsmith import Client
 
-from src.tools.trace_report import CACHE_DIR, TraceReport, build_trace_report_async
+from src.tools.fetch_traces import TRACE_OFFLOAD_DIR, TraceReport, _build_trace_report_async
 
 
 def save_runs(runs: list[Any], cache_path: Path) -> None:
@@ -39,7 +39,7 @@ def run_from_cache(cache_path: Path | str, offload: bool = False) -> TraceReport
     client = Client()
     cache_path = Path(cache_path)
     runs = load_runs(cache_path)
-    traces = build_trace_report_async(runs, client)
+    traces = _build_trace_report_async(runs, client)
     error_count = sum(1 for r in runs if r.error)
     total_cost = sum(float(r.total_cost or 0) for r in runs)
 
@@ -55,7 +55,7 @@ def run_from_cache(cache_path: Path | str, offload: bool = False) -> TraceReport
     }
 
     if offload:
-        traces_path = CACHE_DIR / f"{cache_path.stem}.traces.json"
+        traces_path = TRACE_OFFLOAD_DIR / f"{cache_path.stem}.traces.json"
         traces_path.parent.mkdir(parents=True, exist_ok=True)
         traces_path.write_text(json.dumps(traces, ensure_ascii=False, indent=2))
         report["traces_path"] = str(traces_path)

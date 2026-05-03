@@ -166,7 +166,7 @@ def quick_wiki_integrity_check(files: list[str] | None = None) -> str:
 
     Args:
         files: list of virtual paths (/wiki/...) or real absolute paths to check.
-               None (or omitted) = scan the whole wiki for these quick checks.
+               None (or omitted) = scan the whole wiki.
     """
     if files is None:
         return run_wiki_integrity_check()

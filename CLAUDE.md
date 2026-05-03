@@ -34,4 +34,4 @@ Required `.env` vars: `ANTHROPIC_API_KEY`, `LANGSMITH_API_KEY`, `LANGSMITH_TRACI
 
 - `src/tools/trace_report_pickle_cache.py` is dev-only. It uses pickle to replay
   LangSmith runs locally and should not be used in production. `trace_report.py`
-  is the production path; keep `_log_fetch()` and `FETCH_LOG`.
+  is the production path.

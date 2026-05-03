@@ -15,6 +15,7 @@ jupyter
 # Dev
 python-dotenv
 pytest
+pytest-asyncio # registers the asyncio mark (so pytest stops warning) + actually awaits your async def tests
 
 # ArXiv fetching
 arxiv>=2.0.0

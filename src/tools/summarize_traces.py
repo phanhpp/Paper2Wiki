@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any
 import anthropic
-from src.tools.trace_report import TraceReport
+from src.tools.fetch_traces import TraceReport
 from pydantic import BaseModel
 from typing import Optional
 from langchain.tools import tool
@@ -12,10 +12,11 @@ import asyncio
 
 _ASYNC_CLIENT = anthropic.AsyncAnthropic()
 _MODEL = "claude-haiku-4-5-20251001"
-_MAX_TOKENS = 1500
+_MAX_TOKENS = 4192
 _SYSTEM_PROMPT = (
     "You are a concise technical analyst for a LLM agent system called Paper2Wiki. "
     "You receive formatted LangSmith trace logs and return structured JSON summaries. "
+    "Emphasize any issues or anomalies in the traces. "
     "Return only valid JSON — no markdown fences, no preamble, no explanation."
 )
 
@@ -37,14 +38,10 @@ class TraceSummaryList(BaseModel):
 
 
 def _load_traces(report: TraceReport) -> dict[str, str]:
-    traces = report.get("traces")
-    if traces is not None:
-        return traces
-    traces_path = report.get("traces_path")
-    if traces_path is not None:
-        with open(traces_path, encoding="utf-8") as f:
-            return json.load(f)
-    raise ValueError("TraceReport has neither 'traces' nor 'traces_path'")
+    if not report.is_offloaded:
+        return report.traces  # type: ignore[return-value]  # validated non-None by model_validator
+    with open(report.traces_path, encoding="utf-8") as f:  # type: ignore[arg-type]
+        return json.load(f)
 
 
 def _filter_traces(traces: dict[str, str], focus_query: str | None) -> dict[str, str]:
@@ -75,20 +72,27 @@ def _build_messages(traces: dict[str, str], focus_query: str | None) -> str:
         parts.append("")
     return "\n".join(parts)
 
+from pathlib import Path
+
 async def _summarize_traces_async(
     report: TraceReport,
+    offset: int = 0,
+    limit: int = 50,
     focus_query: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Summarize traces using the async Anthropic client.
-
-    This is the undecorated implementation. Tool wrappers call this function so
-    the sync wrapper does not call a decorated LangChain tool object.
-    """
-    traces = _load_traces(report)
+    """Undecorated implementation called by the tool wrapper."""
+    all_traces = list(_load_traces(report).items())
+    sliced = all_traces[offset: offset + limit]
+    traces = dict(sliced)
     traces = _filter_traces(traces, focus_query)
     prompt = _build_messages(traces, focus_query)
 
-    # The parse() method automatically transforms your Pydantic model, validates the response, and returns a parsed_output attribute
+    # DEBUG: dump full prompt to file for inspection
+    debug_path = Path(__file__).parent / "trace_offloads" / f"debug_prompt_{offset}.txt"
+    debug_path.write_text(prompt, encoding="utf-8")
+
+    response = await _ASYNC_CLIENT.messages.parse(...)
+    # parse() validates response against TraceSummaryList and populates parsed_output
     response = await _ASYNC_CLIENT.messages.parse(
         model=_MODEL,
         max_tokens=_MAX_TOKENS,
@@ -102,24 +106,28 @@ async def _summarize_traces_async(
 @tool
 async def summarize_traces_async(
     report: TraceReport,
+    offset: int = 0,
+    limit: int = 50,
     focus_query: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Async tool: summarize all traces in a TraceReport.
+    """Haiku structured summaries for a page of traces in a ``TraceReport``.
 
-    Prefer this inside async agent execution. Accepts the TraceReport returned
-    by run_trace_report_async() and returns one structured summary per trace.
+    Use ``report["trace_count"]`` to compute how many batches are needed
+    (``ceil(trace_count / 50)``), then fire all batches in parallel with
+    ``offset=0, 50, 100, …``. Do NOT raise ``limit`` above 50 — doing so
+    risks exceeding Haiku's 200K context limit and crashing the call.
+
+    Args:
+        report: From ``run_trace_report_async()`` — either ``traces`` (inline)
+            or ``traces_path`` (offloaded JSON).
+        offset: Index of the first trace to include (0-based). Default 0.
+        limit: Number of traces per batch. Default 50; do not exceed 50.
+        focus_query: Optional keywords (split on whitespace). Within the
+            selected page, keeps only traces whose text matches any keyword
+            (case-insensitive); if none match, the full page is used.
+
+    Returns:
+        One dict per trace (``TraceSummary`` shape: ``trace_id``,
+        ``session_summary``, ``status``, ``error_type``, optional metadata fields).
     """
-    return await _summarize_traces_async(report, focus_query)
-
-
-@tool
-def summarize_traces(
-    report: TraceReport,
-    focus_query: str | None = None,
-) -> list[dict[str, Any]]:
-    """Sync tool: summarize all traces in a TraceReport.
-
-    Convenience wrapper for synchronous callers. Do not call from an active
-    async event loop; use summarize_traces_async() there.
-    """
-    return asyncio.run(_summarize_traces_async(report, focus_query))
+    return await _summarize_traces_async(report, offset, limit, focus_query)

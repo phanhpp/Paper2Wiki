@@ -45,13 +45,13 @@ inner_backend = LocalShellBackend(root_dir=str(REPO_ROOT))
 backend = GuardedLocalShellBackend(root_dir=str(REPO_ROOT))
 print(type(backend).__mro__)  # mro means method resolution order, show the inheritance hierarchy
 
+#Permissions only apply to the built-in filesystem tools (ls, read_file, glob, grep, write_file, edit_file).
 agent = create_deep_agent(
     model=haiku_llm,
     skills=[str(REPO_ROOT / "skills/")],
     memory=[str(REPO_ROOT / "memories/AGENTS.md")],
     system_prompt=PHASE_1_SUPERVISOR_PROMPT,
     backend=inner_backend,
-    # subagents=[ingest_subagent],
     tools=all_tools, # custom tools plus built-in: read_file, write_file, edit_file, ls, glob, grep, execute
     store=InMemoryStore(),
     checkpointer=checkpointer,  # Required!
@@ -59,9 +59,7 @@ agent = create_deep_agent(
         "execute": True,
         "write_file": True,
         "edit_file": True,
-        # "ls": True, 
-        #"read_file": {"allowed_decisions": ["approve", "reject"]},
-    },
+        },
 )
 
 print(PHASE_1_SUPERVISOR_PROMPT)
