@@ -396,6 +396,7 @@ async def _run_trace_report_async(
     project: str = "paper2wiki",
     days: int = 7,
     limit: int = 100,
+    error: Optional[bool] = False,
 ) -> TraceReport:
     """Fetch recent runs and return a TraceReport.
 
@@ -407,19 +408,21 @@ async def _run_trace_report_async(
         project: LangSmith project name.
         days:    How many days back to fetch from.
         limit:   Max runs to fetch.
+        error:   bool - default False. Whether to fetch only error runs.
     """
     client = AsyncClient()
 
     now = datetime.now(timezone.utc)
     start_time = now - timedelta(days=days)
 
-    runs = [
-        run async for run in client.list_runs(
-            project_name=project,
-            start_time=start_time,
-            limit=limit
-        )
-    ]
+    list_runs_kwargs: dict[str, Any] = {
+        "project_name": project,
+        "start_time": start_time,
+        "limit": limit,
+    }
+    if error:
+        list_runs_kwargs["error"] = error
+    runs = [run async for run in client.list_runs(**list_runs_kwargs)]
 
     end_time = min((r.end_time for r in runs if r.end_time), default=now)
     actual_start = min((r.start_time for r in runs if r.start_time), default=start_time)

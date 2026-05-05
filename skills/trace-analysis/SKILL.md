@@ -21,6 +21,11 @@ Use this skill when the user:
 
 ### 1. Fetch
 
+**Before calling `run_trace_report_async`, determine the `error` argument from the user's phrasing:**
+- "analyze errors", "traces with errors", "what failed", "failures" → **`error=True`**
+- "analyze successful runs", "what worked" → `error=False`
+- "analyze traces", "self-improve", "check behaviour" (no qualifier) → omit `error`
+
 Call `run_trace_report_async` tool to fetch recent traces from LangSmith.
 
 | Arg | Description |
@@ -28,14 +33,11 @@ Call `run_trace_report_async` tool to fetch recent traces from LangSmith.
 | `project` | Project name |
 | `days` | Lookback window in days (`start_time = now - days`) |
 | `limit` | Maximum number of runs to fetch |
-| `offload` | If `True`, write traces to JSON file instead of returning inline |
+| `error` | `True` → only traces with errors; `False` → only successful traces; omit for all |
 
-Use default arguments unless:
+Offloading to a JSON file is handled automatically by the tool. If `traces_path` is present in the returned report, read traces from that file; delete it after logging in step 4.
 
-- Tool returns no runs → increase `days` by 1 or 2
-- `limit > 100` → set `offload=True`
-
-**If `offload=True`:** the traces will be accessed through `traces_path` instead of inline `traces`. Delete this file after logging in step 4.
+Use default arguments unless the tool returns no runs → increase `days` by 1 or 2.
 
 #### structure
 
@@ -79,6 +81,9 @@ git --no-pager diff HEAD~5 -- <affected_file>
 
 - If recently modified → issue may already be fixed, strike it from the report with a note
 - If unchanged since traces were recorded → finding still valid, include as normal
+- If git history is inconclusive → ask the user whether the issue has already been addressed before proposing a fix
+
+**Always ask the user to confirm findings before proposing any fixes.** Present the report and wait for acknowledgement — do not proceed to Step 4 until the user explicitly approves.
 
 Then present the validated report:
 
@@ -110,9 +115,9 @@ Approve changes? (HITL required before writing)
 
 ### 4. Commit & Log
 
-After report is approved and changes committed:
+**Always log after presenting the report** — even if there are no findings or no changes to commit.
 
-1. Append to `trace_analysis_log.md`:
+1. Append to `trace_analysis_log.md` (create if it doesn't exist):
 
 ```markdown
 ## 2026-05-01T14:30:00Z
@@ -122,7 +127,7 @@ After report is approved and changes committed:
 - Changes committed: updated AGENTS.md Known Pitfalls
 ```
 
-1. If `offload=True` was used, delete the offloaded trace file:
+2. If a `traces_path` file was used, delete it:
 
 ```bash
 rm <traces_path>

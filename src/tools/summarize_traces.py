@@ -2,11 +2,10 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 import anthropic
 from src.tools.fetch_traces import TraceReport
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field
+from typing_extensions import Optional, Literal, Any
 from langchain.tools import tool
 import asyncio
 
@@ -23,12 +22,11 @@ _SYSTEM_PROMPT = (
 class TraceSummary(BaseModel):
     trace_id: str
     session_summary: str
-    status: str
-    error_type: str
-    recoverable: Optional[bool] = None
+    status: Literal["success", "error", "pending", "cancelled"]
+    error_type: str = Field(description="Short error category if status='error', e.g. 'tool_failure', 'context_limit', 'hitl_rejected'; else 'none'")
     affected_skill: Optional[str] = None
-    skill_compliance: Optional[str] = None
-    deviation_note: Optional[str] = None
+    skill_compliance: Optional[str] = Field(default=None, description="'compliant', 'deviated', or 'not_applicable'")
+    deviation_note: Optional[str] = Field(default=None, description="Concise description of what the agent did wrong or unexpectedly; null if compliant")
     latency_s: Optional[float] = None
     total_cost: Optional[float] = None
     llm_turns: Optional[int] = None
