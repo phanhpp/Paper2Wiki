@@ -10,7 +10,7 @@ so no network calls are made during test runs.
 
 Run: 
     # use uv to get the correct python version
-    uv run pytest tests/test_fetch_traces.py::test_model_validator_rejects_offloaded_without_path
+    uv run pytest -v -s tests/test_fetch_traces.py::test_offload_when_large
     
     # run only tests with the expect_exception marker
     uv run pytest -m expect_exception
@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -28,7 +29,8 @@ from src.tools.fetch_traces import (
     _MAX_TRACE_CHARS,
     _TOOL_CONTENT_TRUNCATE_THRESHOLD,
     _VERBOSE_TOOLS,
-    _build_trace_report_async,
+    _group_formatted_traces_async,
+    _make_trace_report,
     _redact_content,
     TraceReport,
 )
@@ -65,24 +67,38 @@ def mock_async_client(runs: list[SimpleNamespace]) -> AsyncMock:
     return client
 
 
+_REPORT_BASE: dict[str, Any] = dict(
+    project="test",
+    fetched_at="2026-01-01T00:00:00+00:00",
+    start_time="2026-01-01T00:00:00+00:00",
+    end_time="2026-01-01T01:00:00+00:00",
+    error_count=0,
+    total_cost=0.0,
+)
+
 # ---------------------------------------------------------------------------
 # Test 1 — auto-offload: is_offloaded=True when chars exceed threshold
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_offload_when_large(runs: list[SimpleNamespace], mock_async_client: AsyncMock) -> None:
-    traces = await _build_trace_report_async(runs, mock_async_client)
-    trace_chars = sum(len(v) for v in traces.values())
-    # Force offload by setting threshold to 0
-    report = TraceReport(
-        project="test", fetched_at="", start_time="", end_time="",
-        run_count=len(runs), trace_count=len(traces), trace_chars=trace_chars,
-        error_count=0, total_cost=0.0,
-        is_offloaded=True, traces_path="/tmp/fake.json",
+async def test_offload_when_large(
+    tmp_path: Path,
+    runs: list[SimpleNamespace],
+    mock_async_client: AsyncMock,
+) -> None:
+    traces = await _group_formatted_traces_async(runs, mock_async_client)
+    # threshold=0 guarantees any non-empty trace set triggers offload
+    report = _make_trace_report(
+        **_REPORT_BASE,
+        traces=traces,
+        run_count=len(runs),
+        offload_dir=tmp_path,
+        threshold=0,
     )
     assert report.is_offloaded is True
     assert report.traces is None
     assert report.traces_path is not None
+    assert Path(report.traces_path).exists(), "offload file must be written to disk"
 
 
 # ---------------------------------------------------------------------------
@@ -90,27 +106,34 @@ async def test_offload_when_large(runs: list[SimpleNamespace], mock_async_client
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_inline_when_small(runs: list[SimpleNamespace], mock_async_client: AsyncMock) -> None:
-    traces = await _build_trace_report_async(runs, mock_async_client)
-    trace_chars = sum(len(v) for v in traces.values())
-    report = TraceReport(
-        project="test", fetched_at="", start_time="", end_time="",
-        run_count=len(runs), trace_count=len(traces), trace_chars=trace_chars,
-        error_count=0, total_cost=0.0,
-        is_offloaded=False, traces=traces,
+async def test_inline_when_small(
+    tmp_path: Path,
+    runs: list[SimpleNamespace],
+    mock_async_client: AsyncMock,
+) -> None:
+    traces = await _group_formatted_traces_async(runs, mock_async_client)
+    total_chars = sum(len(v) for v in traces.values())
+    # threshold above actual size guarantees inline path
+    report = _make_trace_report(
+        **_REPORT_BASE,
+        traces=traces,
+        run_count=len(runs),
+        offload_dir=tmp_path,
+        threshold=total_chars + 1,
     )
     assert report.is_offloaded is False
     assert report.traces is not None
     assert report.traces_path is None
+    assert set(report.traces.keys()) == set(traces.keys())
 
 
 # ---------------------------------------------------------------------------
-# Test 3 — _build_trace_report_async groups runs correctly by trace_id
+# Test 3 — _group_formatted_traces_async groups runs correctly by trace_id
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_build_groups_by_trace_id(runs: list[SimpleNamespace], mock_async_client: AsyncMock) -> None:
-    traces = await _build_trace_report_async(runs, mock_async_client)
+    traces = await _group_formatted_traces_async(runs, mock_async_client)
     # Every trace_id from runs must appear in traces
     expected_trace_ids = {str(r.trace_id) for r in runs}
     assert set(traces.keys()) == expected_trace_ids
@@ -159,7 +182,7 @@ def test_verbose_tool_short_content_still_redacted() -> None:
 
 @pytest.mark.asyncio
 async def test_max_trace_chars_respected(runs: list[SimpleNamespace], mock_async_client: AsyncMock) -> None:
-    traces = await _build_trace_report_async(runs, mock_async_client)
+    traces = await _group_formatted_traces_async(runs, mock_async_client)
     for trace_id, text in traces.items():
         assert len(text) <= _MAX_TRACE_CHARS, (
             f"Trace {trace_id} exceeds _MAX_TRACE_CHARS: {len(text)} chars"

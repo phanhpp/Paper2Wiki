@@ -91,7 +91,6 @@ async def _summarize_traces_async(
     debug_path = Path(__file__).parent / "trace_offloads" / f"debug_prompt_{offset}.txt"
     debug_path.write_text(prompt, encoding="utf-8")
 
-    response = await _ASYNC_CLIENT.messages.parse(...)
     # parse() validates response against TraceSummaryList and populates parsed_output
     response = await _ASYNC_CLIENT.messages.parse(
         model=_MODEL,

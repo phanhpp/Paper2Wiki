@@ -10,19 +10,19 @@ Call graph (arrows = calls / uses)::
         │
         ├─► AsyncClient.list_runs
         │
-        └─► _build_trace_report_async
-                │
-                └─► _format_trace_async  (one per trace, asyncio.gather)
-                        │
-                        ├─► AsyncClient.read_run  (llm runs only)
-                        ├─► _slim
-                        └─► _denoise_messages  (llm inputs)
-                                ├─► _flatten_messages
-                                ├─► _role_from_message
-                                └─► _redact_content
-
-    _run_trace_report_async ──► TraceReport  (inline traces or JSON offload;
-        ``is_offloaded`` + ``trace_chars`` reflect the decision)
+        ├─► _group_formatted_traces_async
+        │       │
+        │       └─► _format_trace_async  (one per trace, asyncio.gather)
+        │               │
+        │               ├─► AsyncClient.read_run  (llm runs only)
+        │               ├─► _slim
+        │               ├─► _denoise_messages  (llm inputs)
+        │               │       ├─► _flatten_messages
+        │               │       ├─► _role_from_message
+        │               │       └─► _redact_content
+        │               └─► _denoise_outputs   (llm outputs)
+        │
+        └─► _make_trace_report  (decides inline vs offload, returns TraceReport)
 
 Example usage:
 ```python
@@ -34,6 +34,7 @@ r = await run_trace_report_async.ainvoke({"limit": 10, "days": 5})
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -98,17 +99,29 @@ def _slim(run: Any) -> dict[str, Any]:
 
     Keeps only fields useful for flow analysis (name, status, latency, error,
     run_type, cost, tags). Full run data is fetched separately for llm runs.
+
+    Returns a dict with the following keys:
+    - name
+    - status
+    - latency
+    - error
+    - run_type
+    - total_cost
+    - tags
     """
-    return {
-        "id": str(getattr(run, "id", "")),
+    slim: dict[str, Any] = {
+        #"id": str(getattr(run, "id", "")),
         "name": getattr(run, "name", None),
         "status": getattr(run, "status", None),
         "latency": getattr(run, "latency", None),
         "error": getattr(run, "error", None),
         "run_type": getattr(run, "run_type", None),
         "total_cost": float(getattr(run, "total_cost", None) or 0),
-        "tags": getattr(run, "tags", None),
     }
+    tags = getattr(run, "tags", None)
+    if tags is not None:
+        slim["tags"] = tags
+    return slim
 
 
 def _role_from_message(msg: dict[str, Any]) -> str:
@@ -192,6 +205,36 @@ def _redact_content(content: Any, tool_name: str = "") -> Any:
     return raw[:500] + f"\n...[truncated — {len(raw)} chars total]...\n" + raw[-200:]
 
 
+def _denoise_outputs(outputs: dict[str, Any]) -> dict[str, Any]:
+    """Strip noise from an LLM run's outputs dict before printing.
+
+    Removes:
+    - ``generation_info`` on each generation entry
+    - ``text`` on each generation entry (duplicate of ``message.kwargs.content[0].text``)
+    - ``message.id`` on each generation entry
+    - From ``message.kwargs``: ``id``, ``usage_metadata``,
+      ``invalid_tool_calls`` (when empty), and from ``response_metadata``:
+      ``model_provider`` and ``stop_sequence``.
+    """
+    outputs = copy.deepcopy(outputs)
+    for generation_list in outputs.get("generations", []):
+        for entry in generation_list:
+            entry.pop("generation_info", None)
+            entry.pop("text", None)  # duplicate of message.kwargs.content[0].text
+            msg = entry.get("message", {})
+            msg.pop("id", None)
+            kwargs = msg.get("kwargs", {})
+            kwargs.pop("id", None)
+            kwargs.pop("usage_metadata", None)
+            if not kwargs.get("invalid_tool_calls"):
+                kwargs.pop("invalid_tool_calls", None)
+            rm = kwargs.get("response_metadata", {})
+            if isinstance(rm, dict):
+                rm.pop("model_provider", None)
+                rm.pop("stop_sequence", None)
+    return outputs
+
+
 def _denoise_messages(inputs: dict[str, Any]) -> list[dict[str, Any]]:
     """Extract denoised non-system messages from an LLM run's inputs dict.
 
@@ -218,42 +261,61 @@ def _denoise_messages(inputs: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 async def _format_trace_async(trace_id: str, trace_runs: list[Any], client: AsyncClient) -> str:
-    """Format a single trace into a depth-indented, human-readable string.
+    """Format a single trace into a concise, human-readable string.
 
-    Full inputs for llm runs are fetched in parallel via ``client.read_run()``
-    because ``list_runs()`` does not return the complete inputs payload.
+    Each run line is tagged with ``[depth=N]`` (no tree indentation — saves space).
+    Full inputs and outputs are fetched via ``client.read_run()`` only for LLM runs
+    that carry signal — skipping redundant prefix calls:
+
+    - ``error is not None`` → always fetch (captures the failure context)
+    - ``error is None`` AND it is the last LLM call → fetch (the final response)
+    - ``error is None`` AND NOT the last LLM call → skip (redundant prefix)
+
+    Inputs are denoised via ``_denoise_messages``; outputs via ``_denoise_outputs``.
     All runs are capped at ``_MAX_TRACE_CHARS`` to guard against bloated traces.
     """
     lines: list[str] = [f"\n=== trace {trace_id} ({len(trace_runs)} runs) ==="]
 
     llm_runs = [run for run in trace_runs if run.run_type == "llm"]
-    full_runs = await asyncio.gather(*[client.read_run(str(run.id)) for run in llm_runs])
-    full_run_map = {str(run.id): full for run, full in zip(llm_runs, full_runs)}
+    last_llm_id = str(llm_runs[-1].id) if llm_runs else None
+    runs_to_fetch = [
+        run for run in llm_runs
+        if run.error is not None or str(run.id) == last_llm_id
+    ]
+    full_runs = await asyncio.gather(*[client.read_run(str(run.id)) for run in runs_to_fetch])
+    full_run_map = {str(run.id): full for run, full in zip(runs_to_fetch, full_runs)}
 
     for run in trace_runs:
         depth = len(run.dotted_order.split(".")) - 1
-        indent = "  " * depth
-        lines.append(f"{indent}[depth={depth}] {_slim(run)}")
+        slim_content = _slim(run)
+        name = slim_content.get("name")
+        # Middleware chain steps: one line (name only). Match case-insensitively.
+        if isinstance(name, str) and "middleware" in name.lower():
+            lines.append(f"[depth={depth}] {name}")
+            continue
+
+        lines.append(f"[depth={depth}] {slim_content}")
 
         if run.run_type != "llm":
             continue
-        
-        full_run = full_run_map[str(run.id)]
 
-        lines.append(f"{indent}  non-system messages (system prompt identical across all runs):")
+        full_run = full_run_map.get(str(run.id))
+        if full_run is None:
+            continue  # redundant prefix call — skipped
+
+        lines.append("Input Messages (exclude system prompt):")
         messages = _denoise_messages(full_run.inputs or {})
         if not messages:
-            lines.append(f"{indent}    (none)")
+            lines.append("(none)")
         else:
             for idx, message in enumerate(messages, start=1):
-                lines.append(f"{indent}    [{idx}] role={message['role']}")
-                lines.append(json.dumps(message["kwargs"], ensure_ascii=False, separators=(",", ":")))
+                lines.append(f"[{idx}] role={message['role']}" + "" + json.dumps(message["kwargs"], ensure_ascii=False, separators=(",", ":")))
 
-        lines.append(f"{indent}  outputs:")
+        lines.append("Outputs:")
         if full_run.outputs:
-            lines.append(json.dumps(full_run.outputs, ensure_ascii=False, separators=(",", ":")))
+            lines.append(json.dumps(_denoise_outputs(full_run.outputs), ensure_ascii=False, separators=(",", ":")))
         else:
-            lines.append(f"{indent}    (none)")
+            lines.append("(none)")
 
     result = "\n".join(lines)
 
@@ -264,7 +326,7 @@ async def _format_trace_async(trace_id: str, trace_runs: list[Any], client: Asyn
     return result
 
 
-async def _build_trace_report_async(runs: list[Any], client: AsyncClient) -> dict[str, str]:
+async def _group_formatted_traces_async(runs: list[Any], client: AsyncClient) -> dict[str, str]:
     """Group runs by trace_id and return ``{trace_id: formatted_string}``."""
     grouped: dict[str, list[Any]] = defaultdict(list)
     for run in runs:
@@ -276,6 +338,58 @@ async def _build_trace_report_async(runs: list[Any], client: AsyncClient) -> dic
         *[_format_trace_async(tid, runs, client) for tid, runs in zip(trace_ids, sorted_traces)]
     )
     return dict(zip(trace_ids, results))
+
+
+def _make_trace_report(
+    *,
+    traces: dict[str, str],
+    project: str,
+    fetched_at: str,
+    start_time: str,
+    end_time: str,
+    run_count: int,
+    error_count: int,
+    total_cost: float,
+    offload_dir: Path = TRACE_OFFLOAD_DIR,
+    threshold: int = _OFFLOAD_THRESHOLD_CHARS,
+) -> TraceReport:
+    """Decide inline vs offload and return a ``TraceReport``.
+
+    Extracted from ``_run_trace_report_async`` so it can be unit-tested with
+    an arbitrary ``threshold`` and a temp ``offload_dir`` without touching the
+    real offload directory.
+
+    Args:
+        traces:      ``{trace_id: formatted_string}`` from ``_format_traces_async``.
+        project:     LangSmith project name.
+        fetched_at:  ISO timestamp of fetch.
+        start_time:  ISO timestamp of earliest run.
+        end_time:    ISO timestamp of latest run.
+        run_count:   Total number of raw runs fetched.
+        error_count: Number of runs with errors.
+        total_cost:  Sum of run costs.
+        offload_dir: Directory to write the JSON file when offloading.
+        threshold:   Char count above which traces are offloaded to disk.
+    """
+    trace_chars = sum(len(v) for v in traces.values())
+    base = dict(
+        project=project,
+        fetched_at=fetched_at,
+        start_time=start_time,
+        end_time=end_time,
+        run_count=run_count,
+        trace_count=len(traces),
+        trace_chars=trace_chars,
+        error_count=error_count,
+        total_cost=total_cost,
+    )
+    if trace_chars > threshold:
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        traces_path = offload_dir / f"{project}_{ts}.traces.json"
+        traces_path.parent.mkdir(parents=True, exist_ok=True)
+        traces_path.write_text(json.dumps(traces, ensure_ascii=False, indent=2))
+        return TraceReport(**base, is_offloaded=True, traces_path=str(traces_path))
+    return TraceReport(**base, is_offloaded=False, traces=traces)
 
 
 async def _run_trace_report_async(
@@ -297,43 +411,33 @@ async def _run_trace_report_async(
     client = AsyncClient()
 
     now = datetime.now(timezone.utc)
-    timestamp = now.strftime("%Y%m%d_%H%M%S")
     start_time = now - timedelta(days=days)
 
     runs = [
         run async for run in client.list_runs(
             project_name=project,
             start_time=start_time,
-            limit=limit,
+            limit=limit
         )
     ]
 
     end_time = min((r.end_time for r in runs if r.end_time), default=now)
     actual_start = min((r.start_time for r in runs if r.start_time), default=start_time)
 
-    traces = await _build_trace_report_async(runs, client)
-    trace_chars = sum(len(v) for v in traces.values())
+    traces = await _group_formatted_traces_async(runs, client)
     error_count = sum(1 for r in runs if r.error)
     total_cost = sum(float(r.total_cost or 0) for r in runs)
 
-    base = dict(
+    return _make_trace_report(
+        traces=traces,
         project=project,
         fetched_at=now.isoformat(),
         start_time=actual_start.isoformat(),
         end_time=end_time.isoformat(),
         run_count=len(runs),
-        trace_count=len(traces),
-        trace_chars=trace_chars,
         error_count=error_count,
         total_cost=total_cost,
     )
-
-    if trace_chars > _OFFLOAD_THRESHOLD_CHARS:
-        traces_path = TRACE_OFFLOAD_DIR / f"{project}_{timestamp}.traces.json"
-        traces_path.parent.mkdir(parents=True, exist_ok=True)
-        traces_path.write_text(json.dumps(traces, ensure_ascii=False, indent=2))
-        return TraceReport(**base, is_offloaded=True, traces_path=str(traces_path))
-    return TraceReport(**base, is_offloaded=False, traces=traces)
 
 
 @tool

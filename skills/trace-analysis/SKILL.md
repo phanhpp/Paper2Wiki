@@ -37,7 +37,7 @@ Use default arguments unless:
 
 **If `offload=True`:** the traces will be accessed through `traces_path` instead of inline `traces`. Delete this file after logging in step 4.
 
-#### Output structure
+#### structure
 
 - Runs are grouped by **trace** (one trace = one user request, spanning all its sub-operations).
 - Within each trace, runs are printed in execution order with **depth** indicating nesting:
@@ -45,16 +45,12 @@ Use default arguments unless:
   - `depth=1` — direct child (e.g. an llm call or tool call spawned by the root)
   - `depth=2+` — nested further
 
-#### Run types
+#### Reading LLM runs
 
-Each run has a `run_type`: `llm`, `tool`, `chain`, etc.
+Each run has a `run_type`. For `llm` runs, inputs and outputs are expanded only for **errored calls** and the **last call** in the trace — all other LLM calls show one line only (redundant prefixes).
 
-For `run_type=llm` runs, the report prints full input messages and outputs.
-
-- **System message is omitted** — it is identical across all runs, so excluded to save space.
-- Each remaining message shows its `role` and compact `kwargs` structure.
-- Verbose tools `read_file`, `write_file`, `run_trace_report_async`, `summarize_traces_async`, `ls`, `edit_file`, `grep`, `execute`) have `content` intentionally redacted as `[redacted — N chars]` to avoid context bloat.
-- Focus analysis on flow and issues (especially tool choice and order). Do not rely on raw tool output in traces: outputs are usually long and low-signal; e.g. for `run_trace_report_async` / `summarize_traces_async` the outputs are already used/logged, and for `execute` the implemented code is reflected in later messages and can be verified from local files.
+- **Inputs**: non-system messages with `role` + compact `kwargs`. Tool outputs for verbose tools (`read_file`, `execute`, etc.) are redacted as `[redacted — N chars]` — focus on tool *choice* and *order*, not content.
+- **Outputs**: denoised LangChain structure — read `message.kwargs.content` (text/tool_use blocks) and `message.kwargs.tool_calls` to understand what the model decided to do.
 
 ### 2. Summarize
 
