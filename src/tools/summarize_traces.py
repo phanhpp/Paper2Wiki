@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from typing_extensions import Optional, Literal, Any
 from langchain.tools import tool
 import asyncio
+from pathlib import Path
 
 _ASYNC_CLIENT = anthropic.AsyncAnthropic()
 _MODEL = "claude-haiku-4-5-20251001"
@@ -70,16 +71,13 @@ def _build_messages(traces: dict[str, str], focus_query: str | None) -> str:
         parts.append("")
     return "\n".join(parts)
 
-from pathlib import Path
-
-async def _summarize_traces_async(
-    report: TraceReport,
-    offset: int = 0,
-    limit: int = 50,
+async def _summarize_batch_async(
+    all_traces: list[tuple[str, str]],
+    offset: int,
+    limit: int,
     focus_query: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Undecorated implementation called by the tool wrapper."""
-    all_traces = list(_load_traces(report).items())
+    """Summarize one trace page."""
     sliced = all_traces[offset: offset + limit]
     traces = dict(sliced)
     traces = _filter_traces(traces, focus_query)
@@ -89,7 +87,6 @@ async def _summarize_traces_async(
     debug_path = Path(__file__).parent / "trace_offloads" / f"debug_prompt_{offset}.txt"
     debug_path.write_text(prompt, encoding="utf-8")
 
-    # parse() validates response against TraceSummaryList and populates parsed_output
     response = await _ASYNC_CLIENT.messages.parse(
         model=_MODEL,
         max_tokens=_MAX_TOKENS,
@@ -99,6 +96,42 @@ async def _summarize_traces_async(
     )
     return [item.model_dump() for item in response.parsed_output.items]
 
+async def _summarize_traces_async(
+    report: TraceReport,
+    offset: int = 0,
+    limit: int = 50,
+    focus_query: str | None = None,
+) -> list[dict[str, Any]]:
+    """Undecorated implementation called by the tool wrapper.
+
+    Default mode (offset=0, limit=50): summarize the full report in parallel
+    batches of 50.
+
+    Targeted mode (custom offset/limit): summarize only one selected page.
+    """
+    if limit <= 0:
+        raise ValueError("limit must be > 0")
+    if limit > 50:
+        raise ValueError("limit must be <= 50 to avoid context overflow")
+    if offset < 0:
+        raise ValueError("offset must be >= 0")
+
+    all_traces = list(_load_traces(report).items())
+    if not all_traces:
+        return []
+
+    # Explicit page request (used for retrying one failed batch).
+    if offset != 0 or limit != 50:
+        return await _summarize_batch_async(all_traces, offset, limit, focus_query)
+
+    # Default tool path: summarize the whole report in parallel pages of 50.
+    tasks = [
+        _summarize_batch_async(all_traces, batch_offset, 50, focus_query)
+        for batch_offset in range(0, len(all_traces), 50)
+    ]
+    batch_results = await asyncio.gather(*tasks)
+    return [item for batch in batch_results for item in batch]
+
 
 @tool
 async def summarize_traces_async(
@@ -107,21 +140,24 @@ async def summarize_traces_async(
     limit: int = 50,
     focus_query: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Haiku structured summaries for a page of traces in a ``TraceReport``.
+    """Haiku structured summaries for traces in a ``TraceReport``.
 
-    Use ``report["trace_count"]`` to compute how many batches are needed
-    (``ceil(trace_count / 50)``), then fire all batches in parallel with
-    ``offset=0, 50, 100, …``. Do NOT raise ``limit`` above 50 — doing so
-    risks exceeding Haiku's 200K context limit and crashing the call.
+    Default behavior (``offset=0`` and ``limit=50``): summarize the entire
+    report automatically by splitting into pages of 50 and running those pages
+    in parallel.
+
+    Targeted behavior (custom ``offset``/``limit``): summarize a single page,
+    useful for retrying only a failed batch.
 
     Args:
         report: From ``run_trace_report_async()`` — either ``traces`` (inline)
             or ``traces_path`` (offloaded JSON).
-        offset: Index of the first trace to include (0-based). Default 0.
-        limit: Number of traces per batch. Default 50; do not exceed 50.
+        offset: Index of the first trace to include (0-based). Keep default 0
+            to process all pages automatically.
+        limit: Traces per page. Default 50. Must be <= 50.
         focus_query: Optional keywords (split on whitespace). Within the
-            selected page, keeps only traces whose text matches any keyword
-            (case-insensitive); if none match, the full page is used.
+            selected page(s), keeps only traces whose text matches any keyword
+            (case-insensitive); if none match, that page is summarized as-is.
 
     Returns:
         One dict per trace (``TraceSummary`` shape: ``trace_id``,

@@ -41,8 +41,8 @@ supervisor_llm = ChatAnthropic(
 checkpointer = MemorySaver()
 
 # Backend
-inner_backend = LocalShellBackend(root_dir=str(REPO_ROOT)) 
-backend = GuardedLocalShellBackend(root_dir=str(REPO_ROOT))
+#inner_backend = LocalShellBackend(root_dir=str(REPO_ROOT), virtual_mode=True) 
+backend = GuardedLocalShellBackend(root_dir=str(REPO_ROOT), virtual_mode=True)
 print(type(backend).__mro__)  # mro means method resolution order, show the inheritance hierarchy
 
 #Permissions only apply to the built-in filesystem tools (ls, read_file, glob, grep, write_file, edit_file).
@@ -51,7 +51,7 @@ agent = create_deep_agent(
     skills=[str(REPO_ROOT / "skills/")],
     memory=[str(REPO_ROOT / "memories/AGENTS.md")],
     system_prompt=PHASE_1_SUPERVISOR_PROMPT,
-    backend=inner_backend,
+    backend=backend,
     tools=all_tools, # custom tools plus built-in: read_file, write_file, edit_file, ls, glob, grep, execute
     store=InMemoryStore(),
     checkpointer=checkpointer,  # Required!

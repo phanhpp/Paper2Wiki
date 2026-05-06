@@ -17,11 +17,14 @@ Run:
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import math
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+import uuid
 
 import pytest
 
@@ -52,7 +55,7 @@ def runs() -> list[SimpleNamespace]:
 
 
 @pytest.fixture()
-def mock_async_client(runs: list[SimpleNamespace]) -> AsyncMock:
+def mock_async_client(runs: list[SimpleNamespace]) -> Any:
     """AsyncClient whose read_run returns the matching run from the fixture.
 
     _format_trace_async calls client.read_run for each llm run to fetch full
@@ -60,10 +63,11 @@ def mock_async_client(runs: list[SimpleNamespace]) -> AsyncMock:
     network call is needed.
     """
     run_map = {str(r.id): r for r in runs}
-    client = AsyncMock()
-    async def _read_run(run_id: str) -> SimpleNamespace:
-        return run_map.get(run_id, runs[0])
-    client.read_run.side_effect = _read_run
+    class _FakeClient:
+        async def read_run(self, run_id: str) -> SimpleNamespace:
+            return run_map.get(run_id, runs[0])
+
+    client = _FakeClient()
     return client
 
 
@@ -84,7 +88,7 @@ _REPORT_BASE: dict[str, Any] = dict(
 async def test_offload_when_large(
     tmp_path: Path,
     runs: list[SimpleNamespace],
-    mock_async_client: AsyncMock,
+    mock_async_client: Any,
 ) -> None:
     traces = await _group_formatted_traces_async(runs, mock_async_client)
     # threshold=0 guarantees any non-empty trace set triggers offload
@@ -109,7 +113,7 @@ async def test_offload_when_large(
 async def test_inline_when_small(
     tmp_path: Path,
     runs: list[SimpleNamespace],
-    mock_async_client: AsyncMock,
+    mock_async_client: Any,
 ) -> None:
     traces = await _group_formatted_traces_async(runs, mock_async_client)
     total_chars = sum(len(v) for v in traces.values())
@@ -132,7 +136,7 @@ async def test_inline_when_small(
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_build_groups_by_trace_id(runs: list[SimpleNamespace], mock_async_client: AsyncMock) -> None:
+async def test_build_groups_by_trace_id(runs: list[SimpleNamespace], mock_async_client: Any) -> None:
     traces = await _group_formatted_traces_async(runs, mock_async_client)
     # Every trace_id from runs must appear in traces
     expected_trace_ids = {str(r.trace_id) for r in runs}
@@ -181,7 +185,7 @@ def test_verbose_tool_short_content_still_redacted() -> None:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_max_trace_chars_respected(runs: list[SimpleNamespace], mock_async_client: AsyncMock) -> None:
+async def test_max_trace_chars_respected(runs: list[SimpleNamespace], mock_async_client: Any) -> None:
     traces = await _group_formatted_traces_async(runs, mock_async_client)
     for trace_id, text in traces.items():
         assert len(text) <= _MAX_TRACE_CHARS, (
@@ -219,3 +223,99 @@ def test_model_validator_rejects_both_set() -> None:
             run_count=0, trace_count=0, trace_chars=0, error_count=0, total_cost=0.0,
             is_offloaded=False, traces={"id": "text"}, traces_path="/tmp/fake.json",
         )
+
+# ---------------------------------------------------------------------------
+# Test 8 — _summarize_traces_async: Anthropic API call is replaceable with fake
+#
+# Patches _ASYNC_CLIENT.messages.parse so no real API calls are made.
+# The real offset/limit slicing logic still runs — only the LLM call is faked.
+# ---------------------------------------------------------------------------
+
+from src.tools.summarize_traces import TraceSummaryList, TraceSummary, _summarize_traces_async
+
+
+def _fake_trace_summary() -> TraceSummary:
+    return TraceSummary(
+        trace_id=str(uuid.uuid4()),
+        session_summary="fake summary",
+        status="success",
+        error_type="none",
+        latency_s=0.0,
+        total_cost=0.0,
+        llm_turns=1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_summarize_batches_fired_in_parallel(
+    tmp_path: Path,
+    runs: list[SimpleNamespace],
+    mock_async_client: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With >50 traces, ceil(N/50) parse calls must be fired concurrently.
+
+    Parallelism is verified by injecting a 0.05 s delay into the fake and
+    checking total wall-time is ~1 batch delay, not N * batch delay.
+    """
+
+    # format traces into a dict of {trace_id: denoised messages}
+    traces = await _group_formatted_traces_async(runs, mock_async_client)
+    if len(traces) < 51:
+        # runs.json may collapse to a small number of unique trace_ids.
+        # Clone trace text into synthetic ids so we can test multi-batch behavior.
+        seed_items = list(traces.items())
+        traces = {
+            f"{trace_id}__copy_{i}": text
+            for i, (trace_id, text) in enumerate(seed_items * 60)
+        }
+
+    # create TraceReport
+    report = _make_trace_report(
+        **_REPORT_BASE,
+        traces=traces,
+        run_count=len(runs),
+        offload_dir=tmp_path,
+        threshold=0,  # force offload so trace_count is set
+    )
+
+    # Computes how many batches should exist at limit=50
+    batch_size = 50
+    num_batches = math.ceil(report.trace_count / batch_size)
+    FAKE_DELAY = 0.05
+
+    call_count = 0
+
+    # return fake parse() 
+    async def slow_fake_parse(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        await asyncio.sleep(FAKE_DELAY)
+        fake_response = SimpleNamespace(
+            parsed_output=TraceSummaryList(items=[_fake_trace_summary()])
+        )
+        return fake_response
+
+    class _FakeMessages:
+        async def parse(self, *args, **kwargs):
+            return await slow_fake_parse(*args, **kwargs)
+
+    class _FakeAnthropicClient:
+        messages = _FakeMessages()
+
+    # Replaces Anthropic client (_ASYNC_CLIENT.messages.parse) with a fake async function
+    monkeypatch.setattr(
+        "src.tools.summarize_traces._ASYNC_CLIENT",
+        _FakeAnthropicClient(),
+    )
+
+    # One default call should fan out all pages in parallel internally.
+    start = time.perf_counter()
+    results = await _summarize_traces_async(report)
+    elapsed = time.perf_counter() - start
+
+    assert isinstance(results, list)
+    assert call_count == num_batches # parse called once per internal page
+    assert elapsed < FAKE_DELAY * num_batches, (
+        f"Calls look sequential: {elapsed:.3f}s >= {FAKE_DELAY * num_batches:.3f}s"
+    ) # total elapsed time is less than sequential time (delay * num_batches) → this is the evidence they ran concurrently

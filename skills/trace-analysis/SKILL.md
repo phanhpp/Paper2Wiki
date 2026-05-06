@@ -56,14 +56,19 @@ Each run has a `run_type`. For `llm` runs, inputs and outputs are expanded only 
 
 ### 2. Summarize
 
-Call `summarize_traces_async(report, offset=N, limit=50)` in batches.
-Use `report["trace_count"]` to compute how many calls are needed (`ceil(trace_count / 50)`).
+Call `summarize_traces_async(report)` once.
 
-Fire all batches in parallel: each with `limit=50` and `offset=0, 50, 100, …`
-The last batch will naturally contain the remainder.
+The tool now handles batching internally:
 
-- **Do not raise `limit` above 50** — larger batches will hit Haiku's context limit
-- **Never re-fetch if summarization fails** — adjust `offset`/`limit` and retry the failed batch only
+- Splits traces into pages of `limit=50`
+- Fires all pages in parallel (`offset=0, 50, 100, ...`)
+- Merges and returns one combined summary list
+
+If one page fails and you need a targeted retry, call:
+`summarize_traces_async(report, offset=<failed_offset>, limit=50)`
+
+- **Do not raise `limit` above 50** — larger pages hit Haiku's context limit
+- **Never re-fetch traces if summarization fails** — retry only the failed page via `offset`/`limit`
 
 ### 3. Cluster & Synthesize
 
