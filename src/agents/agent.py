@@ -1,5 +1,5 @@
 from pathlib import Path
-from deepagents import create_deep_agent, FilesystemPermission
+from deepagents import create_deep_agent, FilesystemPermission, CompiledSubAgent
 from deepagents.backends import CompositeBackend, StateBackend, FilesystemBackend, LocalShellBackend
 from langchain.chat_models import init_chat_model
 from src.tools.ingest_tools import all_tools
@@ -9,6 +9,7 @@ import os
 from langgraph.store.memory import InMemoryStore
 from langgraph.checkpoint.memory import MemorySaver
 from src.agents.backend_wrapper import GuardedLocalShellBackend
+from src.agents.daytona_agent import create_sandbox_subagent
 
 # 1. Check if user set a specific path in their .env
 # 2. If not, default to the folder inside the repo
@@ -45,24 +46,55 @@ checkpointer = MemorySaver()
 backend = GuardedLocalShellBackend(root_dir=str(REPO_ROOT), virtual_mode=True)
 print(type(backend).__mro__)  # mro means method resolution order, show the inheritance hierarchy
 
-#Permissions only apply to the built-in filesystem tools (ls, read_file, glob, grep, write_file, edit_file).
-agent = create_deep_agent(
-    model=haiku_llm,
-    skills=[str(REPO_ROOT / "skills/")],
-    memory=[str(REPO_ROOT / "memories/AGENTS.md")],
-    system_prompt=PHASE_1_SUPERVISOR_PROMPT,
-    backend=backend,
-    tools=all_tools, # custom tools plus built-in: read_file, write_file, edit_file, ls, glob, grep, execute
-    store=InMemoryStore(),
-    checkpointer=checkpointer,  # Required!
-    interrupt_on={
-        "execute": True,
-        "write_file": True,
-        "edit_file": True,
-        },
-)
 
-print(PHASE_1_SUPERVISOR_PROMPT)
+def create_supervisor(thread_id: str):
+    """
+    Create the main supervisor agent for a conversation thread.
+
+    This supervisor runs on the local guarded shell backend and is configured with:
+    - project skills from `skills/`
+    - long-lived memory instructions from `memories/AGENTS.md`
+    - a checkpoint saver for human-in-the-loop interrupt/resume
+    - a single compiled subagent (`marp-agent`) whose runnable is a Daytona-sandboxed agent
+
+    Args:
+        thread_id: Identifier used to locate or create the Daytona sandbox for the
+            visualization subagent.
+
+    Returns:
+        A DeepAgent supervisor instance produced by `create_deep_agent(...)`.
+    """
+    # visualization coding agent
+    visual_agent = create_sandbox_subagent(model=haiku_llm, thread_id=thread_id)
+
+    custom_subagent = CompiledSubAgent(
+        name="marp-slides-creator",
+        description="Specialized agent for creating marp slides",
+        runnable=visual_agent
+    )
+
+    #Permissions only apply to the built-in filesystem tools (ls, read_file, glob, grep, write_file, edit_file).
+    supervisor = create_deep_agent(
+        model=haiku_llm,
+        skills=[str(REPO_ROOT / "skills/")],
+        memory=[str(REPO_ROOT / "memories/AGENTS.md")],
+        system_prompt=PHASE_1_SUPERVISOR_PROMPT,
+        backend=backend,
+        tools=all_tools, # custom tools plus built-in: read_file, write_file, edit_file, ls, glob, grep, execute
+        store=InMemoryStore(),
+        checkpointer=checkpointer,  # Required!
+        subagents=[custom_subagent],
+        interrupt_on={
+            "execute": True,
+            "write_file": True,
+            "edit_file": True,
+            },
+    )
+
+    print(PHASE_1_SUPERVISOR_PROMPT)
+
+    return supervisor
+
 # # Print system prompt
 # agent
 

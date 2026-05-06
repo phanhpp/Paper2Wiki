@@ -303,7 +303,7 @@ async def test_summarize_batches_fired_in_parallel(
     class _FakeAnthropicClient:
         messages = _FakeMessages()
 
-    # Replaces Anthropic client (_ASYNC_CLIENT.messages.parse) with a fake async function
+    # Replaces Anthropic client (_ASYNC_CLIENT.messages.parse) with slow_fake_parse
     monkeypatch.setattr(
         "src.tools.summarize_traces._ASYNC_CLIENT",
         _FakeAnthropicClient(),

@@ -19,14 +19,10 @@ Upload research papers → agent builds and maintains a structured, interlinked 
 
 ```
 Supervisor Agent
-├── Ingest Subagent     → papers → wiki pages (StoreBackend)
-├── Code Subagent       → user coding tasks (SandboxBackend + HITL)
-└── Query Subagent      → questions → answers from wiki
+├── Visualisation Subagent       → visualization tasks that can flood supervisor's context 
 
 Skills (on-demand):
-  paper-ingestion, wiki-maintenance, citation
-  mermaid, plotting, paper-impl, data-verify, marp
-  trace-analyzer, wiki-health
+  llm-wiki, marp-slide, trace-analyzer
 
 Storage:
   /raw/       → source papers (read-only)
@@ -59,9 +55,7 @@ uv venv --python 3.11
 source .venv/bin/activate  # or .venv\Scripts\activate on Windows
 
 # 3. Install dependencies
-uv add deepagents langchain-anthropic langgraph-checkpoint-postgres
-uv add langchain-daytona daytona-sdk  # sandbox
-uv add ipykernel jupyter              # notebooks
+uv add -r requirements.txt
 
 # 4. Register Jupyter kernel
 uv run python -m ipykernel install --user --name=paper2wiki
@@ -96,32 +90,8 @@ paper2wiki/
 │   └── AGENTS.md               ← pre-created by you
 │                               preferences.md created by agent
 ├── src/
-│   ├── supervisor.py
-│   ├── ingest.py
-│   ├── code.py
-│   ├── query.py
-│   └── middleware/
-│       ├── loop_detection.py
-│       ├── precomplete_checklist.py
-│       └── local_context.py
-│
+│  
 ├── skills/
-│   ├── paper-ingestion/
-│   │   ├── SKILL.md
-│   │   └── fetch_arxiv.py
-│   │   └── lint.py
-│   │   └── parse_citations.py
-│   ├── mermaid/
-│   │   ├── SKILL.md
-│   │   └── validate.sh
-│   ├── trace-analyzer/
-│   │   ├── SKILL.md
-│   │   └── analyze.py
-│   ├── wiki-health/
-│   │   └── SKILL.md
-│   ├── plotting/SKILL.md
-│   └── marp/SKILL.md
-│
 ├── wiki/                       ← gitignored
 │   ├── index.md
 │   ├── log.md
@@ -134,14 +104,10 @@ paper2wiki/
 │   ├── outputs/
 │   └── health/
 │
-├── raw/                        ← gitignored
-│
 ├── notebooks/
 │   └── explore.ipynb
 │
 └── tests/
-    ├── test_lint.py
-    └── test_skill_format.py
 ```
 
 ---
@@ -205,3 +171,7 @@ Uses **Daytona** (thread-scoped, fresh per conversation):
 ## License
 
 MIT
+
+## References
+
+- marp-slide skill adapted from [softaworks/agent-toolkit](https://github.com/softaworks/agent-toolkit) (MIT License)
