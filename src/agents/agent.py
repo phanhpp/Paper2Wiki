@@ -1,7 +1,5 @@
 from pathlib import Path
-from deepagents import create_deep_agent, FilesystemPermission, CompiledSubAgent
-from deepagents.backends import CompositeBackend, StateBackend, FilesystemBackend, LocalShellBackend
-from langchain.chat_models import init_chat_model
+from deepagents import create_deep_agent, CompiledSubAgent
 from src.tools.ingest_tools import all_tools
 from src.prompts.system_prompt import PHASE_1_SUPERVISOR_PROMPT
 from langchain_anthropic import ChatAnthropic
@@ -9,23 +7,21 @@ import os
 from langgraph.store.memory import InMemoryStore
 from langgraph.checkpoint.memory import MemorySaver
 from src.agents.backend_wrapper import GuardedLocalShellBackend
-from src.agents.daytona_agent import create_sandbox_subagent
+from src.agents.daytona_agent import create_daytona_agent
+from src.agents.sandbox_utils import register_sandbox
+from langchain_core.utils.uuid import uuid7
 
 # 1. Check if user set a specific path in their .env
-# 2. If not, default to the folder inside the repo
-# src/agents/agent.py → parents[2] = repo root
+# 2. If not, default to the folder inside the repo root: src/agents/agent.py → parents[2] = repo root
 REPO_ROOT    = Path(__file__).resolve().parents[2] 
 WIKI_PATH = os.getenv("WIKI_PATH", REPO_ROOT / "wiki")
 
-print(f"REPO_ROOT: {REPO_ROOT}")
-print(f"WIKI_PATH:  {WIKI_PATH}")
-
+# not support adaptive thinking but does support extended thinking
+# only Opus and Sonnet 4.5+ support effort parameter
 haiku_llm = ChatAnthropic(
     model="claude-haiku-4-5-20251001", # Fastest latency
     max_retries=8,
     timeout=120.0
-    # not support adaptive thinking but does support extended thinking
-    # only Opus and Sonnet 4.5+ support effort parameter
 )
 
 supervisor_llm = ChatAnthropic(
@@ -33,21 +29,12 @@ supervisor_llm = ChatAnthropic(
     max_retries=8,
     timeout=120.0,
     effort="medium", # By default, Claude uses high effort, spending as many tokens as needed for excellent results
-    thinking={"type": "adaptive"},
-    # temperature=0.0,
+    thinking={"type": "adaptive"}, # temperature=0.0 is not compatible with adaptive thinking
     max_tokens=8000,
 )
 
-#Human-in-the-loop requires a checkpointer to persist agent state between the interrupt and resume
-checkpointer = MemorySaver()
 
-# Backend
-#inner_backend = LocalShellBackend(root_dir=str(REPO_ROOT), virtual_mode=True) 
-backend = GuardedLocalShellBackend(root_dir=str(REPO_ROOT), virtual_mode=True)
-print(type(backend).__mro__)  # mro means method resolution order, show the inheritance hierarchy
-
-
-def create_supervisor(thread_id: str):
+def create_supervisor(thread_id: str | None = None):
     """
     Create the main supervisor agent for a conversation thread.
 
@@ -64,23 +51,43 @@ def create_supervisor(thread_id: str):
     Returns:
         A DeepAgent supervisor instance produced by `create_deep_agent(...)`.
     """
+    # need thread id to restore the sandbox from the previous session
+    if not thread_id:
+        thread_id = str(uuid7())
+
     # visualization coding agent
-    visual_agent = create_sandbox_subagent(model=haiku_llm, thread_id=thread_id)
+    _daytona_backend, daytona_sandbox, visual_agent = create_daytona_agent(
+        model=haiku_llm,
+        thread_id=thread_id,
+        skills=[str(REPO_ROOT / "skills/marp-slide")],
+    )
+    register_sandbox(thread_id, daytona_sandbox.id)
 
     custom_subagent = CompiledSubAgent(
-        name="marp-slides-creator",
-        description="Specialized agent for creating marp slides",
-        runnable=visual_agent
+        name="marp-slide-creator",
+        description="For creating Marp slides/ presentations",
+        runnable=visual_agent,
+        interrupt_on={ # Each subagent can have its own interrupt_on configuration that overrides the main agent’s settings
+            "execute": True,
+            "write_file": True,
+            "edit_file": True,
+        },
     )
 
-    #Permissions only apply to the built-in filesystem tools (ls, read_file, glob, grep, write_file, edit_file).
+    #Human-in-the-loop requires a checkpointer to persist agent state between the interrupt and resume
+    checkpointer = MemorySaver()
+
+    # Backend
+    supervisor_backend = GuardedLocalShellBackend(root_dir=str(REPO_ROOT), virtual_mode=True)
+    #print(type(backend).__mro__)  # mro = method resolution order, show the inheritance hierarchy
+
     supervisor = create_deep_agent(
         model=haiku_llm,
-        skills=[str(REPO_ROOT / "skills/")],
+        skills=[str(REPO_ROOT / "skills/")], # skill and memory references must be absolute paths
         memory=[str(REPO_ROOT / "memories/AGENTS.md")],
         system_prompt=PHASE_1_SUPERVISOR_PROMPT,
-        backend=backend,
-        tools=all_tools, # custom tools plus built-in: read_file, write_file, edit_file, ls, glob, grep, execute
+        backend=supervisor_backend,
+        tools=all_tools,
         store=InMemoryStore(),
         checkpointer=checkpointer,  # Required!
         subagents=[custom_subagent],
@@ -91,35 +98,4 @@ def create_supervisor(thread_id: str):
             },
     )
 
-    print(PHASE_1_SUPERVISOR_PROMPT)
-
     return supervisor
-
-# # Print system prompt
-# agent
-
-# ingest_subagent = {
-#     "name": "ingest",
-#     "skills": ["/skills/"],
-#     "permissions": [
-#         FilesystemPermission(paths=["/skills/**"],    operations=["read"],         mode="allow"),
-#         FilesystemPermission(paths=["/raw/", "/raw/**"],       operations=["read", "write"], mode="allow"),
-#         FilesystemPermission(paths=["/wiki/","/wiki/**"],      operations=["read", "write"], mode="allow"),
-#         FilesystemPermission(paths=["/memories/**"],  operations=["read"],         mode="allow"),
-#         FilesystemPermission(paths=["/workspace/**"], operations=["read", "write"], mode="allow"),
-#         FilesystemPermission(paths=["/**"],           operations=["read", "write"], mode="deny"),
-#     ],
-#     "description": "Paper ingestion, wiki maintenance, citation extract",
-#     "system_prompt": INGEST_AGENT_SYSTEM_PROMPT,
-#     "tools": all_tools,
-# }
-
-# backend=CompositeBackend(
-#         default=StateBackend(),
-#         routes={
-#             "/raw/":      FilesystemBackend(root_dir=str(raw_dir),      virtual_mode=True),
-#             "/wiki/":     FilesystemBackend(root_dir=str(wiki_dir),     virtual_mode=True),
-#             "/skills/":   FilesystemBackend(root_dir=str(skills_dir),   virtual_mode=True),
-#             "/memories/": FilesystemBackend(root_dir=str(memories_dir), virtual_mode=True),
-#         },
-#     )

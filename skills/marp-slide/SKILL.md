@@ -7,7 +7,14 @@ description: Create professional Marp presentation slides with 7 beautiful theme
 
 Create professional, visually appealing Marp presentation slides with 7 pre-designed themes and built-in best practices.
 
-Important: always delegate this skill to `marp-slides-creator` subagent
+Important: this skill belongs to `marp-slide-creator` agent
+
+## Output Location
+
+```bash
+SKILL_DIR="${SKILL_DIR:-$(pwd)/skills/marp-slide}"
+MARP_SLIDES_DIR="${MARP_SLIDES_DIR:-$(pwd)/marp-slides}"
+```
 
 ## When to Use This Skill
 
@@ -32,26 +39,26 @@ First, determine the appropriate theme based on the user's request and content.
 - **General/Unsure** → default theme
 - **Dark background preferred** → dark or tech theme
 
-For detailed theme selection guidance, read `references/theme-selection.md`.
+For detailed theme selection guidance, read `$SKILL_DIR/references/theme-selection.md`.
 
 ### Step 2: Create Slides
 
 1. **Read relevant references first**:
-   - Always start by reading `references/marp-syntax.md` for basic syntax
-   - For images: `references/image-patterns.md` (official Marpit image syntax)
-   - For advanced features (math, emoji): `references/advanced-features.md`
-   - For custom themes: `references/theme-css-guide.md`
+   - Always start by reading `$SKILL_DIR/references/marp-syntax.md` for basic syntax
+   - For images: `$SKILL_DIR/references/image-patterns.md` (official Marpit image syntax)
+   - For advanced features (math, emoji): `$SKILL_DIR/references/advanced-features.md`
+   - For custom themes: `$SKILL_DIR/references/theme-css-guide.md`
 
 2. Copy content from the appropriate template file:
-   - `assets/template-basic.md` - Default theme (most common)
-   - `assets/template-minimal.md` - Minimal theme
-   - `assets/template-colorful.md` - Colorful theme
-   - `assets/template-dark.md` - Dark mode theme
-   - `assets/template-gradient.md` - Gradient theme
-   - `assets/template-tech.md` - Tech/code theme
-   - `assets/template-business.md` - Business theme
+   - `$SKILL_DIR/assets/template-basic.md` - Default theme (most common)
+   - `$SKILL_DIR/assets/template-minimal.md` - Minimal theme
+   - `$SKILL_DIR/assets/template-colorful.md` - Colorful theme
+   - `$SKILL_DIR/assets/template-dark.md` - Dark mode theme
+   - `$SKILL_DIR/assets/template-gradient.md` - Gradient theme
+   - `$SKILL_DIR/assets/template-tech.md` - Tech/code theme
+   - `$SKILL_DIR/assets/template-business.md` - Business theme
 
-3. Read `references/best-practices.md` for quality guidelines
+3. Read `$SKILL_DIR/references/best-practices.md` for quality guidelines
 
 4. Structure content following best practices:
    - Title slide with `<!-- _class: lead -->`
@@ -59,9 +66,9 @@ For detailed theme selection guidance, read `references/theme-selection.md`.
    - 3-5 bullet points per slide
    - Adequate whitespace
 
-5. Add images if needed using patterns from `references/image-patterns.md`
+5. Add images if needed using patterns from `$SKILL_DIR/references/image-patterns.md`
 
-6. Save to `/mnt/user-data/outputs/` with `.md` extension
+6. Save to `$MARP_SLIDES_DIR/` with `.md` extension (create the folder if missing)
 
 ## Available Themes
 
@@ -118,11 +125,11 @@ For detailed theme selection guidance, read `references/theme-selection.md`.
 
 2. **Select theme**
    - Use quick selection rules above
-   - If uncertain, consult `references/theme-selection.md`
+   - If uncertain, consult `$SKILL_DIR/references/theme-selection.md`
    - Default to default theme if still unsure
 
 3. **Apply template**
-   - Load appropriate template from `assets/`
+   - Load appropriate template from `$SKILL_DIR/assets/`
    - CSS is already embedded - no external files needed
    - Maintain template structure
 
@@ -133,18 +140,18 @@ For detailed theme selection guidance, read `references/theme-selection.md`.
    - Use 3-5 bullet points per slide
 
 5. **Refine quality**
-   - Read `references/best-practices.md`
+   - Read `$SKILL_DIR/references/best-practices.md`
    - Ensure adequate whitespace
    - Maintain consistency
    - Keep text concise (15-25 chars per line)
 
 6. **Add images**
-   - If needed, consult `references/image-patterns.md`
+   - If needed, consult `$SKILL_DIR/references/image-patterns.md`
    - Common: `![bg right:40%](image.png)` for side images
    - Use proper Marp image syntax
 
 7. **Output file**
-   - Save to `/mnt/user-data/outputs/`
+   - Save to `$MARP_SLIDES_DIR/`
    - Use descriptive filename like `presentation.md`
 
 ## Handling "Make It Look Good" Requests
@@ -175,7 +182,7 @@ When users give vague instructions like "良い感じにして", "かっこよ�
 
 ## Image Integration
 
-For slides with images, consult `references/image-patterns.md` for detailed syntax.
+For slides with images, consult `$SKILL_DIR/references/image-patterns.md` for detailed syntax.
 
 Common patterns:
 - **Side image**: `![bg right:40%](image.png)` - Image on right, text on left
@@ -196,7 +203,7 @@ Example lecture pattern:
 
 ## File Output
 
-Always save the final Marp file to `/mnt/user-data/outputs/` with `.md` extension:
+Always save the final Marp file to `$MARP_SLIDES_DIR/` with `.md` extension:
 - `presentation.md`
 - `seminar-slides.md`
 - `lecture-materials.md`
@@ -210,25 +217,25 @@ Before delivering slides, verify:
 - [ ] All h2 titles are concise (5-7 chars)
 - [ ] Bullet points are 3-5 items per slide
 - [ ] Images use proper Marp syntax
-- [ ] File saved to outputs directory
+- [ ] File saved under `$MARP_SLIDES_DIR/`
 - [ ] Content follows best practices
 
 ## References
 
 ### Core Documentation
-- **Marp syntax**: `references/marp-syntax.md` - Basic Marp/Marpit syntax (directives, frontmatter, pagination, etc.)
-- **Image patterns**: `references/image-patterns.md` - Official image syntax (bg, filters, split backgrounds)
-- **Theme CSS guide**: `references/theme-css-guide.md` - How to create custom themes based on Marpit specification
-- **Advanced features**: `references/advanced-features.md` - Math, emoji, fragmented lists, Marp CLI, VS Code
-- **Official themes**: `references/official-themes.md` - default, gaia, uncover themes documentation
+- **Marp syntax**: `$SKILL_DIR/references/marp-syntax.md` - Basic Marp/Marpit syntax (directives, frontmatter, pagination, etc.)
+- **Image patterns**: `$SKILL_DIR/references/image-patterns.md` - Official image syntax (bg, filters, split backgrounds)
+- **Theme CSS guide**: `$SKILL_DIR/references/theme-css-guide.md` - How to create custom themes based on Marpit specification
+- **Advanced features**: `$SKILL_DIR/references/advanced-features.md` - Math, emoji, fragmented lists, Marp CLI, VS Code
+- **Official themes**: `$SKILL_DIR/references/official-themes.md` - default, gaia, uncover themes documentation
 
 ### Quality & Selection Guides
-- **Theme selection**: `references/theme-selection.md` - How to choose the right theme for content
-- **Best practices**: `references/best-practices.md` - Quality guidelines for "cool" slides
+- **Theme selection**: `$SKILL_DIR/references/theme-selection.md` - How to choose the right theme for content
+- **Best practices**: `$SKILL_DIR/references/best-practices.md` - Quality guidelines for "cool" slides
 
 ### Templates & Assets
-- **Templates**: `assets/template-*.md` - Starting points with embedded CSS for each theme (7 themes)
-- **Standalone CSS**: `assets/theme-*.css` - CSS files for reference (already embedded in templates)
+- **Templates**: `$SKILL_DIR/assets/template-*.md` - Starting points with embedded CSS for each theme (7 themes)
+- **Standalone CSS**: `$SKILL_DIR/assets/theme-*.css` - CSS files for reference (already embedded in templates)
 
 ### Official External Links
 - **Marp Official Site**: https://marp.app/

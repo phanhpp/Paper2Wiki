@@ -56,3 +56,4 @@ prompt.yaml
 src/tools/trace_offloads/
 *.yaml
 *.json
+marp-slides/

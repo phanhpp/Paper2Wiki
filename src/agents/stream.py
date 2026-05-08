@@ -5,7 +5,7 @@ import asyncio
 from langgraph.types import Command
 import ast, json
 from langchain_core.utils.uuid import uuid7
-from langchain_core.runnables import RunnableConfig
+from langchain_core.runnables import Runnable, RunnableConfig
 from src.agents.agent import create_supervisor
 
 SESSION_AUTO_APPROVE = False
@@ -62,8 +62,10 @@ def _handle_interrupts(interrupts):
 
 async def run_turn_stream_async(
     user_message: str,
+    agent: Runnable | None = None,
     config: RunnableConfig | None = None,
     thread_id: str | None = None,
+    
 ):
     """Run one streamed turn with HITL interrupt support.
 
@@ -74,6 +76,9 @@ async def run_turn_stream_async(
 
     The resulting id is always written back to ``config["configurable"]`` so downstream
     components (graph state/checkpointer/tools) use a single canonical thread id.
+
+    If you pass a custom ``agent``, use the same ``thread_id`` (or omit both so defaults
+    match) wherever that agent was constructed with thread-scoped resources.
     """
     # Extract caller-provided configurable values (if any) so we can preserve them.
     configurable = dict((config or {}).get("configurable") or {})
@@ -88,7 +93,9 @@ async def run_turn_stream_async(
         "thread_id": resolved_thread_id,
     }
 
-    agent = create_supervisor(resolved_thread_id)
+    if agent is None:
+        agent = create_supervisor(resolved_thread_id)
+    
     payload = {"messages": [{"role": "user", "content": user_message}]}
 
     while True:
@@ -99,6 +106,7 @@ async def run_turn_stream_async(
             payload,
             config=merged_config,
             version="v2",
+            subgraphs=True,
             stream_mode=["values", "messages", "updates"],
         ):
             if chunk["type"] == "values":  # Interrupts ride on values stream parts in v2
@@ -150,6 +158,18 @@ async def run_turn_stream_async(
         # Loop back, stream the resumed execution
 
 
-def run_turn_stream(user_message: str, config: dict | None = None, thread_id: str | None = None):
+def run_turn_stream(
+    user_message: str,
+    agent: Runnable | None = None,
+    config: dict | None = None,
+    thread_id: str | None = None,
+):
     """Sync wrapper (kept for convenience) around the async implementation."""
-    return asyncio.run(run_turn_stream_async(user_message=user_message, config=config, thread_id=thread_id))
+    return asyncio.run(
+        run_turn_stream_async(
+            user_message=user_message,
+            agent=agent,
+            config=config,
+            thread_id=thread_id,
+        )
+    )
