@@ -1,35 +1,34 @@
-# Paper2Wiki
+# Paper2Wiki: A Self-Improving Research Assistant
 
-A self-improving LLM knowledge base built on the [Karpathy LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f), powered by the [Deep Agents SDK](https://github.com/langchain-ai/deepagents).
-
-Upload research papers → agent builds and maintains a structured, interlinked wiki that compounds knowledge over time. Unlike RAG (which re-derives knowledge on every query), the wiki grows richer with every paper added.
+A research assistant that transforms research papers into durable artifacts — wiki pages, slide decks, and code. Powered by the [Deep Agents SDK](https://github.com/langchain-ai/deepagents), it can refine its own skills and logic on-demand by analyzing its execution traces.
 
 ---
 
 ## What It Does
 
-- **Ingest** papers (PDF, arXiv URL, DOI) → structured wiki pages with [[wikilinks]], concept pages, author profiles, citation graphs
-- **Query** the compiled wiki → synthesized answers that get filed back as new wiki pages
-- **Code** tasks from paper content → implement algorithms, verify benchmarks, generate mermaid diagrams (sandbox-isolated, HITL approval)
-- **Self-improve** → trace-analyzer skill rewrites agent skills based on LangSmith failure traces
+- **LLM-Wiki**: builds and maintains a graph-structured knowledge base from academic papers
+- **Marp slides**: generates presentation decks from papers or wiki content (sandboxed via Daytona)
+- **Self-improvement**: analyzes LangSmith traces to surface failures, then proposes fixes to skills and `AGENTS.md`
+- **General assistance**: answers questions, writes/edits code, and runs repo tools (with HITL where configured)
 
 ---
 
 ## Architecture
 
-```
-Supervisor Agent
-├── Visualisation Subagent       → visualization tasks that can flood supervisor's context 
+Paper2Wiki uses a supervisor-subagent architecture powered by the [Deep Agents SDK](https://github.com/langchain-ai/deepagents).
 
-Skills (on-demand):
-  llm-wiki, marp-slide, trace-analyzer
-
-Storage:
-  /raw/       → source papers (read-only)
-  /wiki/      → LLM-maintained knowledge base
-  /skills/    → self-improving skill files
-  /memories/  → AGENTS.md schema + preferences
+```text
+Supervisor Agent (Local)
+├── Tools: Ingest, Query, Trace Fetcher
+├── Skills: llm-wiki, trace-analysis
+└── Subagent: marp-slide-creator (Daytona Sandbox)
+    └── Skill: marp-slide
 ```
+
+- **Supervisor**: Handles high-level orchestration, wiki maintenance, and trace analysis. Runs on your local machine with guarded shell access.
+- **Marp Subagent**: An isolated Daytona container dedicated to generating and styling presentation decks.
+- **HITL (Human-in-the-Loop)**: By default, the system interrupts and asks for approval before any `write_file`, `edit_file`, or `execute` (shell/git) operation.
+
 
 ---
 
@@ -65,106 +64,123 @@ cp .env.example .env
 ```
 
 `.env`:
+
 ```bash
 ANTHROPIC_API_KEY=sk-ant-...
 LANGSMITH_API_KEY=lsv2_...
-LANGSMITH_TRACING=true
+LANGSMITH_TRACING=true        # Required for self-improvement
 LANGSMITH_PROJECT=paper2wiki
-DAYTONA_API_KEY=...          # from daytona.io dashboard
+DAYTONA_API_KEY=...           # Required for Marp slides
+WIKI_PATH=./wiki              # Optional: custom wiki location
 ```
+
+## Usage
+
+You can interact with Paper2Wiki using natural language. Here are common patterns:
+
+### 1. Ingesting Papers
+- "Ingest this paper: https://arxiv.org/abs/2312.00752"
+- "Add the 'Attention is All You Need' paper to my wiki"
+- "Search for recent papers on 'LoRA' and ingest the best one"
+
+### 2. Querying the Wiki
+- "What are the main findings of the ReAct paper?"
+- "Compare the architectural differences between Llama 3 and Mistral"
+- "Summarize everything we know about 'Chain of Thought' prompting"
+
+### 3. Generating Presentations
+- "Create a 5-slide deck about the 'Attention' paper using the 'tech' theme"
+- "Make a presentation summarizing our wiki's content on 'Model Merging'"
+- "Restyle the existing slides in `marp-slides/intro.md` to look more professional"
+
+### 4. Self-Improvement
+- "Analyze my recent traces and improve your skills"
+- "Why did the last ingest fail? Check the traces and fix the issue"
 
 ---
 
-## Project Structure
+## Storage Structure
 
-```
-paper2wiki/
-├── README.md
-├── pyproject.toml
-├── langgraph.json              ← LangSmith deployment config
-├── .env
-├── .env.example
-├── .gitignore
-│
-├── memories/
-│   └── AGENTS.md               ← pre-created by you
-│                               preferences.md created by agent
-├── src/
-│  
-├── skills/
-├── wiki/                       ← gitignored
-│   ├── index.md
-│   ├── log.md
-│   ├── papers/
-│   ├── concepts/
-│   ├── entities/
-│   ├── comparisons/
-│   ├── syntheses/
-│   ├── graph/
-│   ├── outputs/
-│   └── health/
-│
-├── notebooks/
-│   └── explore.ipynb
-│
-└── tests/
-```
+- `/wiki/`: The core knowledge base (Markdown + JSON)
+- `/skills/`: Self-improving skill definitions (SKILL.md files)
+- `/memories/`: Long-term agent guidance (`AGENTS.md`)
+- `/marp-slides/`: Final presentation outputs (PDF, PNG, Markdown)
+
 
 ---
+
 ## How The Wiki Works (Karpathy Pattern)
 
-```
+The wiki subsystem is inspired by the [Karpathy LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f).
+
+```text
 raw/        ← YOU put source papers here (immutable)
-wiki/       ← AGENT writes and maintains this entirely
-AGENTS.md   ← tells agent how to structure and maintain wiki
+wiki/       ← AGENT writes and maintains this entirely (compiled artifacts)
 ```
 
+Concretely, on ingest the agent extracts and maintains:
+
+- **Navigation + provenance**: `wiki/index.md` (catalog + 1-line summaries), `wiki/log.md` (append-only actions), `wiki/SCHEMA.md` (structure/tag taxonomy)
+- **Immutable sources + parsed artifacts**: `wiki/raw/` plus `wiki/raw/assets/<slug>/` with
+  - `images/` (figures), `tables/` (extracted tables), and `<slug>.md` (markdown parse of the PDF)
+- **Compiled pages**: entity/concept/comparison/query pages under `wiki/entities/`, `wiki/concepts/`, `wiki/comparisons/`, `wiki/queries/` with YAML frontmatter + `[[wikilinks]]`
+- **Graphs (optional but supported)**: `wiki/graph/graph.json` (nodes/edges, confidence) and `wiki/graph/citations.json` (citation metadata + reference links)
+
 Three operations:
+
 - **Ingest**: new paper → wiki pages + [[wikilinks]] + index.md + log.md
 - **Query**: question → read index.md → drill into pages → synthesize → save answer back
 - **Lint**: health check → broken links, orphans, contradictions, missing pages
 
 ---
 
-## Self-Improvement Loop
+## How Trace Analysis Works
 
-```
-Inner (every ingest):
-  LoopDetectionMiddleware  → prevents wiki update loops
-  PreCompletionChecklist   → forces lint + index + log + git commit
-  HITL on git commit       → you approve before pushing
+The agent uses the `trace-analysis` skill to self-improve by analyzing its own performance:
 
-Outer (manual):
-  trace-analyzer skill     → reads LangSmith traces → rewrites /skills/
-  wiki-health skill        → checks entire wiki → health_report.md
-  HITL on skill edits      → you approve before skills change
-```
+1. **Fetch**: Retrieves recent execution traces from LangSmith (filtered by success or failure).
+2. **Summarize**: Uses an LLM to condense traces into a structured report of what happened.
+3. **Analyze**: Identifies patterns, anomalies, skill deviations, or tool misuse.
+4. **Validate**: Checks git history to ensure findings haven't already been fixed.
+5. **Propose**: Suggests actionable improvements to `/skills/` or `AGENTS.md`.
+6. **Apply**: Implements approved changes after human confirmation.
 
----
 
-## Sandbox (Code Subagent)
-
-Uses **Daytona** (thread-scoped, fresh per conversation):
-
-```python
-# Code subagent spins up sandbox on demand
-# User-requested tasks execute inside isolated container
-# Network blocked after paper fetch (XSS protection)
-# Rendered outputs (SVG, PNG) served as static files
-```
 
 ---
 
-## Build Phases
+## Marp Slide Creation (Isolated Sandbox)
 
-| Phase | What |
-|---|---|
-| 1 | AGENTS.md + lint.py + minimal agent (FilesystemBackend local) |
-| 2 | Skills + middleware (LoopDetection, PreCompletion, LocalContext) |
-| 3 | Subagents + StoreBackend + permissions + git HITL |
-| 4 | Sandbox (Daytona) + HITL on code tasks |
-| 5 | Self-improvement (trace-analyzer + wiki-health skills) |
-| 6 | Deploy LangSmith + PostgresStore + qmd search |
+The agent uses a dedicated subagent in a Daytona sandbox to create presentations:
+
+1. **Isolation**: Runs in a fresh, thread-scoped container for every conversation.
+2. **Workflow**:
+   - **Selects** a professional theme (Business, Tech, Minimal, etc.).
+   - **Structures** content from papers or wiki pages into Marp Markdown.
+   - **Exports** the deck to multiple formats (SVG, PNG, PDF).
+3. **Security**: Network access is restricted to prevent data exfiltration.
+4. **Persistence**: Final outputs are saved to the host's `marp-slides/` folder.
+
+---
+
+## Developer Information
+
+### Project Structure
+```text
+llm_wiki/
+├── src/agents/       # Supervisor & Daytona subagent logic
+├── src/tools/        # Ingest (Docling, arXiv), Trace, & Wiki tools
+├── skills/           # Skill definitions (Markdown + logic)
+├── wiki/             # The knowledge base
+└── marp-slides/      # Presentation outputs
+```
+
+### Wiki Integrity (Linting)
+The system includes a `wiki-health` skill that performs both programmatic and LLM-based checks:
+- **Programmatic**: Broken links, orphan pages, index completeness, frontmatter validation.
+- **LLM-based**: Semantic contradictions, "missing concept" detection, and quality assessment.
+
+Trigger it with: *"Run a wiki health check"*
 
 ---
 
@@ -174,4 +190,6 @@ MIT
 
 ## References
 
-- marp-slide skill adapted from [softaworks/agent-toolkit](https://github.com/softaworks/agent-toolkit) (MIT License)
+- **Marp-slide skill**: Adapted from [softaworks/agent-toolkit](https://github.com/softaworks/agent-toolkit).
+- **LLM-wiki skill**: Adapted from [hermes-agent](https://github.com/NousResearch/hermes-agent).
+- **Wiki Pattern**: Inspired by [Andre Karpathy's LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f).

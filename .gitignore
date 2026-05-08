@@ -57,3 +57,4 @@ src/tools/trace_offloads/
 *.yaml
 *.json
 marp-slides/
+memories/agents_md_template.md

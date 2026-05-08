@@ -2,21 +2,42 @@
 
 ## Project Structure
 
-```
+```markdown
 llm_wiki/                         # Paper2Wiki — repository root
+├── memories/
+│   ├── AGENTS.md                 # long-lived agent guidance (this file)
+│   └── agents_md_template.md
+├── notebooks/
+│   └── explore.ipynb
+├── marp-slides/                  # generated Marp decks (outputs)
 ├── src/
+│   ├── prompts/
+│   │   └── system_prompt.py
 │   ├── agents/
-│   │   ├── agent.py
+│   │   ├── agent.py              # supervisor factory (main entry)
+│   │   ├── stream.py             # streaming runner + HITL interrupt handling
+│   │   ├── daytona_agent.py       # Daytona-backed subagent factory
+│   │   ├── sandbox_utils.py       # sandbox registry/inspection helpers
+│   │   ├── backend_wrapper.py     # guarded local shell backend
+│   │   └── prompt_builder.py
 │   ├── tools/
 │   │   ├── ingest_tools.py
-│   │   ├── lint.py
-│   │   ├── utils.py
-│   │   └── docling_parser.py
+│   │   ├── docling_parser.py
+│   │   ├── arxiv_tool.py
+│   │   ├── fetch_traces.py
+│   │   ├── summarize_traces.py
+│   │   ├── wiki_integrity_check.py
+│   │   ├── sandbox_tools.py
+│   │   ├── trace_report_pickle_cache.py  # dev-only
+│   │   └── utils.py
 │   └── utils.py
 ├── skills/
-│   ├── llm-wiki/                   
+│   ├── llm-wiki/
+│   ├── marp-slide/
+│   └── trace-analysis/
 ├── wiki/                         # wiki (index, log, papers, concepts, entities, graph)
-└── AGENTS.md                    
+├── pyproject.toml
+└── README
 ```
 
 ## Dev Environment
