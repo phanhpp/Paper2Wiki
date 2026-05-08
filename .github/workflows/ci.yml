@@ -16,16 +16,13 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4 # downloads your code onto the machine
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
+          # Sets UV_PYTHON for later steps; matches requires-python in pyproject.toml
           python-version: "3.11"
 
       - name: Install dependencies
