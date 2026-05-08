@@ -58,3 +58,4 @@ src/tools/trace_offloads/
 *.json
 marp-slides/
 memories/agents_md_template.md
+requirements.txt

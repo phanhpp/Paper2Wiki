@@ -9,9 +9,10 @@ from langchain_daytona import DaytonaSandbox
 from langchain_anthropic import ChatAnthropic
 from langgraph.checkpoint.memory import MemorySaver
 
-from src.prompts.system_prompt import REPO_ROOT, SUBAGENT_PROMPT
+from src.prompts.system_prompt import SUBAGENT_PROMPT
 from src.tools.sandbox_tools import make_download_and_save_tool, make_sandbox_state_and_fs_tools
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(REPO_ROOT / ".env")
 checkpointer = MemorySaver()
 

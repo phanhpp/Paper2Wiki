@@ -8,7 +8,7 @@ A research assistant that transforms research papers into durable artifacts — 
 
 - **LLM-Wiki**: builds and maintains a graph-structured knowledge base from academic papers
 - **Marp slides**: generates presentation decks from papers or wiki content (sandboxed via Daytona)
-- **Self-improvement**: analyzes LangSmith traces to surface failures, then proposes fixes to skills and `AGENTS.md`
+- **Self-improvement**: analyzes LangSmith traces to surface failures, then proposes fixes to **skills** and `AGENTS.md`
 - **General assistance**: answers questions, writes/edits code, and runs repo tools (with HITL where configured)
 
 ---
@@ -49,17 +49,13 @@ Supervisor Agent (Local)
 git clone https://github.com/yourname/paper2wiki
 cd paper2wiki
 
-# 2. Create environment
-uv venv --python 3.11
-source .venv/bin/activate  # or .venv\Scripts\activate on Windows
+# 2. Create venv and install deps from pyproject.toml + uv.lock
+uv sync
 
-# 3. Install dependencies
-uv add -r requirements.txt
-
-# 4. Register Jupyter kernel
+# 3. (Optional) Jupyter kernel for notebooks
 uv run python -m ipykernel install --user --name=paper2wiki
 
-# 5. Copy and fill env file
+# 4. Copy and fill env file
 cp .env.example .env
 ```
 
@@ -106,7 +102,6 @@ You can interact with Paper2Wiki using natural language. Here are common pattern
 - `/memories/`: Long-term agent guidance (`AGENTS.md`)
 - `/marp-slides/`: Final presentation outputs (PDF, PNG, Markdown)
 
-
 ---
 
 ## How The Wiki Works (Karpathy Pattern)
@@ -145,8 +140,6 @@ The agent uses the `trace-analysis` skill to self-improve by analyzing its own p
 5. **Propose**: Suggests actionable improvements to `/skills/` or `AGENTS.md`.
 6. **Apply**: Implements approved changes after human confirmation.
 
-
-
 ---
 
 ## Marp Slide Creation (Isolated Sandbox)
@@ -166,6 +159,7 @@ The agent uses a dedicated subagent in a Daytona sandbox to create presentations
 ## Developer Information
 
 ### Project Structure
+
 ```text
 llm_wiki/
 ├── src/agents/       # Supervisor & Daytona subagent logic
@@ -175,8 +169,28 @@ llm_wiki/
 └── marp-slides/      # Presentation outputs
 ```
 
+### Tests
+
+```bash
+uv run pytest -q
+```
+
+All tests are offline — no real LangSmith or Daytona calls. Fixture-backed trace tests use `tests/fixtures/runs.json` when present and skip when it is missing. Generate the fixture locally with:
+
+```bash
+uv run --env-file .env python -m tests.save_fixtures
+```
+
+CI runs the same offline suite with:
+
+```bash
+uv run pytest -q
+```
+
 ### Wiki Integrity (Linting)
+
 The system includes a `wiki-health` skill that performs both programmatic and LLM-based checks:
+
 - **Programmatic**: Broken links, orphan pages, index completeness, frontmatter validation.
 - **LLM-based**: Semantic contradictions, "missing concept" detection, and quality assessment.
 

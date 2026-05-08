@@ -21,6 +21,7 @@ import asyncio
 import json
 import math
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -33,7 +34,9 @@ from src.tools.fetch_traces import (
     _TOOL_CONTENT_TRUNCATE_THRESHOLD,
     _VERBOSE_TOOLS,
     _group_formatted_traces_async,
+    _format_trace_async,
     _make_trace_report,
+    _run_trace_report_async,
     _redact_content,
     TraceReport,
 )
@@ -80,6 +83,44 @@ _REPORT_BASE: dict[str, Any] = dict(
     total_cost=0.0,
 )
 
+
+def _fake_run(
+    *,
+    run_id: str,
+    trace_id: str,
+    dotted_order: str,
+    run_type: str = "llm",
+    error: str | None = None,
+    total_cost: float = 0.0,
+    name: str | None = None,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
+) -> SimpleNamespace:
+    """Small LangSmith run stand-in with the attrs used by fetch_traces."""
+    return SimpleNamespace(
+        id=run_id,
+        trace_id=trace_id,
+        dotted_order=dotted_order,
+        run_type=run_type,
+        error=error,
+        status="error" if error else "success",
+        latency=0.1,
+        total_cost=total_cost,
+        name=name or f"{run_type}-{run_id}",
+        tags=[],
+        inputs={
+            "messages": [
+                {
+                    "id": ["langchain", "schema", "messages", "HumanMessage"],
+                    "kwargs": {"content": f"input for {run_id}"},
+                }
+            ]
+        },
+        outputs={"generations": [[{"message": {"kwargs": {"content": f"output {run_id}"}}}]]},
+        start_time=start_time,
+        end_time=end_time,
+    )
+
 # ---------------------------------------------------------------------------
 # Test 1 — auto-offload: is_offloaded=True when chars exceed threshold
 # ---------------------------------------------------------------------------
@@ -90,6 +131,7 @@ async def test_offload_when_large(
     runs: list[SimpleNamespace],
     mock_async_client: Any,
 ) -> None:
+    """When total trace chars exceed ``threshold``, report is offloaded to disk and ``traces`` is None."""
     traces = await _group_formatted_traces_async(runs, mock_async_client)
     # threshold=0 guarantees any non-empty trace set triggers offload
     report = _make_trace_report(
@@ -115,6 +157,7 @@ async def test_inline_when_small(
     runs: list[SimpleNamespace],
     mock_async_client: Any,
 ) -> None:
+    """When under the char threshold, ``TraceReport`` keeps ``traces`` inline and no file path."""
     traces = await _group_formatted_traces_async(runs, mock_async_client)
     total_chars = sum(len(v) for v in traces.values())
     # threshold above actual size guarantees inline path
@@ -137,6 +180,7 @@ async def test_inline_when_small(
 
 @pytest.mark.asyncio
 async def test_build_groups_by_trace_id(runs: list[SimpleNamespace], mock_async_client: Any) -> None:
+    """Formatted output has one key per ``trace_id`` and each value is non-empty text."""
     traces = await _group_formatted_traces_async(runs, mock_async_client)
     # Every trace_id from runs must appear in traces
     expected_trace_ids = {str(r.trace_id) for r in runs}
@@ -146,11 +190,117 @@ async def test_build_groups_by_trace_id(runs: list[SimpleNamespace], mock_async_
         assert isinstance(text, str) and text, f"Trace {trace_id} is empty"
 
 
+@pytest.mark.asyncio
+async def test_format_trace_fetches_only_error_and_last_llm_runs() -> None:
+    """Verify trace formatting fetches only high-signal LLM payloads.
+
+    The formatter should skip successful prefix LLM calls to keep traces compact,
+    while still fetching errored LLM calls for debugging and the final LLM call
+    for the agent's outcome.
+    """
+    trace_runs = [
+        _fake_run(run_id="llm-prefix", trace_id="trace-1", dotted_order="20260101.1"),
+        _fake_run(
+            run_id="tool",
+            trace_id="trace-1",
+            dotted_order="20260101.2",
+            run_type="tool",
+        ),
+        _fake_run(
+            run_id="llm-error",
+            trace_id="trace-1",
+            dotted_order="20260101.3",
+            error="boom",
+        ),
+        _fake_run(run_id="llm-final", trace_id="trace-1", dotted_order="20260101.4"),
+    ]
+
+    class _RecordingClient:
+        def __init__(self) -> None:
+            self.read_ids: list[str] = []
+
+        async def read_run(self, run_id: str) -> SimpleNamespace:
+            self.read_ids.append(run_id)
+            return next(run for run in trace_runs if run.id == run_id)
+
+    client = _RecordingClient()
+    text = await _format_trace_async("trace-1", trace_runs, client)  # type: ignore[arg-type]
+
+    assert client.read_ids == ["llm-error", "llm-final"]
+    assert "input for llm-prefix" not in text
+    assert "input for llm-error" in text
+    assert "input for llm-final" in text
+
+
+@pytest.mark.asyncio
+async def test_run_trace_report_async_uses_langsmith_filters_and_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify the public trace-report path wires LangSmith filters into metadata.
+
+    This protects the integration boundary: project/limit/error must be passed
+    to ``AsyncClient.list_runs``, and the resulting ``TraceReport`` must reflect
+    run counts, error counts, total cost, and observed run time bounds.
+    """
+    started = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    ended = datetime(2026, 1, 1, 12, 5, tzinfo=timezone.utc)
+    runs = [
+        _fake_run(
+            run_id="root",
+            trace_id="trace-a",
+            dotted_order="20260101.1",
+            run_type="chain",
+            total_cost=0.25,
+            start_time=started,
+            end_time=ended,
+        ),
+        _fake_run(
+            run_id="llm",
+            trace_id="trace-a",
+            dotted_order="20260101.2",
+            total_cost=0.75,
+            error="tool failed",
+            start_time=started,
+            end_time=ended,
+        ),
+    ]
+    captured_kwargs: dict[str, Any] = {}
+
+    class _FakeAsyncClient:
+        async def list_runs(self, **kwargs: Any):
+            captured_kwargs.update(kwargs)
+            for run in runs:
+                yield run
+
+        async def read_run(self, run_id: str) -> SimpleNamespace:
+            return next(run for run in runs if run.id == run_id)
+
+    monkeypatch.setattr("src.tools.fetch_traces.AsyncClient", _FakeAsyncClient)
+
+    report = await _run_trace_report_async(
+        project="paper2wiki-test",
+        days=3,
+        limit=2,
+        error=True,
+    )
+
+    assert captured_kwargs["project_name"] == "paper2wiki-test"
+    assert captured_kwargs["limit"] == 2
+    assert captured_kwargs["error"] is True
+    assert report.run_count == 2
+    assert report.trace_count == 1
+    assert report.error_count == 1
+    assert report.total_cost == 1.0
+    assert report.start_time == started.isoformat()
+    assert report.end_time == ended.isoformat()
+
+
 # ---------------------------------------------------------------------------
 # Test 4 — non-verbose tool content truncated at _MAX_TOOL_CONTENT_CHARS
 # ---------------------------------------------------------------------------
 
 def test_tool_content_truncated() -> None:
+    """Non-verbose tool output beyond the threshold is shortened with a truncation marker."""
     long_content = "x" * (_TOOL_CONTENT_TRUNCATE_THRESHOLD + 1000)
     result = _redact_content(long_content, tool_name="other_tool")
     assert isinstance(result, str)
@@ -159,6 +309,7 @@ def test_tool_content_truncated() -> None:
 
 
 def test_tool_content_kept_when_short() -> None:
+    """Short non-verbose tool content passes through ``_redact_content`` unchanged."""
     short = "x" * (_TOOL_CONTENT_TRUNCATE_THRESHOLD - 1)
     assert _redact_content(short, tool_name="other_tool") == short
 
@@ -169,12 +320,14 @@ def test_tool_content_kept_when_short() -> None:
 
 @pytest.mark.parametrize("tool_name", sorted(_VERBOSE_TOOLS))
 def test_verbose_tools_redacted(tool_name: str) -> None:
+    """Listed verbose tools always get full redaction regardless of payload size."""
     content = "a" * 2000
     result = _redact_content(content, tool_name=tool_name)
     assert result == f"[redacted — {len(content)} chars]"
 
 
 def test_verbose_tool_short_content_still_redacted() -> None:
+    """Even tiny read_file outputs are redacted to avoid leaking file contents in traces."""
     content = "tiny"
     result = _redact_content(content, tool_name="read_file")
     assert result == f"[redacted — {len(content)} chars]"
@@ -186,6 +339,7 @@ def test_verbose_tool_short_content_still_redacted() -> None:
 
 @pytest.mark.asyncio
 async def test_max_trace_chars_respected(runs: list[SimpleNamespace], mock_async_client: Any) -> None:
+    """Each formatted trace string length is bounded by ``_MAX_TRACE_CHARS``."""
     traces = await _group_formatted_traces_async(runs, mock_async_client)
     for trace_id, text in traces.items():
         assert len(text) <= _MAX_TRACE_CHARS, (
@@ -198,6 +352,7 @@ async def test_max_trace_chars_respected(runs: list[SimpleNamespace], mock_async
 # ---------------------------------------------------------------------------
 @pytest.mark.expect_exception
 def test_model_validator_rejects_offloaded_without_path() -> None:
+    """``TraceReport`` rejects ``is_offloaded=True`` without ``traces_path``."""
     with pytest.raises(Exception):
         TraceReport(
             project="p", fetched_at="", start_time="", end_time="",
@@ -208,6 +363,7 @@ def test_model_validator_rejects_offloaded_without_path() -> None:
 
 @pytest.mark.expect_exception
 def test_model_validator_rejects_inline_without_traces() -> None:
+    """``TraceReport`` rejects inline mode without a ``traces`` dict."""
     with pytest.raises(Exception):
         TraceReport(
             project="p", fetched_at="", start_time="", end_time="",
@@ -217,6 +373,7 @@ def test_model_validator_rejects_inline_without_traces() -> None:
 
 @pytest.mark.expect_exception
 def test_model_validator_rejects_both_set() -> None:
+    """``TraceReport`` rejects having both ``traces`` and ``traces_path`` set."""
     with pytest.raises(Exception):
         TraceReport(
             project="p", fetched_at="", start_time="", end_time="",
