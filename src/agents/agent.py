@@ -15,6 +15,13 @@ from langchain_core.utils.uuid import uuid7
 # 2. If not, default to the folder inside the repo root: src/agents/agent.py → parents[2] = repo root
 REPO_ROOT    = Path(__file__).resolve().parents[2] 
 WIKI_PATH = os.getenv("WIKI_PATH", REPO_ROOT / "wiki")
+SKILLS_ROOT = REPO_ROOT / "skills"
+
+SUPERVISOR_SKILL_SOURCES = [
+    (str((SKILLS_ROOT / "llm-wiki").resolve()), "Llm-wiki Skills"),
+    # (str((SKILLS_ROOT / "marp-slide").resolve()), "Marp-slide Skills"),
+    (str((SKILLS_ROOT / "trace-analysis").resolve()), "Trace-analysis Skills"),
+]
 
 # not support adaptive thinking but does support extended thinking
 # only Opus and Sonnet 4.5+ support effort parameter
@@ -32,7 +39,6 @@ supervisor_llm = ChatAnthropic(
     thinking={"type": "adaptive"}, # temperature=0.0 is not compatible with adaptive thinking
     max_tokens=8000,
 )
-
 
 def create_supervisor(thread_id: str | None = None):
     """
@@ -83,7 +89,7 @@ def create_supervisor(thread_id: str | None = None):
 
     supervisor = create_deep_agent(
         model=haiku_llm,
-        skills=[str(REPO_ROOT / "skills/")], # skill and memory references must be absolute paths
+        skills=["/skills/"],
         memory=[str(REPO_ROOT / "memories/AGENTS.md")],
         system_prompt=PHASE_1_SUPERVISOR_PROMPT,
         backend=supervisor_backend,

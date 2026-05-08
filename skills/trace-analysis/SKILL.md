@@ -72,10 +72,12 @@ If one page fails and you need a targeted retry, call:
 
 ### 3. Cluster & Synthesize
 
-Supervisor receives all structured summaries and:
+upon receives all structured summaries if:
 
 - **≤2 traces** → present 1 concise summary, no clustering needed
 - **>2 traces** → identify patterns and issues, group by categories (e.g. `error_type`, `skill_compliance`), rank by frequency + severity
+
+Take the summaries as they are, **do not fall back to reading the raw traces**
 
 **Before presenting the report, validate each finding against git history:**
 
