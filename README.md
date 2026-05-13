@@ -46,7 +46,7 @@ Supervisor Agent (Local)
 
 ```bash
 # 1. Clone
-git clone https://github.com/yourname/paper2wiki
+git clone https://github.com/phanhpp/paper2wiki
 cd paper2wiki
 
 # 2. Create venv and install deps from pyproject.toml + uv.lock

@@ -122,5 +122,3 @@ def create_daytona_agent(
     )
 
     return backend, sandbox, agent
-
-print(SUBAGENT_PROMPT)

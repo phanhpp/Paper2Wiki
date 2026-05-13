@@ -39,7 +39,7 @@ import json
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing_extensions import Any, Optional
+from typing import Any, Optional
 from pydantic import BaseModel, model_validator
 from langsmith import AsyncClient
 from langchain.tools import tool

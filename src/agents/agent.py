@@ -1,35 +1,53 @@
-from pathlib import Path
 from deepagents import create_deep_agent, CompiledSubAgent
 from src.tools.ingest_tools import all_tools
 from src.prompts.system_prompt import PHASE_1_SUPERVISOR_PROMPT
-from langchain_anthropic import ChatAnthropic
-import os
 from langgraph.store.memory import InMemoryStore
-from langgraph.checkpoint.memory import MemorySaver
+# from langgraph.checkpoint.memory import MemorySaver
+import aiosqlite
 from src.agents.backend_wrapper import GuardedLocalShellBackend
 from src.agents.daytona_agent import create_daytona_agent
 from src.agents.sandbox_utils import register_sandbox
+from src.agents.llms import haiku_llm
 from langchain_core.utils.uuid import uuid7
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from src.sessions.sessions_db_setup import SESSIONS_DIR
+from pathlib import Path
 
-REPO_ROOT    = Path(__file__).resolve().parents[2] 
 
-# Not support adaptive thinking but does support extended thinking. Only Opus and Sonnet 4.5+ support effort parameter
-haiku_llm = ChatAnthropic(
-    model="claude-haiku-4-5-20251001", # Fastest latency
-    max_retries=8,
-    timeout=120.0
-)
+REPO_ROOT = Path(__file__).resolve().parents[2] 
 
-supervisor_llm = ChatAnthropic(
-    model="claude-sonnet-4-6",
-    max_retries=8,
-    timeout=120.0,
-    effort="medium", # By default, Claude uses high effort, spending as many tokens as needed for excellent results
-    thinking={"type": "adaptive"}, # temperature=0.0 is not compatible with adaptive thinking
-    max_tokens=8000,
-)
+# --- module-level singletons, created once ---
+_checkpoint_conn = None
+_checkpointer = None
 
-def create_supervisor(thread_id: str | None = None):
+
+async def _get_async_checkpointer() -> AsyncSqliteSaver:
+    """Lazily initialize and reuse an async SQLite checkpointer."""
+    global _checkpoint_conn, _checkpointer
+
+    if _checkpointer is None:
+        _checkpoint_conn = await aiosqlite.connect(str(SESSIONS_DIR / "checkpoints.db"))
+        _checkpointer = AsyncSqliteSaver(_checkpoint_conn)
+        await _checkpointer.setup() # creates tables if not exist
+
+    return _checkpointer
+
+
+async def close_checkpointer() -> None:
+    """Explicitly close the async checkpointer connection.
+
+    Call this at app/notebook shutdown to flush SQLite WAL state and release
+    the file handle cleanly.
+    """
+    global _checkpoint_conn, _checkpointer
+
+    if _checkpoint_conn is not None:
+        await _checkpoint_conn.close()
+        _checkpoint_conn = None
+        _checkpointer = None
+
+
+async def create_supervisor(thread_id: str | None = None):
     """
     Create the main supervisor agent for a conversation thread.
 
@@ -70,12 +88,11 @@ def create_supervisor(thread_id: str | None = None):
         },
     )
 
-    # Human-in-the-loop requires a checkpointer to persist agent state between the interrupt and resume
-    checkpointer = MemorySaver()
-
     # Backend
     supervisor_backend = GuardedLocalShellBackend(root_dir=str(REPO_ROOT), virtual_mode=True)
-  
+    
+    checkpointer = await _get_async_checkpointer()
+
     supervisor = create_deep_agent(
         model=haiku_llm,
         skills=["/skills/"],

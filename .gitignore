@@ -44,10 +44,7 @@ wiki/
 raw/
 
 # Local scratch todos (personal / ephemeral)
-todos.md
-graphify-out/
 notebooks/
-learning.md*.ipynb
 .aws/
 skills/deprecated/
 wiki_legacy_20260425/
@@ -59,3 +56,9 @@ src/tools/trace_offloads/
 marp-slides/
 memories/agents_md_template.md
 requirements.txt
+
+# user profile
+USER.md
+
+# persistent
+.sessions/

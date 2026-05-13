@@ -2,11 +2,15 @@
 Stream agent's results: shows live progress + LLM tokens, handles interrupts.
 """
 import asyncio
+import time
 from langgraph.types import Command
 import ast, json
 from langchain_core.utils.uuid import uuid7
 from langchain_core.runnables import Runnable, RunnableConfig
 from src.agents.agent import create_supervisor
+from src.sessions.sessions_db_setup import get_sessions_conn
+from src.sessions.session_manager import save_session
+from src.sessions.title_manager import maybe_auto_title
 
 SESSION_AUTO_APPROVE = False
 
@@ -60,12 +64,23 @@ def _handle_interrupts(interrupts):
     return decisions
 
 
+def _save_session(conn, thread_id, messages, started_at, flow_type="ingest"):
+    """Save session to db and auto-title."""
+    session_id = save_session(
+        conn=conn,
+        thread_id=thread_id,
+        messages=messages,
+        started_at=started_at,
+        flow_type=flow_type,
+    )
+    maybe_auto_title(conn, session_id, messages)
+
+
 async def run_turn_stream_async(
     user_message: str,
     agent: Runnable | None = None,
     config: RunnableConfig | None = None,
-    thread_id: str | None = None,
-    
+    thread_id: str | None = None
 ):
     """Run one streamed turn with HITL interrupt support.
 
@@ -94,9 +109,10 @@ async def run_turn_stream_async(
     }
 
     if agent is None:
-        agent = create_supervisor(resolved_thread_id)
+        agent = await create_supervisor(resolved_thread_id)
     
     payload = {"messages": [{"role": "user", "content": user_message}]}
+    started_at = int(time.time())
 
     while True:
         pending_interrupts = None
@@ -157,6 +173,13 @@ async def run_turn_stream_async(
         payload = Command(resume={"decisions": decisions})
         # Loop back, stream the resumed execution
 
+    # save session to db
+    final_state = await agent.aget_state(merged_config)
+    messages = final_state.values["messages"]
+    debug_content_types = [type(getattr(m, "content", None)).__name__ for m in messages]
+    print(f"[debug] session message content types: {debug_content_types}")
+    _save_session(get_sessions_conn(), resolved_thread_id, messages, started_at)
+    
 
 def run_turn_stream(
     user_message: str,
@@ -170,6 +193,6 @@ def run_turn_stream(
             user_message=user_message,
             agent=agent,
             config=config,
-            thread_id=thread_id,
+            thread_id=thread_id
         )
     )

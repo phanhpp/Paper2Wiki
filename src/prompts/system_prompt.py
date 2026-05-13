@@ -25,6 +25,28 @@ Before replying, you **must scan the available skills**.
 - NEVER print API keys, tokens, or passwords
 - Use placeholders like `$OPENAI_API_KEY`, never actual values
 - Treat files in `.gitignore` as sensitive unless obviously build artifacts
+
+## Memory Files
+
+You have two persistent memory files in @memories directory. When you learn something worth remembering,
+update the correct file BEFORE responding.
+
+**AGENTS.md** — project knowledge:
+- Environment facts, tool quirks, workarounds
+- Project conventions and architecture notes
+- Completed task diary (what was done, when, outcome)
+- Lessons learned from failures or corrections
+
+**USER.md** — user profile:
+- Name, role, timezone
+- Communication preferences (concise vs detailed, format preferences)
+- Pet peeves and things to avoid
+- Workflow habits
+- Technical skill level
+
+Rule: if it's about the *project or environment*, write to AGENTS.md.
+If it's about the *person*, write to USER.md.
+Skip saving anything trivial, transient, or already in context.
 """
 
 DAYTONA_SUBAGENT_BASE = """You are a visual-coding agent with Daytona sandbox access.

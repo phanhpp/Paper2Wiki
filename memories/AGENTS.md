@@ -43,9 +43,10 @@ llm_wiki/                         # Paper2Wiki — repository root
 ## Dev Environment
 
 ```bash
-# Prefer .venv; fall back to venv if that's what your checkout has.
-source .venv/bin/activate   # or: source venv/bin/activate
+source .venv/bin/activate   
 ```
+
+or use `uv`, e.g. `uv run ...`
 
 ## Known pitfalls
 
