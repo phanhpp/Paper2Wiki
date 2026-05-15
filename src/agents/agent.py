@@ -12,6 +12,7 @@ from langchain_core.utils.uuid import uuid7
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from src.sessions.sessions_db_setup import SESSIONS_DIR
 from pathlib import Path
+from langchain.agents.middleware import PIIMiddleware, ModelCallLimitMiddleware, AnthropicPromptCachingMiddleware
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2] 
@@ -108,6 +109,37 @@ async def create_supervisor(thread_id: str | None = None):
             "write_file": True,
             "edit_file": True,
             },
+        middleware=[
+            # Redact emails in user input before sending to model
+            PIIMiddleware(
+                "email",
+                strategy="redact",
+                apply_to_input=True,
+            ),
+            # Mask credit cards in user input
+            PIIMiddleware(
+                "credit_card",
+                strategy="mask",
+                apply_to_input=True,
+            ),
+            # Block API keys - raise error if detected
+            PIIMiddleware(
+                "api_key",
+                detector=r"sk-[a-zA-Z0-9]{32}",
+                strategy="block",
+                apply_to_input=True,
+            ),
+            ModelCallLimitMiddleware(
+                run_limit=15,        # sized for ingest worst case
+                #thread_limit=100,    # generous for long query sessions
+                exit_behavior="end"
+            ),
+            AnthropicPromptCachingMiddleware(
+                ttl="10m",
+                min_messages_to_cache=2, # only cache if it's multi-turn conversation
+                unsupported_model_behavior="ignore"
+            )
+        ],
     )
 
     return supervisor
