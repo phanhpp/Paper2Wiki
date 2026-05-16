@@ -16,7 +16,7 @@ import re
 import threading
 import logging
 from typing import Optional
-from src.agents.llms import haiku_llm
+from src.agents.llms import set_up_llms
 
 logger = logging.getLogger(__name__)
 
@@ -200,14 +200,15 @@ def _generate_title(
     user_snippet = (user_msg or "")[:500]
     assistant_snippet = (assistant_msg or "")[:500]
 
-    response = haiku_llm.invoke([
+    llm = set_up_llms("claude-haiku-4-5-20251001")
+
+    response = llm.invoke([
         {"role": "system", "content": _TITLE_PROMPT},
         {"role": "user", "content": f"User: {user_snippet}\n\nAssistant: {assistant_snippet}"}
     ])
 
-    # TODO: this may not the right way to parse content
     title = (response.content or "").strip().strip('"\'')
-
+    print("Session title: ", title)
     # Strip common LLM output prefixes
     if title.lower().startswith("title:"):
         title = title[6:].strip()

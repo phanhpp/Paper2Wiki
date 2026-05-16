@@ -2,17 +2,16 @@ from deepagents import create_deep_agent, CompiledSubAgent
 from src.tools.ingest_tools import all_tools
 from src.prompts.system_prompt import PHASE_1_SUPERVISOR_PROMPT
 from langgraph.store.memory import InMemoryStore
-# from langgraph.checkpoint.memory import MemorySaver
 import aiosqlite
 from src.agents.backend_wrapper import GuardedLocalShellBackend
 from src.agents.daytona_agent import create_daytona_agent
 from src.agents.sandbox_utils import register_sandbox
-from src.agents.llms import haiku_llm
+from src.agents.llms import set_up_llms
 from langchain_core.utils.uuid import uuid7
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from src.sessions.sessions_db_setup import SESSIONS_DIR
 from pathlib import Path
-from langchain.agents.middleware import PIIMiddleware, ModelCallLimitMiddleware, AnthropicPromptCachingMiddleware
+from langchain.agents.middleware import PIIMiddleware, ModelCallLimitMiddleware #, AnthropicPromptCachingMiddleware
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2] 
@@ -71,7 +70,7 @@ async def create_supervisor(thread_id: str | None = None):
 
     # Create Daytona agent for marp slide creation
     _daytona_backend, daytona_sandbox, visual_agent = create_daytona_agent(
-        model=haiku_llm,
+        model=set_up_llms("claude-haiku-4-5-20251001"),
         thread_id=thread_id,
         skills=[str(REPO_ROOT / "skills/marp-slide")], # not using virture mode so can use absolute path
     )
@@ -95,7 +94,7 @@ async def create_supervisor(thread_id: str | None = None):
     checkpointer = await _get_async_checkpointer()
 
     supervisor = create_deep_agent(
-        model=haiku_llm,
+        model=set_up_llms("claude-haiku-4-5-20251001"),
         skills=["/skills/"],
         memory=["memories/AGENTS.md","memories/USER.md"],
         system_prompt=PHASE_1_SUPERVISOR_PROMPT,
@@ -126,7 +125,7 @@ async def create_supervisor(thread_id: str | None = None):
             PIIMiddleware(
                 "api_key",
                 detector=r"sk-[a-zA-Z0-9]{32}",
-                strategy="block",
+                strategy="redact",
                 apply_to_input=True,
             ),
             ModelCallLimitMiddleware(
@@ -134,11 +133,11 @@ async def create_supervisor(thread_id: str | None = None):
                 #thread_limit=100,    # generous for long query sessions
                 exit_behavior="end"
             ),
-            AnthropicPromptCachingMiddleware(
-                ttl="10m",
-                min_messages_to_cache=2, # only cache if it's multi-turn conversation
-                unsupported_model_behavior="ignore"
-            )
+            # AnthropicPromptCachingMiddleware(
+            #     ttl="10m",
+            #     min_messages_to_cache=2, # only cache if it's multi-turn conversation
+            #     unsupported_model_behavior="ignore"
+            # )
         ],
     )
 

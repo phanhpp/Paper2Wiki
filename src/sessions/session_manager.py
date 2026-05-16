@@ -11,7 +11,7 @@ Use prune_sessions() via CLI for one-off cleanup.
 
 Typical usage after a flow completes:
     session_id = save_session(conn, thread_id, "ingest", messages, model, started_at)
-    maybe_auto_title(conn, session_id, messages, haiku_llm)
+    maybe_auto_title(conn, session_id, messages)
 """
 
 import json
@@ -21,7 +21,7 @@ import logging
 from datetime import datetime
 from sqlite3 import Connection
 from typing import Optional
-from src.agents.llms import HAIKU_MODEL
+from src.agents.llms import MODEL_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ def save_session(
     """
 
     now = int(time.time())
-    resolved_model = model or HAIKU_MODEL
+    resolved_model = model or MODEL_CONFIG["claude-haiku-4-5-20251001"]["model"]
 
     conn.execute("""
         INSERT OR IGNORE INTO sessions(id, source, model, started_at, ended_at, status)
