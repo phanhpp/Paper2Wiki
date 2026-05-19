@@ -9,6 +9,7 @@ from typing_extensions import Optional, Literal, Any
 from langchain.tools import tool
 import asyncio
 from pathlib import Path
+from langsmith import traceable
 
 _ASYNC_CLIENT = anthropic.AsyncAnthropic()
 _MODEL = "claude-haiku-4-5-20251001"
@@ -33,7 +34,7 @@ class TraceSummary(BaseModel):
     llm_turns: Optional[int] = None
 
 class TraceSummaryList(BaseModel):
-    items: list[TraceSummary]
+    summaries: list[TraceSummary]
 
 
 def _load_traces(report: TraceReport) -> dict[str, str]:
@@ -94,7 +95,7 @@ async def _summarize_batch_async(
         messages=[{"role": "user", "content": prompt}],
         output_format=TraceSummaryList,
     )
-    return [item.model_dump() for item in response.parsed_output.items]
+    return [item.model_dump() for item in response.parsed_output.summaries]
 
 async def _summarize_traces_async(
     report: TraceReport,
@@ -134,6 +135,7 @@ async def _summarize_traces_async(
 
 
 @tool
+@traceable(run_type="tool", name="summarize_traces", metadata={"flow": "trace-analysis"})
 async def summarize_traces_async(
     report: TraceReport,
     offset: int = 0,

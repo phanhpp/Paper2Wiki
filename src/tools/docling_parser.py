@@ -3,6 +3,7 @@ import shutil
 from pathlib import Path
 from langchain_core.tools import tool
 from src.tools.utils import get_wiki_root
+from langsmith import traceable
 
 WIKI_ROOT = get_wiki_root()
 
@@ -151,6 +152,7 @@ def _rewrite_markdown_local_images_to_relative(md: str, md_file: Path) -> str:
 
 
 @tool
+@traceable(run_type="tool", name="parse_pdf_docling", metadata={"flow": "wiki-ingestion"})
 def parse_pdf_docling(
     path: str,
     parse_images: bool = True,

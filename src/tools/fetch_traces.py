@@ -44,6 +44,7 @@ from pydantic import BaseModel, model_validator
 from langsmith import AsyncClient
 from langchain.tools import tool
 import asyncio
+from langsmith import traceable
 
 TRACE_OFFLOAD_DIR = Path(__file__).parent / "trace_offloads"
 _TOOL_CONTENT_TRUNCATE_THRESHOLD = 700 # threshold overwhich we truncate tool content
@@ -107,20 +108,35 @@ def _slim(run: Any) -> dict[str, Any]:
     - error
     - run_type
     - total_cost
-    - tags
+    - total_tokens
+    - metadata (only if not None)
+    - tags (only if not None)
     """
     slim: dict[str, Any] = {
-        #"id": str(getattr(run, "id", "")),
+        "id": str(getattr(run, "id", "") or ""),
+        "trace_id": str(getattr(run, "trace_id", "") or ""),
         "name": getattr(run, "name", None),
         "status": getattr(run, "status", None),
         "latency": getattr(run, "latency", None),
         "error": getattr(run, "error", None),
         "run_type": getattr(run, "run_type", None),
         "total_cost": float(getattr(run, "total_cost", None) or 0),
+        "total_tokens": getattr(run, "total_tokens", None),
     }
     tags = getattr(run, "tags", None)
+    metadata = getattr(run, "metadata", None)
+    feedback_stats = getattr(run, "feedback_stats", None)
+    if feedback_stats is not None:
+        slim["feedback_stats"] = feedback_stats
     if tags is not None:
         slim["tags"] = tags
+    if metadata is not None:
+        filtered_metadata = {
+            k: v for k, v in metadata.items()
+            if k in {"thread_id", "revision_id", "ls_provider", "ls_model_name", "flow"}
+        }
+        if filtered_metadata:
+            slim["metadata"] = filtered_metadata
     return slim
 
 
@@ -444,6 +460,7 @@ async def _run_trace_report_async(
 
 
 @tool
+@traceable(run_type="tool", name="fetch_traces", metadata={"flow": "trace-analysis"})
 async def run_trace_report_async(
     project: str = "paper2wiki",
     days: int = 7,

@@ -5,6 +5,7 @@ from pathlib import Path
 import arxiv
 from langchain_core.tools import tool
 from src.tools.utils import get_wiki_root, norm_title, title_score
+from langsmith import traceable
 
 WIKI_ROOT = get_wiki_root()
 
@@ -19,6 +20,7 @@ def _arxiv_cache_path(arxiv_id: str) -> Path:
 
 
 @tool
+@traceable(run_type="tool", name="fetch_arxiv", metadata={"flow": "wiki-ingestion"})
 def fetch_arxiv(query: str) -> dict:
     """
     Search arXiv and download the best-matching paper as a PDF.
