@@ -192,11 +192,14 @@ async def test_build_groups_by_trace_id(runs: list[SimpleNamespace], mock_async_
 
 @pytest.mark.asyncio
 async def test_format_trace_fetches_only_error_and_last_llm_runs() -> None:
-    """Verify trace formatting fetches only high-signal LLM payloads.
+    """Verify trace formatting fetches only high-signal payloads.
 
-    The formatter should skip successful prefix LLM calls to keep traces compact,
-    while still fetching errored LLM calls for debugging and the final LLM call
-    for the agent's outcome.
+    The formatter fetches:
+    - LLM runs that errored (for debugging context)
+    - The final LLM run (for agent outcome)
+    - All tool runs not in TRACE_ANALYSIS_TOOLS (inputs/outputs embedded inline)
+
+    Successful prefix LLM calls are skipped to keep traces compact.
     """
     trace_runs = [
         _fake_run(run_id="llm-prefix", trace_id="trace-1", dotted_order="20260101.1"),
@@ -226,7 +229,7 @@ async def test_format_trace_fetches_only_error_and_last_llm_runs() -> None:
     client = _RecordingClient()
     text = await _format_trace_async("trace-1", trace_runs, client)  # type: ignore[arg-type]
 
-    assert client.read_ids == ["llm-error", "llm-final"]
+    assert client.read_ids == ["llm-error", "llm-final", "tool"]
     assert "input for llm-prefix" not in text
     assert "input for llm-error" in text
     assert "input for llm-final" in text
