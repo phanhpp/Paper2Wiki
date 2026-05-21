@@ -50,10 +50,7 @@ TRACE_OFFLOAD_DIR = Path(__file__).parent / "trace_offloads"
 _TOOL_CONTENT_TRUNCATE_THRESHOLD = 700 # threshold overwhich we truncate tool content
 _MAX_TRACE_CHARS = 50_000 # max chars of trace text to keep
 # Auto-offload when total formatted trace text exceeds this threshold.
-# The agent only needs TraceReport metadata inline — trace text is consumed
-# by summarize_traces_async, not the agent directly. Keep inline payloads
-# small (~5K tokens) to avoid crowding the agent's working context.
-_OFFLOAD_THRESHOLD_CHARS = 20_000
+_OFFLOAD_THRESHOLD_CHARS = 10_000
 _STRIP_KEYS = {"invalid_tool_calls", "response_metadata", "usage_metadata", "id", "tool_call_id"}
 _VERBOSE_TOOLS = {
     "read_file",
@@ -64,6 +61,12 @@ _VERBOSE_TOOLS = {
     "edit_file",
     "grep",
     "execute",
+}
+
+TRACE_ANALYSIS_TOOLS = {
+    "detect_anomalies_async", "run_trace_report_async",
+    "summarize_traces_async", "compute_baselines_async",
+    "fetch_traces",
 }
 
 class TraceReport(BaseModel):
@@ -280,7 +283,7 @@ async def _format_trace_async(trace_id: str, trace_runs: list[Any], client: Asyn
     """Format a single trace into a concise, human-readable string.
 
     Each run line is tagged with ``[depth=N]`` (no tree indentation — saves space).
-    Full inputs and outputs are fetched via ``client.read_run()`` only for LLM runs
+    Full inputs and outputs are fetched via ``client.read_run()`` only for LLM and tool runs
     that carry signal — skipping redundant prefix calls:
 
     - ``error is not None`` → always fetch (captures the failure context)
@@ -293,11 +296,13 @@ async def _format_trace_async(trace_id: str, trace_runs: list[Any], client: Asyn
     lines: list[str] = [f"\n=== trace {trace_id} ({len(trace_runs)} runs) ==="]
 
     llm_runs = [run for run in trace_runs if run.run_type == "llm"]
+    tools_runs = [run for run in trace_runs if run.run_type == "tool" and run.name not in TRACE_ANALYSIS_TOOLS
+]
     last_llm_id = str(llm_runs[-1].id) if llm_runs else None
     runs_to_fetch = [
         run for run in llm_runs
         if run.error is not None or str(run.id) == last_llm_id
-    ]
+    ] + tools_runs
     full_runs = await asyncio.gather(*[client.read_run(str(run.id)) for run in runs_to_fetch])
     full_run_map = {str(run.id): full for run, full in zip(runs_to_fetch, full_runs)}
 
@@ -310,29 +315,36 @@ async def _format_trace_async(trace_id: str, trace_runs: list[Any], client: Asyn
             lines.append(f"[depth={depth}] {name}")
             continue
 
+        full_run = full_run_map.get(str(run.id))
+
+        # For tool runs, embed inputs/outputs into the slim dict so the single
+        # [depth=N] line is self-contained and parseable by anomaly_detection.
+        if full_run is not None and run.run_type == "tool":
+            if full_run.inputs:
+                slim_content["inputs"] = full_run.inputs
+            if full_run.outputs:
+                slim_content["outputs"] = full_run.outputs
+
         lines.append(f"[depth={depth}] {slim_content}")
 
-        if run.run_type != "llm":
-            continue
-
-        full_run = full_run_map.get(str(run.id))
         if full_run is None:
             continue  # redundant prefix call — skipped
 
-        lines.append("Input Messages (exclude system prompt):")
-        messages = _denoise_messages(full_run.inputs or {})
-        if not messages:
-            lines.append("(none)")
-        else:
-            for idx, message in enumerate(messages, start=1):
-                lines.append(f"[{idx}] role={message['role']}" + "" + json.dumps(message["kwargs"], ensure_ascii=False, separators=(",", ":")))
+        if run.run_type == "llm":
+            lines.append("Input Messages (exclude system prompt):")
+            messages = _denoise_messages(full_run.inputs or {})
+            if not messages:
+                lines.append("(none)")
+            else:
+                for idx, message in enumerate(messages, start=1):
+                    lines.append(f"[{idx}] role={message['role']}" + "" + json.dumps(message["kwargs"], ensure_ascii=False, separators=(",", ":")))
 
-        lines.append("Outputs:")
-        if full_run.outputs:
-            lines.append(json.dumps(_denoise_outputs(full_run.outputs), ensure_ascii=False, separators=(",", ":")))
-        else:
-            lines.append("(none)")
-
+            lines.append("Outputs:")
+            if full_run.outputs:
+                lines.append(json.dumps(_denoise_outputs(full_run.outputs), ensure_ascii=False, separators=(",", ":")))
+            else:
+                lines.append("(none)")
+    
     result = "\n".join(lines)
 
     # reserves space for the suffix so len(result) <= _MAX_TRACE_CHARS always holds

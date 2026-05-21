@@ -48,11 +48,20 @@ BASELINES_PATH = Path(__file__).resolve().parents[2] / "memories" / "baselines.j
 _RUN_LINE_RE = re.compile(r"^\[depth=\d+\] (\{.+\})\s*$")
 
 
-class AnomalySignal(BaseModel):
+class FailedSpan(BaseModel):
+    id: str
     run_name: str
-    trace_id: str
+    run_type: str | None
     flow: str | None
+    inputs: dict[str, Any]
+    outputs: dict[str, Any]
     signals: list[str]
+
+
+class AnomalySignal(BaseModel):
+    trace_id: str
+    signals: list[str]          # deduplicated union across all failed spans
+    failed_spans: list[FailedSpan]
 
 
 class AnomalyReport(BaseModel):
@@ -268,7 +277,8 @@ async def detect_anomalies_async(report: TraceReport) -> AnomalyReport:
 
     Returns:
         AnomalyReport with total_runs_analyzed, anomalous_run_count, and a
-        list of AnomalySignal (run_name, trace_id, flow, signals).
+        list of AnomalySignal — one per trace — each containing a deduplicated
+        signals list and a failed_spans list preserving every failed span intact.
     """
     traces = _load_traces(report)
     runs = _parse_runs(traces)
@@ -286,16 +296,39 @@ async def detect_anomalies_async(report: TraceReport) -> AnomalyReport:
         if trace_id and flow:
             trace_flow_counts[trace_id][flow] += 1
 
-    anomalies: list[AnomalySignal] = []
+    # Collect failed spans, group by trace_id, and emit one AnomalySignal per
+    # trace. All failed spans are preserved intact as FailedSpan entries so no
+    # data is lost when the same error propagates through wrapper + actual call.
+    by_trace: dict[str, list[tuple[dict, list[str]]]] = defaultdict(list)
     for r in runs:
         failed, signals = _is_failure(r, baselines, trace_flow_counts)
         if failed:
-            anomalies.append(AnomalySignal(
+            by_trace[r.get("trace_id", "")].append((r, signals))
+
+    anomalies: list[AnomalySignal] = []
+    for tid, items in by_trace.items():
+        seen_signals: set[str] = set()
+        merged_signals: list[str] = []
+        failed_spans: list[FailedSpan] = []
+        for r, sigs in items:
+            failed_spans.append(FailedSpan(
+                id=r.get("id", ""),
                 run_name=r.get("name", "unknown"),
-                trace_id=r.get("trace_id", ""),
+                run_type=r.get("run_type"),
                 flow=_flow(r),
-                signals=signals,
+                inputs=r.get("inputs") or {},
+                outputs=r.get("outputs") or {},
+                signals=sigs,
             ))
+            for s in sigs:
+                if s not in seen_signals:
+                    seen_signals.add(s)
+                    merged_signals.append(s)
+        anomalies.append(AnomalySignal(
+            trace_id=tid,
+            signals=merged_signals,
+            failed_spans=failed_spans,
+        ))
 
     return AnomalyReport(
         total_runs_analyzed=len(runs),
