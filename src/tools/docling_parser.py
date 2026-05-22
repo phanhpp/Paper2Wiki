@@ -3,8 +3,6 @@ import shutil
 from pathlib import Path
 from langchain_core.tools import tool
 from src.tools.utils import get_wiki_root
-from langsmith import traceable
-
 WIKI_ROOT = get_wiki_root()
 
 # Some arXiv/Google PDFs lead with this paragraph before the paper title.
@@ -151,8 +149,7 @@ def _rewrite_markdown_local_images_to_relative(md: str, md_file: Path) -> str:
     return re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", repl, md)
 
 
-@tool
-@traceable(run_type="tool", name="parse_pdf_docling", metadata={"flow": "wiki-ingestion"})
+@tool()
 def parse_pdf_docling(
     path: str,
     parse_images: bool = True,

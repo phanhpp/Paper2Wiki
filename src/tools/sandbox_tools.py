@@ -4,17 +4,14 @@ from pathlib import Path
 
 from langchain_core.tools import tool
 from langchain_daytona import DaytonaSandbox
-from langsmith import traceable
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def make_download_and_save_tool(backend: DaytonaSandbox):
     """Create a tool that copies sandbox output files to host safely."""
 
-    @tool
-    @traceable(run_type="tool", name="save_marp_slides", metadata={"flow": "marp-slides"})
-    def save_output(sandbox_path: str, host_relative_path: str) -> str:
+    @tool()
+    def save_sandbox_output(sandbox_path: str, host_relative_path: str) -> str:
         """Download a file from sandbox and save under repo root.
 
         Args:
@@ -46,7 +43,7 @@ def make_download_and_save_tool(backend: DaytonaSandbox):
         destination.write_bytes(content)
         return f"Saved to {destination}"
 
-    return save_output
+    return save_sandbox_output
 
 
 def make_sandbox_state_and_fs_tools(sandbox):

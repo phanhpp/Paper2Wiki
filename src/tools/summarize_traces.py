@@ -9,8 +9,6 @@ from typing_extensions import Optional, Literal, Any
 from langchain.tools import tool
 import asyncio
 from pathlib import Path
-from langsmith import traceable
-
 _ASYNC_CLIENT = anthropic.AsyncAnthropic()
 _MODEL = "claude-haiku-4-5-20251001"
 _MAX_TOKENS = 4192
@@ -134,8 +132,7 @@ async def _summarize_traces_async(
     return [item for batch in batch_results for item in batch]
 
 
-@tool
-@traceable(run_type="tool", name="summarize_traces", metadata={"flow": "trace-analysis"})
+@tool()
 async def summarize_traces_async(
     report: TraceReport,
     offset: int = 0,

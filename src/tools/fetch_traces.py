@@ -44,7 +44,7 @@ from pydantic import BaseModel, model_validator
 from langsmith import AsyncClient
 from langchain.tools import tool
 import asyncio
-from langsmith import traceable
+from src.tools.utils import TRACE_ANALYSIS_TOOLS
 
 TRACE_OFFLOAD_DIR = Path(__file__).parent / "trace_offloads"
 _TOOL_CONTENT_TRUNCATE_THRESHOLD = 700 # threshold overwhich we truncate tool content
@@ -61,12 +61,6 @@ _VERBOSE_TOOLS = {
     "edit_file",
     "grep",
     "execute",
-}
-
-TRACE_ANALYSIS_TOOLS = {
-    "detect_anomalies_async", "run_trace_report_async",
-    "summarize_traces_async", "compute_baselines_async",
-    "fetch_traces",
 }
 
 class TraceReport(BaseModel):
@@ -136,7 +130,7 @@ def _slim(run: Any) -> dict[str, Any]:
     if metadata is not None:
         filtered_metadata = {
             k: v for k, v in metadata.items()
-            if k in {"thread_id", "revision_id", "ls_provider", "ls_model_name", "flow"}
+            if k in {"thread_id", "revision_id", "ls_provider", "ls_model_name"}
         }
         if filtered_metadata:
             slim["metadata"] = filtered_metadata
@@ -296,8 +290,7 @@ async def _format_trace_async(trace_id: str, trace_runs: list[Any], client: Asyn
     lines: list[str] = [f"\n=== trace {trace_id} ({len(trace_runs)} runs) ==="]
 
     llm_runs = [run for run in trace_runs if run.run_type == "llm"]
-    tools_runs = [run for run in trace_runs if run.run_type == "tool" and run.name not in TRACE_ANALYSIS_TOOLS
-]
+    tools_runs = [run for run in trace_runs if run.run_type == "tool"]
     last_llm_id = str(llm_runs[-1].id) if llm_runs else None
     runs_to_fetch = [
         run for run in llm_runs
@@ -450,7 +443,8 @@ async def _run_trace_report_async(
     }
     if error:
         list_runs_kwargs["error"] = error
-    runs = [run async for run in client.list_runs(**list_runs_kwargs)]
+    all_runs = [run async for run in client.list_runs(**list_runs_kwargs)]
+    runs = [r for r in all_runs if r.name not in TRACE_ANALYSIS_TOOLS]
 
     end_time = min((r.end_time for r in runs if r.end_time), default=now)
     actual_start = min((r.start_time for r in runs if r.start_time), default=start_time)
@@ -471,8 +465,7 @@ async def _run_trace_report_async(
     )
 
 
-@tool
-@traceable(run_type="tool", name="fetch_traces", metadata={"flow": "trace-analysis"})
+@tool()
 async def run_trace_report_async(
     project: str = "paper2wiki",
     days: int = 7,

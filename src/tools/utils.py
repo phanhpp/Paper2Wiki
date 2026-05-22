@@ -65,3 +65,18 @@ def get_wiki_root() -> Path:
     """
     return Path(os.environ.get("WIKI_PATH", get_repo_root() / "wiki")).expanduser().resolve()
 
+
+# Tool names that belong to the trace-analysis pipeline itself.
+# Used in two places:
+#   - fetch_traces._format_trace_async: skips fetching full I/O for these tools
+#     (their inputs/outputs are large blobs that add no diagnostic value).
+#   - anomaly_detection._parse_runs / detect_anomalies_async: skips anomaly
+#     checks on these runs to avoid false positives from self-analysis calls.
+TRACE_ANALYSIS_TOOLS: frozenset[str] = frozenset({
+    "detect_anomalies_async",
+    "run_trace_report_async",
+    "summarize_traces_async",
+    "compute_baselines_async",
+    "fetch_traces",
+})
+

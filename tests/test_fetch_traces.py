@@ -452,7 +452,7 @@ async def test_summarize_batches_fired_in_parallel(
         call_count += 1
         await asyncio.sleep(FAKE_DELAY)
         fake_response = SimpleNamespace(
-            parsed_output=TraceSummaryList(items=[_fake_trace_summary()])
+            parsed_output=TraceSummaryList(summaries=[_fake_trace_summary()])
         )
         return fake_response
 
