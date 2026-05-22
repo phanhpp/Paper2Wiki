@@ -14,7 +14,7 @@ from collections import defaultdict
 
 from langsmith import Client
 
-from src.tools.anomaly_detection import AnomalyReport, FailedSpan
+from src.tools.anomaly_detection import AnomalyError, AnomalyReport, FailedSpan
 
 _SCOPE_BY_RUN_TYPE: dict[str, str] = {
     "tool":  "tool",
@@ -31,15 +31,14 @@ def _safe_dataset_component(value: str | None) -> str:
     return cleaned or "unknown"
 
 
-def _signal_suffix(signals: list[str]) -> str:
-    """Summarize anomaly signal kinds for fallback dataset names."""
-    kinds = []
-    seen = set()
-    for signal in signals:
-        kind = signal.split(":", 1)[0]
-        if kind and kind not in seen:
-            seen.add(kind)
-            kinds.append(kind)
+def _error_suffix(errors: list[AnomalyError]) -> str:
+    """Return a suffix from typed error categories only."""
+    kinds: list[AnomalyError] = []
+    seen: set[AnomalyError] = set()
+    for error in errors:
+        if error not in seen:
+            seen.add(error)
+            kinds.append(error)
     return "_".join(kinds) or "anomaly"
 
 
@@ -48,12 +47,12 @@ def _dataset_name(span: FailedSpan) -> str:
 
     Scoping rules:
     - known tool → ``{flow}_{run_name}`` (specific project tool that failed)
-    - generic wrapper names ``model``/``tools`` → ``{context_name}_{signal_kind}``
+    - generic wrapper names ``model``/``tools`` → ``{context_name}_{error_kind}``
       when parser context is available
-    - other flowless spans → ``{run_name}_{signal_kind}``
+    - other flowless spans → ``{run_name}_{error_kind}``
     """
     run_name = _safe_dataset_component(span.run_name)
-    suffix = _signal_suffix(span.signals)
+    suffix = _error_suffix(span.errors)
 
     if span.flow:
         return f"{_safe_dataset_component(span.flow)}_{run_name}"
@@ -74,9 +73,9 @@ def create_datasets_from_anomaly_report(
 
     Scoping:
     - known project tools → ``{flow}_{tool_name}``
-    - generic ``model``/``tools`` wrapper spans → ``{context_name}_{signal_kind}``
+    - generic ``model``/``tools`` wrapper spans → ``{context_name}_{error_kind}``
       (for example ``TodoListMiddleware_after_model_hard_error``)
-    - other flowless spans → ``{run_name}_{signal_kind}``
+    - other flowless spans → ``{run_name}_{error_kind}``
 
     Appends to existing datasets and skips examples whose run_id has already
     been pushed (idempotent — safe to call repeatedly on the same report).
