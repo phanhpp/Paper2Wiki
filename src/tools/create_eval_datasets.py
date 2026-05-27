@@ -14,7 +14,7 @@ from collections import defaultdict
 
 from langsmith import Client
 
-from src.tools.anomaly_detection import AnomalyError, AnomalyReport, FailedSpan
+from src.tools.anomaly_detection import AnomalyReport, FailedSpan
 
 _SCOPE_BY_RUN_TYPE: dict[str, str] = {
     "tool":  "tool",
@@ -31,37 +31,40 @@ def _safe_dataset_component(value: str | None) -> str:
     return cleaned or "unknown"
 
 
-def _error_suffix(errors: list[AnomalyError]) -> str:
-    """Return a suffix from typed error categories only."""
-    kinds: list[AnomalyError] = []
-    seen: set[AnomalyError] = set()
-    for error in errors:
-        if error not in seen:
-            seen.add(error)
-            kinds.append(error)
-    return "_".join(kinds) or "anomaly"
-
-
 def _dataset_name(span: FailedSpan) -> str:
-    """Derive a dataset name from a span's run_type and flow.
+    """Derive a dataset name from scope + target signature.
 
     Scoping rules:
-    - known tool → ``{flow}_{run_name}`` (specific project tool that failed)
-    - generic wrapper names ``model``/``tools`` → ``{context_name}_{error_kind}``
+    - flow-backed spans → ``{flow}``
+    - generic wrapper names ``model``/``tools`` → ``{context_name}``
       when parser context is available
-    - other flowless spans → ``{run_name}_{error_kind}``
+    - other flowless spans → ``global``
+
+    Then append a single target signature so each component appears once:
+    ``__rt_<run_type>__rn_<run_name>__ctx_<context|none>``.
     """
     run_name = _safe_dataset_component(span.run_name)
-    suffix = _error_suffix(span.errors)
 
     if span.flow:
-        return f"{_safe_dataset_component(span.flow)}_{run_name}"
-
-    if span.run_name in _GENERIC_WRAPPER_NAMES:
-        source_name = _safe_dataset_component(span.context_name or span.run_name)
+        scope = _safe_dataset_component(span.flow)
+    elif span.run_name in _GENERIC_WRAPPER_NAMES:
+        scope = _safe_dataset_component(span.context_name or "middleware")
     else:
-        source_name = run_name
-    return f"{source_name}_{suffix}"
+        scope = "global"
+
+    run_type = _safe_dataset_component(span.run_type or "unknown")
+    return f"{scope}__rt_{run_type}__rn_{run_name}"
+
+
+def _dataset_description(span: FailedSpan) -> str:
+    """Create a precise dataset description for automatic target selection."""
+    context_value = span.context_name if span.context_name is not None else "None"
+    return (
+        "Use this dataset when evaluating spans with "
+        f"run_type={span.run_type or 'unknown'}, "
+        f"run_name={span.run_name}, "
+        f"context_name={context_value}."
+    )
 
 
 def create_datasets_from_anomaly_report(
@@ -94,16 +97,17 @@ def create_datasets_from_anomaly_report(
     """
     ls = client or Client()
 
-    groups: dict[str, list[tuple[str, FailedSpan]]] = defaultdict(list)
+    # Group by dataset name so we can batch-create examples per dataset.
+    groups_by_dataset: dict[str, list[tuple[str, FailedSpan]]] = defaultdict(list)
     for anomaly in report.anomalies:
         for span in anomaly.failed_spans:
-            groups[_dataset_name(span)].append((anomaly.trace_id, span))
+            groups_by_dataset[_dataset_name(span)].append((anomaly.trace_id, span))
 
     created: dict[str, dict[str, int]] = {}
-    for dataset_name, items in groups.items():
+    for dataset_name, items in groups_by_dataset.items():
         first_span = items[0][1]
         scope = _SCOPE_BY_RUN_TYPE.get(first_span.run_type or "", "tool")
-        description = f"{scope.title()}-level failures: {first_span.flow or 'unknown'} flow"
+        description = f"{_dataset_description(first_span)} Scope={scope}."
 
         if ls.has_dataset(dataset_name=dataset_name):
             dataset = ls.read_dataset(dataset_name=dataset_name)
@@ -111,6 +115,11 @@ def create_datasets_from_anomaly_report(
             dataset = ls.create_dataset(
                 dataset_name=dataset_name,
                 description=description,
+                metadata={
+                    "run_type":     first_span.run_type,
+                    "run_name":     first_span.run_name,
+                    "context_name": first_span.context_name,
+                },
             )
 
         existing_run_ids: set[str] = set()
@@ -132,6 +141,7 @@ def create_datasets_from_anomaly_report(
                     "trace_id": trace_id,
                     "run_name": span.run_name,
                     "flow": span.flow,
+                    "run_type": span.run_type,
                     "context_name": span.context_name,
                     "errors": span.errors,
                     "signals": span.signals,

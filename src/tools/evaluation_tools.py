@@ -2,7 +2,7 @@
 
 Pipeline (after ``detect_anomalies_async``):
 
-    create_datasets_from_anomaly_report(report)  # see evaluation_datasets.py
+    create_datasets_from_anomaly_report(report)  # see create_eval_datasets.py
 
     build_evaluators_for_signals(signals)
         → returns the right mix of evaluators for a set of anomaly signals:
@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from typing import Callable, Sequence
 
 import anthropic
@@ -55,8 +56,10 @@ from langsmith.evaluation import evaluate
 from langsmith.evaluation.evaluator import EvaluationResult
 from langsmith.schemas import Run, Example
 
-from src.tools.anomaly_detection import AnomalyError
-from src.tools.evaluation_datasets import create_datasets_from_anomaly_report
+from src.tools.anomaly_detection import AnomalyError, _SPIKE_MULTIPLIER
+from src.tools.create_eval_datasets import create_datasets_from_anomaly_report
+from src.tools.ingest_tools import all_tools
+from src.agents.llms import set_up_llms
 
 _JUDGE_MODEL = "claude-haiku-4-5-20251001"
 
@@ -69,15 +72,72 @@ _DEFAULT_COMPOSITE_WEIGHTS = {
 # Code evaluators — deterministic, no LLM call
 # ---------------------------------------------------------------------------
 
-def no_hard_error(outputs: dict) -> dict:
-    """Score 1 if the run produced no error field, 0 if it did.
+def no_hard_error(run: Run) -> dict:
+    """Score 1 if the run produced no error, 0 if it did.
 
-    Use for ``hard_error`` signals. Checks the outputs dict directly — if the
-    tool raised an exception, the output typically contains an 'error' key or
-    is empty.
+    Use for ``hard_error`` signals. Reads ``run.error`` — the authoritative
+    field set by LangSmith when a tool raises. Checking ``outputs`` is
+    unreliable because a crashed tool returns ``{}`` with no error key.
     """
-    has_error = bool(outputs.get("error") or outputs.get("Error"))
-    return {"key": "no_hard_error", "score": 0 if has_error else 1}
+    return {"key": "no_hard_error", "score": 0 if run.error is not None else 1}
+
+
+def build_latency_evaluator(signal: str) -> Callable:
+    """Code evaluator for ``latency_spike`` — passes if the new run's latency stays below 3× baseline.
+
+    Parses the baseline median from the signal string
+    (e.g. ``latency_spike:123.1s_vs_median_40.5s``) so the threshold matches
+    exactly what triggered the anomaly.  Reads ``run.latency`` from the
+    LangSmith Run object supplied by ``evaluate()``.
+    """
+    m = re.search(r"_vs_median_([\d.]+)s", signal)
+    median_latency = float(m.group(1)) if m else None
+    threshold = _SPIKE_MULTIPLIER * median_latency if median_latency is not None else None
+
+    def latency_not_spiking(run: Run) -> dict:
+        latency = run.latency
+        if latency is None:
+            return {"key": "latency_not_spiking", "score": 0, "comment": "missing latency"}
+        if threshold is None:
+            return {"key": "latency_not_spiking", "score": 1, "comment": "no baseline"}
+        passed = latency <= threshold
+        return {
+            "key": "latency_not_spiking",
+            "score": 1 if passed else 0,
+            "comment": f"{latency:.1f}s vs threshold {threshold:.1f}s",
+        }
+
+    latency_not_spiking.__name__ = "latency_not_spiking"
+    return latency_not_spiking
+
+
+def build_token_evaluator(signal: str) -> Callable:
+    """Code evaluator for ``token_blowout`` — passes if the new run's token count stays below 3× baseline.
+
+    Parses the baseline median from the signal string
+    (e.g. ``token_blowout:5000_vs_median_1200``) so the threshold is anchored
+    to the same baseline that triggered the anomaly.  Reads ``run.total_tokens``
+    from the LangSmith Run object supplied by ``evaluate()``.
+    """
+    m = re.search(r"_vs_median_([\d.]+)$", signal)
+    median_tokens = float(m.group(1)) if m else None
+    threshold = _SPIKE_MULTIPLIER * median_tokens if median_tokens is not None else None
+
+    def tokens_not_blown(run: Run) -> dict:
+        tokens = run.total_tokens
+        if not tokens:
+            return {"key": "tokens_not_blown", "score": 1, "comment": "no tokens recorded"}
+        if threshold is None:
+            return {"key": "tokens_not_blown", "score": 1, "comment": "no baseline"}
+        passed = tokens <= threshold
+        return {
+            "key": "tokens_not_blown",
+            "score": 1 if passed else 0,
+            "comment": f"{tokens} tokens vs threshold {threshold:.0f}",
+        }
+
+    tokens_not_blown.__name__ = "tokens_not_blown"
+    return tokens_not_blown
 
 
 # ---------------------------------------------------------------------------
@@ -130,47 +190,6 @@ def build_llm_judge(signal: str, pass_criteria: str) -> Callable:
     return evaluator_fn
 
 
-def build_output_quality_judge(signals: list[str], pass_criteria: str) -> Callable:
-    """Return a general LLM judge that scores whether the *output* makes sense.
-
-    Unlike signal-specific judges, this always fires regardless of which anomaly
-    triggered. Code evaluators can only check numbers — this judge checks whether
-    the output content is coherent and correct given the input.
-
-    Args:
-        signals:       All signals from the run (used to frame the context).
-        pass_criteria: From ``example.metadata["pass_criteria"]``.
-
-    Returns:
-        A LangSmith-compatible evaluator with key ``"llm_judge_output_quality"``.
-    """
-    judge = anthropic.Anthropic()
-    context = "; ".join(signals) if signals else "anomaly"
-    system_prompt = (
-        f"You are evaluating an AI agent's output quality after an anomaly was detected.\n"
-        f"Anomaly signals: {context}\n"
-        f"Pass criteria: {pass_criteria}\n"
-        f"Score 1 if the output is coherent and correct given the input, 0 if it is not.\n"
-        f'Reply with JSON only: {{"score": 0|1, "reason": "<10 words>"}}'
-    )
-
-    def evaluator_fn(inputs: dict, outputs: dict) -> dict:
-        resp = judge.messages.create(
-            model=_JUDGE_MODEL,
-            max_tokens=128,
-            system=system_prompt,
-            messages=[{"role": "user", "content": json.dumps({"inputs": inputs, "outputs": outputs})}],
-        )
-        try:
-            result = json.loads(resp.content[0].text)
-            return {"key": "llm_judge_output_quality", "score": result["score"], "comment": result.get("reason", "")}
-        except Exception:
-            return {"key": "llm_judge_output_quality", "score": 0, "comment": "parse error"}
-
-    evaluator_fn.__name__ = "llm_judge_output_quality"
-    return evaluator_fn
-
-
 # ---------------------------------------------------------------------------
 # Evaluator selection
 # ---------------------------------------------------------------------------
@@ -184,8 +203,8 @@ def build_evaluators_for_errors(
 
     Rules:
     - ``hard_error``       → ``no_hard_error`` (code) + LLM judge for recovery quality
-    - ``latency_spike``    → category is already captured in the example metadata
-    - ``token_blowout``    → category is already captured in the example metadata
+    - ``latency_spike``    → ``latency_not_spiking`` code evaluator (checks ``run.latency``)
+    - ``token_blowout``    → ``tokens_not_blown`` code evaluator (checks ``run.total_tokens``)
     - ``step_count_spike`` → LLM judge for step necessity
 
     Output quality judging is opt-in: call ``build_output_quality_judge`` separately
@@ -213,16 +232,16 @@ def build_evaluators_for_errors(
         if error == "hard_error":
             _add(no_hard_error)
             _add(build_llm_judge(signal, pass_criteria))  # was recovery graceful?
+        elif error == "latency_spike":
+            _add(build_latency_evaluator(signal))
+        elif error == "token_blowout":
+            _add(build_token_evaluator(signal))
         elif error == "step_count_spike":
             _add(build_llm_judge(signal, pass_criteria))  # were extra steps necessary?
 
     return evals
 
 
-def build_evaluators_for_signals(signals: list[str], pass_criteria: str) -> list[Callable]:
-    """Backward-compatible wrapper that derives categories from signal strings."""
-    errors = [signal.split(":", 1)[0] for signal in signals]
-    return build_evaluators_for_errors(errors, signals, pass_criteria)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -281,26 +300,23 @@ def apply_composite_scores(
 # ---------------------------------------------------------------------------
 
 def build_pass_rate_evaluator(key: str = "no_hard_error") -> Callable:
-    """Return a summary_evaluator that computes experiment-level pass rate for a metric.
+    """Return a summary_evaluator that computes experiment-level pass rate.
 
     Pass to ``evaluate(summary_evaluators=[build_pass_rate_evaluator(...)])``.
-    Fires once after all runs settle, receiving all runs and examples at once.
+    Fires once after all runs settle, receiving all outputs at once.
 
     Args:
-        key: The feedback key to compute pass rate for (e.g. ``"no_hard_error"``).
+        key: Label for the metric key written to LangSmith (e.g. ``"no_hard_error"``).
 
     Returns:
         A summary evaluator function compatible with LangSmith's ``summary_evaluators`` param.
     """
-    def pass_rate(runs: Sequence[Run], examples: Sequence[Example]) -> EvaluationResult:
+    def pass_rate(outputs: list[dict], runs: list[Run]) -> dict:
         passed = sum(
-            1 for r in runs
-            if (r.feedback_stats or {}).get(key, {}).get("avg", 0) == 1
+            1 for o, r in zip(outputs, runs)
+            if not r.error and not (o.get("error") or o.get("Error"))
         )
-        return EvaluationResult(
-            key=f"{key}_pass_rate",
-            score=passed / len(runs) if runs else 0,
-        )
+        return {"key": f"{key}_pass_rate", "score": passed / len(outputs) if outputs else 0}
 
     pass_rate.__name__ = f"{key}_pass_rate"
     return pass_rate
@@ -309,10 +325,86 @@ def build_pass_rate_evaluator(key: str = "no_hard_error") -> Callable:
 # ---------------------------------------------------------------------------
 # Run evaluation
 # ---------------------------------------------------------------------------
-# todo: build target function based on dataset scope
-def build_target_function(dataset_name: str) -> Callable:
-    """Build a target function based on dataset scope."""
+def build_target_function(dataset_name: str, client: Client | None = None) -> Callable:
+    """Build an async target callable by reading the dataset's metadata from LangSmith.
 
+    Dispatch rules (confirmed against real trace data):
+    - ``run_type=tool``,  ``context_name=None``  → ``tool.ainvoke``  (e.g. fetch_arxiv)
+    - ``run_type=llm``,   ``context_name=None``  → ``llm.ainvoke``   (standalone ChatAnthropic)
+    - ``run_type=chain``, ``context_name=None``  → ``agent.ainvoke`` (root supervisor, rare)
+    - ``context_name`` is not None               → raises ValueError  (middleware span, skip)
+
+    Sandbox tools (save_sandbox_output, get_sandbox_state, list_sandbox_files) are not
+    registered in ``all_tools`` — they raise ValueError until sandbox tool lookup is wired up.
+
+    Args:
+        dataset_name: LangSmith dataset name created by ``create_eval_datasets.py``.
+        client:       Optional pre-constructed LangSmith Client.
+
+    Returns:
+        Async callable ``(inputs: dict) -> dict`` ready for ``evaluate(target=...)``.
+
+    Raises:
+        ValueError: If the dataset targets a middleware span, an unregistered tool, or
+                    an unknown run_type.
+    """
+    ls = client or Client()
+    meta = (ls.read_dataset(dataset_name=dataset_name).metadata or {})
+    run_type = meta.get("run_type")
+    run_name = meta.get("run_name")
+    ctx = meta.get("context_name")
+
+    if ctx is not None:
+        raise ValueError(
+            f"Dataset '{dataset_name}' targets a middleware span (context_name={ctx!r}) — "
+            "skip evaluation for middleware spans until target isolation is implemented."
+        )
+
+    if run_type == "tool":
+        tool_map = {t.name: t for t in all_tools}
+        t = tool_map.get(run_name)
+        if t is None:
+            raise ValueError(
+                f"Tool {run_name!r} is not registered in all_tools "
+                f"(sandbox tools are not yet supported as evaluation targets)."
+            )
+
+        async def target(inputs: dict) -> dict:
+            result = await t.ainvoke(inputs)
+            return result if isinstance(result, dict) else {"output": result}
+
+        target.__name__ = f"target_{run_name}"
+        return target
+
+    elif run_type == "llm":
+        llm = set_up_llms("claude-haiku-4-5-20251001")
+
+        async def target(inputs: dict) -> dict:
+            response = await llm.ainvoke(inputs.get("messages", inputs))
+            content = response.content if hasattr(response, "content") else str(response)
+            return {"output": content}
+
+        target.__name__ = f"target_{run_name}"
+        return target
+
+    elif run_type == "chain":
+        from src.agents.agent import create_supervisor  # lazy to avoid circular import
+
+        async def target(inputs: dict) -> dict:
+            agent = await create_supervisor()
+            result = await agent.ainvoke(inputs)
+            return result if isinstance(result, dict) else {"output": str(result)}
+
+        target.__name__ = "target_agent"
+        return target
+
+    else:
+        raise ValueError(
+            f"Unknown run_type={run_type!r} in metadata for dataset '{dataset_name}'"
+        )
+
+# call list_datasets() to get the dataset name + may add description for agent to know which to use
+# for now skip those with context_name is not None
 def run_evaluate(
     dataset_name: str,
     target: Callable,

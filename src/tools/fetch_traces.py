@@ -290,7 +290,7 @@ async def _format_trace_async(trace_id: str, trace_runs: list[Any], client: Asyn
     lines: list[str] = [f"\n=== trace {trace_id} ({len(trace_runs)} runs) ==="]
 
     llm_runs = [run for run in trace_runs if run.run_type == "llm"]
-    tools_runs = [run for run in trace_runs if run.run_type == "tool"]
+    tools_runs = [run for run in trace_runs if run.run_type == "tool" and run.name not in TRACE_ANALYSIS_TOOLS] # add tool name filter for safety
     last_llm_id = str(llm_runs[-1].id) if llm_runs else None
     runs_to_fetch = [
         run for run in llm_runs
@@ -435,18 +435,32 @@ async def _run_trace_report_async(
 
     now = datetime.now(timezone.utc)
     start_time = now - timedelta(days=days)
+    print("start time:", start_time)
 
+    # POST /runs/query rejects limit > 100 at the API level.
+    # Rate limits: ≤7 days → 10 req/10s; >7 days → 3 req/10s.
+    # For large limits, omit limit from the body and break locally to avoid
+    # burning through rate-limited pagination pages. Caller should keep limit
+    # ≤ 100 for >7-day windows to stay well within 3 req/10s.
+    _API_MAX_LIMIT = 100
     list_runs_kwargs: dict[str, Any] = {
         "project_name": project,
         "start_time": start_time,
-        "limit": limit,
     }
     if error:
         list_runs_kwargs["error"] = error
-    all_runs = [run async for run in client.list_runs(**list_runs_kwargs)]
+    if limit <= _API_MAX_LIMIT:
+        list_runs_kwargs["limit"] = limit
+        all_runs = [run async for run in client.list_runs(**list_runs_kwargs)]
+    else:
+        all_runs = []
+        async for run in client.list_runs(**list_runs_kwargs):
+            all_runs.append(run)
+            if len(all_runs) >= limit:
+                break
     runs = [r for r in all_runs if r.name not in TRACE_ANALYSIS_TOOLS]
 
-    end_time = min((r.end_time for r in runs if r.end_time), default=now)
+    end_time = max((r.end_time for r in runs if r.end_time), default=now)
     actual_start = min((r.start_time for r in runs if r.start_time), default=start_time)
 
     traces = await _group_formatted_traces_async(runs, client)
@@ -480,7 +494,11 @@ async def run_trace_report_async(
     Args:
         project: LangSmith project name to query (default: "paper2wiki").
         days: Lookback window in days (start_time = now - days).
-        limit: Maximum number of runs to fetch from LangSmith.
+        limit: Maximum number of runs to fetch. The LangSmith API rejects
+               limit > 100 per request; values above 100 are handled by
+               client-side pagination (each page is a separate API call).
+               Note: >7-day windows are rate-limited to 3 req/10s, so keep
+               limit ≤ 100 for large windows to avoid rate limit errors.
 
     Returns:
         TraceReport dict with keys:

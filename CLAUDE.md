@@ -86,3 +86,12 @@ Three skills are available to the supervisor:
 ## Pending Cleanup
 
 - `src/tools/trace_report_pickle_cache.py` is dev-only. It uses pickle to replay LangSmith runs locally and should not be used in production. `trace_report.py` is the production path.
+
+## Todos
+
+- Integrate anomaly_detection and create_eval_dataset to Trace_analyzer skill
+- use Web extract for llm-wiki, docling too slow
+- Capacity limit for /memories/
+- Wrap agent into Cli
+- Consolidation agent + cron
+- RL

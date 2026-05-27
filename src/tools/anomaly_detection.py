@@ -50,8 +50,10 @@ _LLM_RUN_TYPES = {"llm"}
 _EXCLUDE_NAMES = {"model", "tools", "ChatAnthropic"}
 BASELINES_PATH = Path(__file__).resolve().parents[2] / "memories" / "baselines.json"
 
+# Extracts the JSON string (including {}) from lines like: [depth=2] {"key": "value"}
 _RUN_LINE_RE = re.compile(r"^\[depth=\d+\] (\{.+\})\s*$")
-_TRACE_FRAME_RE = re.compile(r"^\[depth=\d+\]\s+(.+?)\s*$")
+# Extracts whatever text comes AFTER the depth tag: [depth=1] some text
+_TRACE_FRAME_RE = re.compile(r"^\[depth=\d+\]\s+(.+?)\s*$") 
 TOOL_FLOWS = {
     "fetch_arxiv": "wiki-ingestion",
     "parse_pdf_docling": "wiki-ingestion",
@@ -134,6 +136,8 @@ def _parse_runs(traces: dict[str, str]) -> list[dict[str, Any]]:
         for line in text.splitlines():
             stripped = line.strip()
             frame = _TRACE_FRAME_RE.match(stripped)
+            # If the content after the depth tag is plain text (not JSON),
+            # remember it as the context name for the following runs
             if frame and not frame.group(1).startswith("{"):
                 context_name = frame.group(1)
 
