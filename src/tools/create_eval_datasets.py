@@ -9,8 +9,11 @@ Called after ``detect_anomalies_async()``:
 
 from __future__ import annotations
 
+import ast
+import json
 import re
 from collections import defaultdict
+from typing import Any
 
 from langsmith import Client
 
@@ -65,6 +68,30 @@ def _dataset_description(span: FailedSpan) -> str:
         f"run_name={span.run_name}, "
         f"context_name={context_value}."
     )
+
+
+def _normalize_example_inputs(raw_inputs: dict[str, Any]) -> dict[str, Any]:
+    """Normalize legacy wrapped/stringified tool inputs for replay."""
+    if not isinstance(raw_inputs, dict):
+        return {"input": raw_inputs}
+
+    wrapped = raw_inputs.get("input")
+    if "input" not in raw_inputs or len(raw_inputs) != 1:
+        return raw_inputs
+    if isinstance(wrapped, dict):
+        return wrapped
+    if not isinstance(wrapped, str):
+        return raw_inputs
+
+    text = wrapped.strip()
+    for parser in (json.loads, ast.literal_eval):
+        try:
+            parsed = parser(text)
+        except Exception:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return raw_inputs
 
 
 def create_datasets_from_anomaly_report(
@@ -134,7 +161,7 @@ def create_datasets_from_anomaly_report(
                 continue
 
             new_examples.append({
-                "inputs": span.inputs,
+                "inputs": _normalize_example_inputs(span.inputs),
                 "outputs": span.outputs,
                 "metadata": {
                     "run_id": span.id,

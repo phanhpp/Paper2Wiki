@@ -47,6 +47,7 @@ def _anomaly_examples() -> list[tuple]:
         params = []
         for ds in client.list_datasets():
             ds_desc = (ds.description or "").lower()
+            print('ds description', ds_desc)
             # Support both new naming ("__rt_") and legacy anomaly datasets.
             if "__rt_" not in ds.name and "failures" not in ds_desc:
                 continue

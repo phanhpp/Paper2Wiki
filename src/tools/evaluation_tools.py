@@ -52,7 +52,7 @@ from typing import Callable, Sequence
 
 import anthropic
 from langsmith import Client
-from langsmith.evaluation import evaluate
+from langsmith.evaluation import aevaluate
 from langsmith.evaluation.evaluator import EvaluationResult
 from langsmith.schemas import Run, Example
 
@@ -195,9 +195,9 @@ def build_llm_judge(signal: str, pass_criteria: str) -> Callable:
 # ---------------------------------------------------------------------------
 
 def build_evaluators_for_errors(
-    errors: list[AnomalyError],
-    signals: list[str],
-    pass_criteria: str,
+    dataset_name: str,
+    metadata_filter: dict | None = None,
+    client: Client | None = None,
 ) -> list[Callable]:
     """Return evaluators for explicit anomaly categories.
 
@@ -211,13 +211,43 @@ def build_evaluators_for_errors(
     and append it to the returned list when you want to score output correctness.
 
     Args:
-        errors:        Typed anomaly categories from ``AnomalySignal.errors``.
-        signals:       Detailed signal strings from ``AnomalySignal.signals``.
-        pass_criteria: From ``example.metadata["pass_criteria"]``.
-
+        dataset_name: LangSmith dataset name created by ``create_eval_datasets.py``.
     Returns:
         Deduplicated list of evaluator callables ready to pass to ``run_evaluate``.
     """
+
+    # get the examples from the dataset
+    ls = client or Client()
+
+    if metadata_filter:
+        examples = ls.list_examples(dataset_name=dataset_name, metadata=metadata_filter)
+    else:
+        examples = ls.list_examples(dataset_name=dataset_name)
+
+    # Aggregate anomaly metadata across examples in this dataset.
+    errors: set[AnomalyError] = set()
+    signal_by_error: dict[str, str] = {}
+    pass_criteria_parts: list[str] = []
+    for ex in examples:
+        meta = ex.metadata or {}
+        for error in meta.get("errors", []):
+            if isinstance(error, str):
+                errors.add(error)  # type: ignore[arg-type]
+        for signal in meta.get("signals", []):
+            if not isinstance(signal, str):
+                continue
+            key = signal.split(":", 1)[0]
+            signal_by_error.setdefault(key, signal)
+        criteria = meta.get("pass_criteria")
+        if isinstance(criteria, str) and criteria.strip():
+            pass_criteria_parts.append(criteria)
+
+    pass_criteria = (
+        " ; ".join(dict.fromkeys(pass_criteria_parts))
+        if pass_criteria_parts
+        else "No hard error"
+    )
+
     evals: list[Callable] = []
     seen_keys: set[str] = set()
 
@@ -226,8 +256,9 @@ def build_evaluators_for_errors(
             seen_keys.add(fn.__name__)
             evals.append(fn)
 
-    signal_by_error = {signal.split(":", 1)[0]: signal for signal in signals}
-    for error in errors:
+    for error in ("hard_error", "latency_spike", "token_blowout", "step_count_spike"):
+        if error not in errors:
+            continue
         signal = signal_by_error.get(error, error)
         if error == "hard_error":
             _add(no_hard_error)
@@ -405,17 +436,16 @@ def build_target_function(dataset_name: str, client: Client | None = None) -> Ca
 
 # call list_datasets() to get the dataset name + may add description for agent to know which to use
 # for now skip those with context_name is not None
-def run_evaluate(
+async def run_evaluate(
     dataset_name: str,
-    target: Callable,
-    evaluators: list[Callable],
+    evaluators: list[Callable] | None = None,
     *,
-    summary_evaluators: list[Callable] | None = None,
+    #summary_evaluators: list[Callable] | None = None,
     experiment_prefix: str | None = None,
     metadata_filter: dict | None = None,
     client: Client | None = None,
 ):
-    """Run a LangSmith evaluation against a dataset.
+    """Run an async LangSmith evaluation against a dataset.
 
     The caller supplies ``target`` — the callable invoked on each example's inputs.
     Choose based on the dataset scope:
@@ -441,17 +471,31 @@ def run_evaluate(
         ``.experiment_name`` to pass to ``apply_composite_scores`` later.
     """
     ls = client or Client()
+    # For now middleware spans are skipped.
+    effective_filter = dict(metadata_filter or {})
+    effective_filter.setdefault("context_name", None)
 
-    if metadata_filter:
-        data = list(ls.list_examples(dataset_name=dataset_name, metadata=metadata_filter))
-    else:
-        data = dataset_name
+    # check if dataset_name is valid
+    if not ls.has_dataset(dataset_name=dataset_name):
+        raise ValueError(f"Dataset {dataset_name} not found")
 
-    return evaluate(
+    # if evaluators is not provided, build them from the dataset name
+    if evaluators is None:
+        evaluators = build_evaluators_for_errors(dataset_name, metadata_filter=effective_filter, client=ls)
+
+    target = build_target_function(dataset_name, client=ls)
+
+    data = (
+        list(ls.list_examples(dataset_name=dataset_name, metadata=effective_filter))
+        if effective_filter
+        else dataset_name
+    )
+
+    return await aevaluate(
         target,
         data=data,
         evaluators=evaluators,
-        summary_evaluators=summary_evaluators or [],
+        #summary_evaluators=summary_evaluators or [],
         experiment_prefix=experiment_prefix,
         client=ls,
     )
