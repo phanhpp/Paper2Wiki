@@ -10,23 +10,45 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: Tests
+  unit:
+    name: Unit Tests
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4 # downloads your code onto the machine
+      - uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          # Sets UV_PYTHON for later steps; matches requires-python in pyproject.toml
           python-version: "3.11"
 
-      - name: Install dependencies
-        run: uv sync --frozen
+      - run: uv sync --frozen
 
-      - name: Run tests
-        run: uv run pytest -q
+      - run: uv run pytest -m "not integration and not slow and not langsmith" -q
+
+  regression:
+    name: Regression (LangSmith)
+    runs-on: ubuntu-latest
+    needs: unit
+
+    env:
+      LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      LANGSMITH_TEST_SUITE: "paper2wiki-regression"
+      LANGSMITH_EXPERIMENT: ${{ github.sha }}
+      LANGSMITH_TEST_CACHE: tests/cassettes
+      LANGSMITH_EXPERIMENT_METADATA: >
+        {"git_sha": "${{ github.sha }}", "branch": "${{ github.ref_name }}"}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.11"
+
+      - run: uv sync --frozen
+
+      - name: Run regression suite
+        run: uv run pytest -m "langsmith and not slow" -q
