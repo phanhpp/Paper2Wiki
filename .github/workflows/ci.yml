@@ -34,6 +34,7 @@ jobs:
     env:
       LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      LANGSMITH_TRACING: "true"
       LANGSMITH_TEST_SUITE: "paper2wiki-regression"
       LANGSMITH_EXPERIMENT: ${{ github.sha }}
       LANGSMITH_TEST_CACHE: tests/cassettes

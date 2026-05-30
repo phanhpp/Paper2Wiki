@@ -95,8 +95,14 @@ Rule: unit tests are not useless just because they mock — they test your logic
 
 **CI jobs:**
 - `unit` job: `not integration and not slow and not langsmith` — no secrets, always runs
-- `regression` job: `langsmith and not slow` — needs `LANGSMITH_API_KEY` + `ANTHROPIC_API_KEY`, runs after unit passes
+- `regression` job: `langsmith and not slow` — needs `LANGSMITH_API_KEY` + `ANTHROPIC_API_KEY` + `LANGSMITH_TRACING=true`, runs after unit passes
 - `slow` / `integration`: opt-in locally only
+
+**Required env vars for regression job** (all must be set or tests fail at runtime):
+- `LANGSMITH_API_KEY` — authenticates LangSmith API calls; missing = 401 at collection time
+- `LANGSMITH_TRACING=true` — enables `t.log_inputs/outputs/feedback`; missing = `ValueError` at test runtime
+- `ANTHROPIC_API_KEY` — needed by the LLM judge in `test_anomaly_regression`
+- `LANGSMITH_TEST_CACHE` — path to cassette dir for caching LLM calls; missing `vcrpy` package = `ImportError`
 
 **When adding a new tool**, add both:
 1. A unit test with mocked I/O covering the main logic branches
