@@ -3,16 +3,31 @@
 Each test case replays a failing production trace from an anomaly dataset and
 asserts the target no longer exhibits the same failure.
 
-Dataset naming: ``{scope}__rt_{run_type}__rn_{run_name}`` (no context suffix —
-middleware spans are skipped at dataset-creation time).
-Legacy datasets are matched by "failures" in the description.
+Scope — hard_error examples only:
+    Only examples with "hard_error" in their metadata errors list are collected.
+    latency_spike, token_blowout, and step_count_spike examples are skipped here
+    because those signals require run.latency / run.total_tokens / child_run_ids,
+    which are only available on the LangSmith Run object from evaluate() — not from
+    a local pytest invocation. Those are tracked via run_evaluate() in evaluation_tools.py.
+
+Dataset naming:
+    New format:  ``{scope}__rt_{run_type}__rn_{run_name}``  (matched by "__rt_" in name)
+    Legacy:      matched by "failures" in the dataset description
+    Middleware spans (context_name is not None) are skipped — no callable target exists.
+
+Limits:
+    _MAX_DATASETS examples (default 5) × _MAX_EXAMPLES per dataset (default 3) to
+    keep CI time bounded as the anomaly backlog grows.
 
 Run:
-    LANGSMITH_TEST_SUITE="paper2wiki regression" pytest tests/test_anomaly_regression.py
-    LANGSMITH_TEST_SUITE="paper2wiki regression" pytest tests/test_anomaly_regression.py --langsmith-output
+    LANGSMITH_TEST_SUITE="paper2wiki-regression" uv run pytest tests/test_anomaly_regression.py
+    LANGSMITH_TEST_SUITE="paper2wiki-regression" uv run pytest tests/test_anomaly_regression.py --langsmith-output
 
 Cache LLM calls in CI:
-    LANGSMITH_TEST_CACHE=tests/cassettes pytest tests/test_anomaly_regression.py
+    LANGSMITH_TEST_CACHE=tests/cassettes uv run pytest tests/test_anomaly_regression.py -v -s
+
+Dry run (no LangSmith sync):
+    LANGSMITH_TEST_TRACKING=false uv run pytest tests/test_anomaly_regression.py -v -s
 """
 
 from __future__ import annotations
@@ -23,7 +38,7 @@ import time
 
 import pytest
 import anthropic
-from langsmith import Client, testing as t
+from langsmith import Client, testing as t, wrappers
 
 from src.tools.evaluation_tools import build_target_function
 
@@ -34,8 +49,15 @@ _JUDGE_MODEL = "claude-haiku-4-5-20251001"
 # Parametrize — one test case per (dataset, example) pair
 # ---------------------------------------------------------------------------
 
+_MAX_DATASETS = 5     # most-recently-modified anomaly datasets to consider
+_MAX_EXAMPLES = 3      # most-recent examples per dataset
+
+
 def _anomaly_examples() -> list[tuple]:
-    """Return [(dataset_name, example)] for all evaluable anomaly datasets.
+    """Return [(dataset_name, example)] for the most recent evaluable anomaly datasets.
+
+    Limits to ``_MAX_DATASETS`` datasets and ``_MAX_EXAMPLES`` examples per dataset
+    so CI time stays bounded as the anomaly backlog grows.
 
     Returns an empty list (skips all tests) when LANGSMITH_API_KEY is missing
     or invalid so collection never hard-errors in CI.
@@ -45,20 +67,28 @@ def _anomaly_examples() -> list[tuple]:
     try:
         client = Client()
         params = []
-        for ds in client.list_datasets():
+        matched = 0
+        for ds in client.list_datasets(limit=100):  # list_datasets has no date sort, scan and cap
+            if matched >= _MAX_DATASETS:
+                break
             ds_desc = (ds.description or "").lower()
-            print('ds description', ds_desc)
-            # Support both new naming ("__rt_") and legacy anomaly datasets.
             if "__rt_" not in ds.name and "failures" not in ds_desc:
                 continue
+            matched += 1
+            count = 0
             for ex in client.list_examples(dataset_id=ds.id):
+                if count >= _MAX_EXAMPLES:
+                    break
                 ex_meta = ex.metadata or {}
                 if ex_meta.get("context_name") is not None:
                     continue  # middleware span — no target available
+                if "hard_error" not in (ex_meta.get("errors") or []):
+                    continue  # latency/token/step anomalies need evaluate(), not pytest
                 params.append(pytest.param(
                     ds.name, ex,
                     id=f"{ds.name}::{ex.id}",
                 ))
+                count += 1
         return params
     except Exception as exc:
         import warnings
@@ -68,7 +98,9 @@ def _anomaly_examples() -> list[tuple]:
 
 def _judge_recovery(inputs: dict, outputs: dict, pass_criteria: str) -> int:
     """LLM judge: did the tool recover gracefully from the error? Returns 0 or 1."""
-    judge = anthropic.Anthropic()
+    
+    # langsmith wrapper — enable tracing + caching
+    judge = wrappers.wrap_anthropic(anthropic.Anthropic())
     resp = judge.messages.create(
         model=_JUDGE_MODEL,
         max_tokens=128,
@@ -94,13 +126,18 @@ def _judge_recovery(inputs: dict, outputs: dict, pass_criteria: str) -> int:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("dataset_name,example", _anomaly_examples())
 async def test_anomaly_regression(dataset_name: str, example) -> None:
-    """Re-run the failing span and assert it no longer exhibits the anomaly signal."""
+    """Re-run a failing span and assert it no longer exhibits the anomaly signal.
+
+    Parametrized over the most recent examples from every anomaly dataset (up to
+    _MAX_DATASETS datasets × _MAX_EXAMPLES examples each). One test case per example.
+
+    inputs/reference_outputs are already stored in the LangSmith dataset — logging
+    them again here would be redundant. Only t.log_outputs() is called to record
+    the fresh run result so LangSmith can diff new vs reference outputs.
+    """
     meta = example.metadata or {}
     errors: list[str] = meta.get("errors", [])
     pass_criteria: str = meta.get("pass_criteria", "No hard error")
-
-    t.log_inputs(example.inputs)
-    t.log_reference_outputs(example.outputs)
 
     target = build_target_function(dataset_name)
 

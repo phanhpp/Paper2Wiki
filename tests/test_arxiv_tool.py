@@ -1,6 +1,18 @@
 """Unit tests for ``fetch_arxiv`` with mocked network and isolated temp dirs.
 
-Covers cache hits (no ``arxiv.Client``) and URL-based fetch with a fake client.
+All tests monkey-patch ``arxiv.Client`` with a fake that returns canned ``_Paper``
+objects and never opens a socket. This makes them fast and deterministic, but means
+they do NOT catch: real arXiv API changes, network errors, rate-limit handling,
+actual PDF download failures, or broken PDF path construction against live data.
+
+For live-network coverage see ``test_regression.py::test_fetch_arxiv_downloads_paper``
+(marked ``integration``).
+
+Covered cases:
+- Cache hit: valid cache JSON + PDF on disk → returns payload, never constructs Client
+- Cache miss (stale): cache JSON exists but PDF is gone → re-fetches and downloads fresh PDF
+- URL input: ``arxiv.org/abs/...`` URL → ID extracted, paper fetched, PDF downloaded
+- No results: arXiv returns empty list → raises ``ValueError``
 """
 from __future__ import annotations
 

@@ -83,6 +83,25 @@ Three skills are available to the supervisor:
 - `skills/trace-analysis/` — LangSmith trace analysis workflow
 - `skills/marp-slide/` — Marp slide creation (injected into Daytona sandbox)
 
+## Testing Strategy
+
+Two layers — they catch different bugs and are both necessary:
+
+**Unit tests** (`tests/test_arxiv_tool.py`, `tests/test_wiki_integrity_check.py`, etc.) — mock all I/O, never touch the network or real files. Fast and deterministic. Catch regressions in **your logic**: cache hit/miss decisions, ID extraction, error paths, schema validation. Use `@pytest.mark.unit`. Run in CI without secrets.
+
+**Regression/integration tests** (`tests/test_regression.py`, `tests/test_anomaly_regression.py`) — hit real external services or real wiki files. Catch a different class of failure: **the external world drifting away from your assumptions** — arXiv API changes, LangSmith dataset schema changes, wiki pages going stale, Docling output format changes. Unit tests can't catch these because mocks assume the behavior you already observed.
+
+Rule: unit tests are not useless just because they mock — they test your logic. Integration tests are not redundant just because unit tests pass — they test the contract with the outside world.
+
+**CI jobs:**
+- `unit` job: `not integration and not slow and not langsmith` — no secrets, always runs
+- `regression` job: `langsmith and not slow` — needs `LANGSMITH_API_KEY` + `ANTHROPIC_API_KEY`, runs after unit passes
+- `slow` / `integration`: opt-in locally only
+
+**When adding a new tool**, add both:
+1. A unit test with mocked I/O covering the main logic branches
+2. A `@pytest.mark.integration` or `@pytest.mark.langsmith` test that calls the real thing at least once
+
 ## Pending Cleanup
 
 - `src/tools/trace_report_pickle_cache.py` is dev-only. It uses pickle to replay LangSmith runs locally and should not be used in production. `trace_report.py` is the production path.

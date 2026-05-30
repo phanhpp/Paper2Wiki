@@ -173,42 +173,22 @@ llm_wiki/
 
 CI runs two jobs on every PR and push to `main`:
 
-| Job | Markers | Needs secrets | What it checks |
-|---|---|---|---|
-| **Unit** | `not integration, not slow, not langsmith` | No | Pure logic, mocked I/O |
-| **Regression** | `langsmith and not slow` | `LANGSMITH_API_KEY`, `ANTHROPIC_API_KEY` | Live tools against real LangSmith datasets |
+| Job | Command | Needs secrets |
+|---|---|---|
+| **Unit** | `pytest -m "not integration and not slow and not langsmith"` | No |
+| **Regression** | `pytest -m "langsmith and not slow"` | `LANGSMITH_API_KEY`, `ANTHROPIC_API_KEY` |
+
+The regression job is the CI gate — it replays known-failing spans (tool, llm, or chain) from LangSmith anomaly datasets and hard-gates on `hard_error` examples only. `latency_spike`, `token_blowout`, and `step_count_spike` anomalies are tracked offline via `evaluate()`, not here. See `tests/test_regression.py` and `tests/test_anomaly_regression.py` for details.
 
 ```bash
-# fast — unit only (no secrets needed)
+# unit (no secrets)
 uv run pytest -m "not integration and not slow and not langsmith" -q
 
-# regression gate (requires .env)
+# regression gate
 LANGSMITH_TEST_SUITE="paper2wiki-regression" \
 LANGSMITH_TEST_CACHE=tests/cassettes \
 uv run pytest -m "langsmith and not slow" -q
-
-# slow tests — opt-in locally (runs Docling, ~2 min)
-uv run pytest -m slow -q
 ```
-
-#### Regression test suite (`tests/test_regression.py`, `tests/test_anomaly_regression.py`)
-
-**`test_wiki_health_check_runs_clean`** — runs `quick_wiki_integrity_check` against the real `wiki/` dir. Hard gate: `wiki-check: OK`. Soft: `error_count` logged to LangSmith.
-
-**`test_existing_wiki_pages_quality`** — parametrized over 3 known-good pages. Hard gates via `expect()`: each page has at least one `[[wikilink]]`, valid frontmatter, and >200 chars. Soft: `wikilink_count`, `header_count` tracked as trends.
-
-**`test_pdf_parse_produces_content`** *(slow, opt-in)* — fetches arXiv `1706.03762` and runs Docling. Hard gates: output >500 chars, contains `##` headers, parse finishes in <3 min (`expect.value(elapsed).to_be_less_than(180)`). Does **not** check for wikilinks — those are written by the agent, not the parser.
-
-**`test_anomaly_regression`** — dynamically parametrized over every LangSmith dataset matching `__rt_` in the name (new format) or `"failures"` in the description (legacy). For each example: replays the failing tool call, logs `local_latency_s` as soft metric. Hard gate for `hard_error` examples: `assert not outputs.get("error")`. Also runs an LLM judge (`claude-haiku-4-5`) via `t.trace_feedback()` to score recovery quality when the tool doesn't error.
-
-#### Metrics logged to LangSmith per test
-
-| Test | Soft (`t.log_feedback`) | Hard (`assert` / `expect`) |
-|---|---|---|
-| wiki health | `error_count` | `result == "wiki-check: OK"` |
-| wiki page quality | `wikilink_count`, `header_count` | `expect(content).to_contain("[[")`, `expect.value(len) > 200` |
-| pdf parse | `content_length`, `has_headers` | `len > 500`, `"##" in content`, `elapsed < 180s` |
-| anomaly regression | `local_latency_s`, `recovery_quality` (LLM judge) | `not outputs.get("error")` for hard-error examples |
 
 Fixture-backed trace tests use `tests/fixtures/runs.json` when present and skip when missing. Generate locally with:
 
