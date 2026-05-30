@@ -1,20 +1,45 @@
-"""Regression smoke tests — pytest-langsmith CI gate.
+"""Regression tests — pytest-langsmith CI gate.
 
-Three tests:
-- test_wiki_health_check_runs_clean: runs quick_wiki_integrity_check against the
-  real wiki/ dir and asserts no errors. Cheap, always-on.
-- test_pdf_parse_produces_content: fetches a known paper and parses it, asserts
-  the raw parse output is non-empty and substantial. Does NOT check wiki structure
-  (wikilinks are added by the agent, not by parse). Marked @pytest.mark.slow.
-- test_existing_wiki_pages_quality: reads a fixed set of known-good wiki pages and
-  checks structural invariants with expect(). Cheap, always-on.
+Tests here hit real files or real external services. They complement the unit tests
+in test_arxiv_tool.py / test_wiki_integrity_check.py (which mock all I/O) by catching
+the class of failure that mocks can't: external API changes, wiki pages going stale,
+Docling output format drift, arXiv schema changes.
+
+See CLAUDE.md ## Testing Strategy for the full rationale.
+
+Tests and their markers:
+
+  test_wiki_health_check_runs_clean       smoke, langsmith
+    Runs quick_wiki_integrity_check against the real wiki/ dir.
+    Hard gate: result == "wiki-check: OK". Soft: error_count.
+    Cheap and always-on — catches broken wikilinks or bad frontmatter committed to wiki/.
+
+  test_fetch_arxiv_downloads_paper        integration, langsmith
+    Hits the real arXiv API and downloads a PDF to tmp_path (not wiki/raw/).
+    Hard gates: no error, title present, PDF exists on disk. Soft: fetch_latency_s.
+    Unit tests mock arxiv.Client entirely — this is the only test that exercises
+    the live network path and catches API contract changes.
+
+  test_pdf_parse_produces_content         slow, langsmith
+    Fetches the same known paper (cache hit after fetch test) and runs Docling on it.
+    Hard gates: output > 500 chars, contains ## headers, parse finishes < 3 min.
+    Does NOT assert wikilinks — those are written by the agent, not the parser.
+    Marked slow because Docling can take 1–3 minutes.
+
+  test_existing_wiki_pages_quality        smoke, langsmith, parametrized
+    Reads a fixed set of known-good wiki pages directly from disk (no agent call).
+    Hard gates via expect(): each page has [[wikilinks]], frontmatter, > 200 chars.
+    Soft: wikilink_count, header_count tracked as trends in LangSmith.
+
+CI jobs:
+  regression job runs: langsmith and not slow  →  wiki health + page quality
+  slow / integration:  opt-in locally only
 
 Run:
-    LANGSMITH_TEST_SUITE="paper2wiki regression" pytest tests/test_regression.py
-    LANGSMITH_TEST_SUITE="paper2wiki regression" pytest tests/test_regression.py -m "not slow"
+    LANGSMITH_TEST_SUITE="paper2wiki-regression" uv run pytest tests/test_regression.py -m "langsmith and not slow" -q
 
-Cache LLM calls in CI:
-    LANGSMITH_TEST_CACHE=tests/cassettes pytest tests/test_regression.py
+Dry run (no LangSmith sync):
+    LANGSMITH_TEST_TRACKING=false uv run pytest tests/test_regression.py -v -s -m "not slow"
 """
 
 from __future__ import annotations
@@ -26,6 +51,7 @@ import pytest
 from langsmith import expect, testing as t
 
 import src.tools.wiki_integrity_check as wiki_check
+import src.tools.arxiv_tool as arxiv_tool
 from src.tools.arxiv_tool import fetch_arxiv
 from src.tools.docling_parser import parse_pdf_docling
 
@@ -59,27 +85,70 @@ def test_wiki_health_check_runs_clean() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Parse quality smoke test — slow, opt-in
+# arXiv fetch smoke test — fast, always runs
+# ---------------------------------------------------------------------------
+
+@pytest.mark.langsmith
+@pytest.mark.integration
+def test_fetch_arxiv_downloads_paper(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fetch a known paper from arXiv and assert metadata + PDF are present.
+
+    Complements the unit tests in test_arxiv_tool.py, which mock arxiv.Client and
+    never touch the network. This test hits the real arXiv API and downloads a real
+    PDF, so it catches regressions that mocks can't: API schema changes, auth errors,
+    download failures, or broken PDF path construction.
+
+    Downloads go to tmp_path instead of wiki/raw/ so repeated runs don't accumulate
+    test artifacts in the production wiki folder.
+    Marked integration (not smoke) because it requires external network access.
+    """
+    import time
+
+    monkeypatch.setattr(arxiv_tool, "RAW_PAPERS_DIR", tmp_path / "papers")
+    monkeypatch.setattr(arxiv_tool, "_ARXIV_CACHE_DIR", tmp_path / ".cache")
+
+    paper_id = "1706.03762"  # Attention Is All You Need — stable, well-known
+    t.log_inputs({"paper_id": paper_id})
+
+    start = time.perf_counter()
+    result = fetch_arxiv.invoke({"query": paper_id})
+    elapsed = time.perf_counter() - start
+
+    t.log_outputs({"title": result.get("title"), "pdf_path": result.get("pdf_path")})
+    t.log_feedback(key="fetch_latency_s", score=elapsed)
+
+    assert not result.get("error"), f"fetch_arxiv errored: {result.get('error')}"
+    assert result.get("title"), "No title in result"
+    assert result.get("pdf_path"), "No pdf_path in result"
+    assert Path(result["pdf_path"]).exists(), f"PDF not on disk: {result['pdf_path']}"
+
+
+# ---------------------------------------------------------------------------
+# Docling parse smoke test — slow, opt-in
 # ---------------------------------------------------------------------------
 
 @pytest.mark.langsmith
 @pytest.mark.slow
-def test_pdf_parse_produces_content() -> None:
-    """Fetch a known paper and assert the raw parse output is non-empty and substantial.
+def test_pdf_parse_produces_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Parse a known PDF with Docling and assert the output is non-empty and structured.
 
-    Only tests fetch_arxiv + parse_pdf_docling — NOT the agent. Wikilinks and
-    wiki structure are added by the agent using the llm-wiki skill; asserting on
-    them here would be testing the wrong thing.
+    Downloads go to tmp_path, not wiki/raw/ — keeps the production wiki clean.
+    Does NOT check for wikilinks — those are written by the agent, not the parser.
     """
     import time
-    paper_id = "1706.03762"  # Attention Is All You Need — stable, well-known
-    t.log_inputs({"paper_id": paper_id})
 
+    monkeypatch.setattr(arxiv_tool, "RAW_PAPERS_DIR", tmp_path / "papers")
+    monkeypatch.setattr(arxiv_tool, "_ARXIV_CACHE_DIR", tmp_path / ".cache")
+
+    paper_id = "1706.03762"
     arxiv_result = fetch_arxiv.invoke({"query": paper_id})
     assert not arxiv_result.get("error"), f"fetch_arxiv failed: {arxiv_result.get('error')}"
 
+    pdf_path = arxiv_result["pdf_path"]
+    t.log_inputs({"pdf_path": pdf_path})
+
     start = time.perf_counter()
-    parse_result = parse_pdf_docling.invoke({"path": arxiv_result["pdf_path"]})
+    parse_result = parse_pdf_docling.invoke({"path": pdf_path})
     elapsed = time.perf_counter() - start
 
     content: str = parse_result.get("markdown", "") if isinstance(parse_result, dict) else str(parse_result)
@@ -88,9 +157,9 @@ def test_pdf_parse_produces_content() -> None:
     t.log_feedback(key="content_length", score=len(content))
     t.log_feedback(key="has_headers", score=1 if "##" in content else 0)
 
-    expect.value(elapsed).to_be_less_than(180)                          # parse should finish in 3 min
+    expect.value(elapsed).to_be_less_than(180)
     assert len(content) > 500, f"Parsed output suspiciously short ({len(content)} chars)"
-    assert "##" in content, "No markdown headers in parsed output — parse may have failed"
+    assert "##" in content, "No markdown headers — parse may have failed"
 
 
 # ---------------------------------------------------------------------------
