@@ -51,10 +51,9 @@ wiki/
 ├── index.md            # Sectioned content catalog with one-line summaries
 ├── log.md              # Chronological action log (append-only, rotated yearly)
 ├── raw/                # Layer 1: Immutable source material
-│   ├── articles/       # Web articles, clippings
-│   ├── papers/         # PDFs, arxiv papers
-│   ├── transcripts/    # Meeting notes, interviews
-│   └── assets/         # each assets/<slug> contains Images, diagrams referenced by sources, parsed .md file related to the slug
+│   ├── articles/       # Web articles, clippings (<slug>.md)
+│   ├── papers/         # Research papers, arXiv, PDFs (<slug>.md — web_extract returns markdown directly)
+│   └── transcripts/    # Meeting notes, interviews, pasted text
 ├── entities/           # Layer 2: Entity pages (people, orgs, products, models)
 ├── concepts/           # Layer 2: Concept/topic pages
 ├── comparisons/        # Layer 2: Side-by-side analyses
@@ -130,7 +129,7 @@ Adapt to the user's domain. The schema constrains agent behavior and ensures con
   updated: YYYY-MM-DD
   type: entity | concept | comparison | query | summary
   tags: [from taxonomy below]
-  sources: [raw/papers/source-name.pdf]
+  sources: [raw/papers/source-name.md]
   # Optinal for arxiv papers:
   authors: [Name1, Name2]
   # Optional quality signals:
@@ -278,19 +277,34 @@ When the user provides a source (URL, file, paste), integrate it into the wiki:
 
 ① **Capture the raw source:**
 
-- Upon getting user `query`:
-  - **Fetch** — use `fetch_arxiv(query)` tool to get `pdf_path` - where the raw pdf is saved (default to `raw/papers/`)
-  - **Parse** — use `parse_pdf_docling(pdf_path)` - All outputs  go under `raw/assets/<slug>/`:
-    - `raw/assets/<slug>/images/`: images (if any)
-    - `raw/assets/<slug>/tables/`: tables (if any)
-    - `raw/assets/<slug>/<slug>.md`: Markdown version of pdf
+**Step 1 — determine the ingest mode.** Check for an explicit user preference in the current prompt first:
+- User says "quality", "docling", "careful parsing", "full PDF" → use **Option A**
+- User says "fast", "quick", "just the web version" → use **Option B**
+- No explicit instruction → call `get_ingest_mode()` which reads `ingest.mode` from `~/.paper2wiki/config.yaml` (default: `"fast"`)
 
-- **Read raw text** — `read_file` on `markdown_path`
-- **Add raw frontmatter** (`source_url`, `ingested`, `sha256` of the body).
-  On re-ingest of the same URL: recompute the sha256, compare to the stored value — skip if identical, flag drift and update if different. This is cheap enough to
-  do on every re-ingest and catches silent source changes.
+**Option A — Quality (fetch_arxiv + parse_pdf_docling):**
+Best structural fidelity for research papers. Slower (~30–60s). Use for arXiv papers and PDFs where section structure matters.
 
-**IMPORTANT**: Check the wiki and confirm with user if the source has been partially ingested and skip unnecessary steps e.g if you find the paper and its artifacts in raw/ then you may skip fetch and parse steps.
+- Call `fetch_arxiv(query)` with the arXiv ID, URL, or title → returns `pdf_path`, `title`, `metadata`
+- Call `parse_pdf_docling(pdf_path)` → returns clean markdown with preserved headings, tables, equations
+- Derive a slug from the title
+- Save content to `raw/papers/<slug>.md`
+
+**Option B — Fast (web_extract):**
+Good enough for articles and paper previews. Faster (~3–10s). Providers (especially Firecrawl) handle PDFs server-side but with lower structural fidelity than Docling.
+
+- Call `web_extract([url])` → returns `ExtractResult` with `.content` (markdown), `.title`, `.url`
+- Derive a slug from the title
+- Articles → save to `raw/articles/<slug>.md`
+- Papers/PDFs → save to `raw/papers/<slug>.md`
+
+**Pasted text (either mode):**
+- Save directly to `raw/articles/<slug>.md` (or `raw/papers/` if it's a paper excerpt)
+- Derive a slug from the first heading or first line
+
+**After saving:** prepend the raw frontmatter block (see `### raw/ Frontmatter` in the SCHEMA.md template above).
+
+**IMPORTANT**: Check the wiki before extracting. If `raw/papers/<slug>.md` or `raw/articles/<slug>.md` already exists, compare its sha256 against a fresh fetch — skip extraction entirely if content is unchanged.
 
 ② **Discuss takeaways** with the user — what's interesting, what matters for
    the domain. (Skip this in automated/cron contexts — proceed directly.)

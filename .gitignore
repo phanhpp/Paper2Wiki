@@ -52,6 +52,7 @@ project_overview.md
 prompt.yaml
 src/tools/trace_offloads/
 *.yaml
+!config.example.yaml
 *.json
 marp-slides/
 memories/agents_md_template.md
@@ -60,5 +61,11 @@ requirements.txt
 # user profile
 USER.md
 
+# private notes
+notes.md
+
 # persistent
 .sessions/
+
+# web tools reference
+web_tools_reference/
