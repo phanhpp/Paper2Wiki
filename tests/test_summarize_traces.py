@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from src.tools.fetch_traces import TraceReport
-from src.tools.summarize_traces import _filter_traces, _load_traces, _summarize_traces_async
+from src.tools.observability_eval_tools.fetch_traces import TraceReport
+from src.tools.observability_eval_tools.summarize_traces import _filter_traces, _load_traces, _summarize_traces_async
 
 
 @pytest.mark.unit

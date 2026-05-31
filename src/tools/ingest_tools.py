@@ -1,17 +1,23 @@
-from src.tools.docling_parser import parse_pdf_docling
-from src.tools.arxiv_tool import fetch_arxiv
-from src.tools.wiki_integrity_check import quick_wiki_integrity_check
-from src.tools.fetch_traces import run_trace_report_async
-from src.tools.summarize_traces import summarize_traces_async
-from src.tools.anomaly_detection import detect_anomalies_async, compute_baselines_async
-# Re-export parser-backed tools so callers import only from this module
-all_tools = [
-    fetch_arxiv,
-    parse_pdf_docling,
-    quick_wiki_integrity_check,
-    run_trace_report_async,
-    summarize_traces_async,
-    detect_anomalies_async,
-    compute_baselines_async,
-]
+from langchain_core.tools import tool
 
+from src.tools.arxiv_tool import fetch_arxiv  # noqa: F401 — re-exported
+from src.tools.docling_parser import parse_pdf_docling  # noqa: F401 — re-exported
+from src.tools.web_tools.registry import load_config
+
+
+@tool()
+def get_ingest_mode() -> str:
+    """
+    Return the configured ingest mode for the wiki pipeline.
+
+    Reads ingest.mode from ~/.paper2wiki/config.yaml (or PAPER2WIKI_CONFIG path).
+    Returns "quality" or "fast". Defaults to "fast" when unset or invalid.
+
+    quality = fetch_arxiv + parse_pdf_docling  (slow, best structural fidelity)
+    fast    = web_extract via web tools         (faster, lower fidelity for PDFs)
+
+    Explicit user instructions in the prompt always override this value.
+    """
+    config = load_config()
+    mode = config.get("ingest", {}).get("mode", "fast").strip().lower()
+    return mode if mode in ("quality", "fast") else "fast"

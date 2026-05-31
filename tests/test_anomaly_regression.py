@@ -40,7 +40,7 @@ import pytest
 import anthropic
 from langsmith import Client, testing as t, wrappers
 
-from src.tools.evaluation_tools import build_target_function
+from src.tools.observability_eval_tools.evaluation_tools import build_target_function
 
 _JUDGE_MODEL = "claude-haiku-4-5-20251001"
 

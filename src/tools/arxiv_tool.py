@@ -1,5 +1,6 @@
 import json
 import re
+import time
 from difflib import SequenceMatcher
 from pathlib import Path
 import arxiv
@@ -86,7 +87,20 @@ def fetch_arxiv(query: str) -> dict:
     RAW_PAPERS_DIR.mkdir(parents=True, exist_ok=True)
     slug = re.sub(r"[^a-z0-9]+", "_", paper.title.lower()).strip("_")
     pdf_path = str(RAW_PAPERS_DIR / f"{slug}.pdf")
-    paper.download_pdf(filename=pdf_path)
+
+    # Retry PDF download — arxiv occasionally returns transient HTTP errors
+    _last_exc: Exception | None = None
+    for attempt in range(3):
+        try:
+            paper.download_pdf(filename=pdf_path)
+            _last_exc = None
+            break
+        except Exception as exc:
+            _last_exc = exc
+            if attempt < 2:
+                time.sleep(3 * (attempt + 1))
+    if _last_exc is not None:
+        raise _last_exc
 
     out = {
         "title": paper.title,

@@ -1,0 +1,30 @@
+# Paper2Wiki web tools configuration
+# Place at: ~/.paper2wiki/config.yaml
+# Or set PAPER2WIKI_CONFIG=/path/to/config.yaml
+
+web:
+  # Shared default provider — used when no per-capability override is set.
+  # Options: firecrawl, tavily, exa
+  # If omitted, priority walk picks the first provider with valid credentials.
+  backend: firecrawl
+
+  # Per-capability overrides — use different providers for search vs extract.
+  # Uncomment to override the shared backend for a specific capability.
+  # search_backend: tavily
+  # extract_backend: firecrawl
+
+  # LLM summarizer settings
+  # Model used to compress large pages into ~5k char markdown summaries.
+  summarizer_model: claude-haiku-4-5-20251001
+
+  # Pages shorter than this (in chars) skip LLM summarization.
+  # Raw content is returned as-is. Default: 5000
+  min_length_for_summary: 5000
+
+ingest:
+  # Parsing strategy for research papers and PDFs.
+  # "quality" = fetch_arxiv + parse_pdf_docling  (slower, best structural fidelity for papers)
+  # "fast"    = web_extract via web tools         (faster, good enough for articles/previews)
+  # Default: fast
+  # Note: explicit user instructions in the prompt override this setting.
+  mode: fast

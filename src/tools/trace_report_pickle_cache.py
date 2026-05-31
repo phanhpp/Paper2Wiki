@@ -15,7 +15,7 @@ from typing import Any
 
 from langsmith import Client
 
-from src.tools.fetch_traces import TRACE_OFFLOAD_DIR, TraceReport, _build_trace_report_async
+from src.tools.observability_eval_tools.fetch_traces import TRACE_OFFLOAD_DIR, TraceReport, _build_trace_report_async
 
 
 def save_runs(runs: list[Any], cache_path: Path) -> None:

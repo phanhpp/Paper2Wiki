@@ -15,9 +15,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4 # Checks out repo code onto the runner
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v5 # Installs uv and puts it on PATH.
         with:
           enable-cache: true
           python-version: "3.11"
@@ -52,4 +52,4 @@ jobs:
       - run: uv sync --frozen
 
       - name: Run regression suite
-        run: uv run pytest -m "langsmith and not slow" -q
+        run: uv run pytest -m "langsmith and not slow and not integration" -q

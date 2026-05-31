@@ -29,7 +29,7 @@ import uuid
 
 import pytest
 
-from src.tools.fetch_traces import (
+from src.tools.observability_eval_tools.fetch_traces import (
     _MAX_TRACE_CHARS,
     _TOOL_CONTENT_TRUNCATE_THRESHOLD,
     _VERBOSE_TOOLS,
@@ -391,7 +391,7 @@ def test_model_validator_rejects_both_set() -> None:
 # The real offset/limit slicing logic still runs — only the LLM call is faked.
 # ---------------------------------------------------------------------------
 
-from src.tools.summarize_traces import TraceSummaryList, TraceSummary, _summarize_traces_async
+from src.tools.observability_eval_tools.summarize_traces import TraceSummaryList, TraceSummary, _summarize_traces_async
 
 
 def _fake_trace_summary() -> TraceSummary:

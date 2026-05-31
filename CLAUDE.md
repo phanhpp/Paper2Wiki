@@ -104,6 +104,10 @@ Rule: unit tests are not useless just because they mock — they test your logic
 - `ANTHROPIC_API_KEY` — needed by the LLM judge in `test_anomaly_regression`
 - `LANGSMITH_TEST_CACHE` — path to cassette dir for caching LLM calls; missing `vcrpy` package = `ImportError`
 
+**Known CI constraints:**
+- `wiki/` is not committed — `test_existing_wiki_pages_quality` skips gracefully when pages are absent (passes in CI, runs fully locally)
+- `test_fetch_arxiv_downloads_paper` hits the real arXiv network — marked `integration`, excluded from regression job to avoid 429 rate limits
+
 **When adding a new tool**, add both:
 1. A unit test with mocked I/O covering the main logic branches
 2. A `@pytest.mark.integration` or `@pytest.mark.langsmith` test that calls the real thing at least once
@@ -115,8 +119,38 @@ Rule: unit tests are not useless just because they mock — they test your logic
 ## Todos
 
 - Integrate anomaly_detection and create_eval_dataset to Trace_analyzer skill
-- use Web extract for llm-wiki, docling too slow
 - Capacity limit for /memories/
 - Wrap agent into Cli
 - Consolidation agent + cron
 - RL
+
+## Next Steps — CI Restructure (blocked on web extraction tool)
+
+**Step 1 (current):** Build web extraction tool to replace `fetch_arxiv` + `parse_pdf_docling`.
+Input: URL. Output: parsed markdown. No PDF download, no arXiv API dependency.
+
+**Step 2:** Once web extraction lands, restructure CI:
+
+```
+Every PR — unit tests only (pytest -m unit):
+    lint logic, evaluator fns, is_failure, tool logic
+    ~10s, no secrets, no network
+
+Nightly — real agent (GitHub Actions schedule):
+    fetch traces (last 24h)
+    compute_baselines_async        ← update rolling baseline from fresh traffic
+    detect_anomalies_async         ← compare current traces against baseline
+    run_evaluate (per dataset)     ← regression check on known failure datasets
+    full URL ingest (1 paper, web extraction)
+    query flow (read-only, 1 LLM call)
+    marp creation (1 LLM call)
+```
+
+The current regression job (langsmith and not slow and not integration) runs anomaly
+regression on every PR — move it to nightly. The PR gate should be unit tests only.
+
+The meaningful part of this setup is not the PR gate but the closed loop:
+    production traces → trace-analyzer → anomaly datasets → nightly regression
+    → catch regressions → HITL + skill patch → nightly confirms fix holds
+
+The PR gate protects logic regressions. The nightly loop catches agent failures.
