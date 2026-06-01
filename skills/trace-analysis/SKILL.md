@@ -124,15 +124,88 @@ Approve changes? (HITL required before writing)
 
 ### 4. Push to Datasets
 
-Call `create_datasets_from_anomaly_report(anomaly_report)` to push the failing spans to LangSmith datasets.
+Call `create_datasets_from_anomaly_report(anomaly_report, eval_cases=True)` to push failing spans to LangSmith datasets and generate PR gate candidates.
 
-- Each anomaly cluster becomes one dataset, scoped by flow + run_type + run_name
+The tool returns:
+```json
+{
+  "datasets": {"<dataset_name>": {"new": N, "total": N}},
+  "suggested_cases": [
+    {
+      "id": "regression_fetch_arxiv_a3f92c1",
+      "type": "regression",
+      "category": "retrieval",
+      "tool": "fetch_arxiv",
+      "inputs": {"query": "1706.03762"},
+      "_review": "fill in expect_keys or expect_error after fix is merged"
+    }
+  ]
+}
+```
+
+- Each anomaly cluster becomes one LangSmith dataset, scoped by flow + run_type + run_name
 - Idempotent — already-pushed run_ids are skipped automatically
-- Log the returned dict: dataset name → `{"new": N, "total": N}`
+- `suggested_cases` contains candidates for `run_type == "tool"` + `hard_error` only — tool crashes are deterministic: fix it, prove it stays fixed. 
 
-These datasets are the input for the nightly CI evaluation job (`run_evaluate`). No further action needed here — the nightly job picks them up automatically.
+#### `eval/cases.json` field schema
 
-Skip this step if there are no anomalies in the report (e.g. pure skill_deviation findings with no failed spans).
+Each case in `eval/cases.json` has these fields:
+
+| Field | Required | Description |
+|---|---|---|
+| `id` | ✅ | Unique snake_case string. Convention: `regression_<tool>_<short_hash>` for auto-generated cases |
+| `type` | ✅ | `"regression"` — blocks merge if it drops below threshold. `"capability"` — tracked only, never gate-blocking |
+| `category` | ✅ | Groups cases for scoring: `"retrieval"`, `"health"`, `"boundary"` |
+| `tool` | ✅ | Exact tool name as registered (matches `t.name` in `all_tools`) |
+| `inputs` | ✅ | Dict passed to `tool.ainvoke(inputs)` — must be JSON-serializable |
+| `expect_keys` | one of | List of strings that must appear in the JSON-serialized output. Use when the tool should succeed and return known fields |
+| `expect_error` | one of | `true` — test passes if the tool raises any exception. Use for invalid inputs that should always error gracefully |
+| `expect_error_contains` | one of | String that must appear in the exception message (case-insensitive). Use for boundary/SSRF checks |
+| `expect_empty` | one of | `true` — test passes if the result is falsy/empty. Use for empty-input edge cases |
+| `_review` | ❌ | Human note — strip before merging |
+
+At least one `expect_*` field is required for `run_gate.py` to assert anything meaningful. A case with no `expect_*` only checks the tool doesn't crash — valid but weak.
+
+#### Completing auto-generated cases (HITL)
+
+Auto-generated cases have `_review` set and no `expect_*` field. Before presenting to the user, **use the anomaly signal and tool name to suggest the missing assertion:**
+
+- Read `span.signals` for the error message. If it contains an HTTP error, invalid ID, malformed input → the input was invalid → suggest `"expect_error": true`
+- If the error looks like a bug on valid input (connection error, parsing crash, unexpected None) → suggest `"expect_keys": [<known output fields for this tool>]` — check the tool's return type or other passing cases in `eval/cases.json` for reference
+- Strip `_review` from the final case before writing
+
+Known output fields per tool (for `expect_keys` suggestions):
+
+| Tool | Typical output keys |
+|---|---|
+| `fetch_arxiv` | `title`, `pdf_path`, `metadata` |
+| `parse_pdf_docling` | `content`, `page_count` |
+| `web_search` | `title`, `url` |
+| `web_extract` | `content`, `url` |
+| `quick_wiki_integrity_check` | `pages_checked` |
+
+**HITL presentation format** — present one case at a time if multiple, or all together if ≤3:
+
+```
+## Suggested eval/cases.json entries (N cases from tool hard errors)
+
+For each case, I've inferred the missing assertion from the error signal:
+
+1. `regression_fetch_arxiv_a3f92c1`
+   Tool: fetch_arxiv | Inputs: {"query": "INVALID999"}
+   Error signal: "No paper found for ID INVALID999"
+   → Input looks invalid — suggesting `expect_error: true`
+
+   Final case:
+   {"id": "regression_fetch_arxiv_a3f92c1", "type": "regression", "category": "retrieval",
+    "tool": "fetch_arxiv", "inputs": {"query": "INVALID999"}, "expect_error": true}
+
+Approve writing these to eval/cases.json? (edit any case before confirming)
+```
+
+After approval, read `eval/cases.json`, append approved cases (with `_review` stripped), and write back. HITL fires automatically at `write_file`.
+
+Skip this step entirely if there are no anomalies in the report (pure skill_deviation findings with no failed spans).
 
 ### 5. Commit, PR & Log
 
