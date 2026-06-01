@@ -17,8 +17,16 @@ from typing import Any
 
 from langsmith import Client
 
-from src.tools.observability_eval_tools.anomaly_detection import AnomalyReport, FailedSpan
+from src.tools.observability_eval_tools.anomaly_detection import AnomalyReport, AnomalySignal, FailedSpan
 from langchain_core.tools import tool
+
+_TOOL_EVAL_CATEGORY: dict[str, str] = {
+    "fetch_arxiv": "retrieval",
+    "parse_pdf_docling": "retrieval",
+    "web_search": "retrieval",
+    "web_extract": "retrieval",
+    "quick_wiki_integrity_check": "health",
+}
 
 _SCOPE_BY_RUN_TYPE: dict[str, str] = {
     "tool":  "tool",
@@ -95,36 +103,64 @@ def _normalize_example_inputs(raw_inputs: dict[str, Any]) -> dict[str, Any]:
     return raw_inputs
 
 
+def _generate_PR_cases(report: AnomalyReport) -> list[dict[str, Any]]:
+    """Generate candidate eval/cases.json entries for tool hard errors only.
+
+    Only hard_error spans with run_type == "tool" produce cases — these are
+    deterministic failures: fix the crash, add a regression case, it must never
+    crash again on those inputs.
+
+    Latency/token/step spikes are performance anomalies and go to LangSmith
+    datasets only — they cannot be reproduced deterministically in run_gate.py.
+    """
+    cases: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    for anomaly in report.anomalies:
+        for span in anomaly.failed_spans:
+            if span.run_type != "tool":
+                continue
+            if "hard_error" not in span.errors:
+                continue
+            if span.id in seen_ids:
+                continue
+            seen_ids.add(span.id)
+
+            cases.append({
+                "id": f"regression_{span.run_name}_{span.id[:8]}",
+                "type": "regression",
+                "category": _TOOL_EVAL_CATEGORY.get(span.run_name, "boundary"),
+                "tool": span.run_name,
+                "inputs": _normalize_example_inputs(span.inputs),
+                # No expect_* set — reviewer must fill in after fixing the crash:
+                # - valid input that crashed → add expect_keys once tool works
+                # - invalid input → add expect_error: true (graceful handling)
+                "_review": "fill in expect_keys or expect_error after fix is merged",
+            })
+
+    return cases
+
+
 @tool()
 def create_datasets_from_anomaly_report(
     report: AnomalyReport,
-    *,
-    client: Client | None = None,
-) -> dict[str, dict[str, int]]:
+    eval_cases: bool = True,
+) -> dict[str, Any]:
     """Push anomalies to LangSmith datasets, scoped by run_type.
-
-    Scoping:
-    - known project tools → ``{flow}_{tool_name}``
-    - generic ``model``/``tools`` wrapper spans → ``{context_name}_{error_kind}``
-      (for example ``TodoListMiddleware_after_model_hard_error``)
-    - other flowless spans → ``{run_name}_{error_kind}``
 
     Appends to existing datasets and skips examples whose run_id has already
     been pushed (idempotent — safe to call repeatedly on the same report).
 
-    Anomaly categories and detailed signal strings are written into example
-    metadata. Baseline thresholds are not copied; the report is already a
-    snapshot of the comparison that triggered each anomaly.
-
     Args:
         report: From ``detect_anomalies_async()``.
-        client: Optional pre-constructed LangSmith Client. Defaults to a new
-                Client() so the caller can inject a mock in tests.
+        eval_cases: If True, also generate candidate ``eval/cases.json`` entries
+            for tool-level anomalies. Returned under ``suggested_cases`` — the
+            skill writes them to ``eval/cases.json`` after HITL approval.
 
     Returns:
-        Dict keyed by dataset name, each value ``{"new": int, "total": int}``.
+        ``{"datasets": {name: {"new": int, "total": int}}, "suggested_cases": [...]}``
     """
-    ls = client or Client()
+    ls = Client()
 
     # Group by dataset name so we can batch-create examples per dataset.
     groups_by_dataset: dict[str, list[tuple[str, FailedSpan]]] = defaultdict(list)
@@ -186,4 +222,7 @@ def create_datasets_from_anomaly_report(
             "total": len(existing_run_ids) + len(new_examples),
         }
 
-    return created
+    result: dict[str, Any] = {"datasets": created}
+    if eval_cases:
+        result["suggested_cases"] = _generate_PR_cases(report)
+    return result
