@@ -169,31 +169,38 @@ llm_wiki/
 └── marp-slides/      # Presentation outputs
 ```
 
-### Tests
+### Tests & CI
 
-CI runs two jobs on every PR and push to `main`:
+CI uses a two-layer eval strategy with a closed feedback loop from production:
 
-| Job | Command | Needs secrets |
-|---|---|---|
-| **Unit** | `pytest -m "not integration and not slow and not langsmith"` | No |
-| **Regression** | `pytest -m "langsmith and not slow"` | `LANGSMITH_API_KEY`, `ANTHROPIC_API_KEY` |
+```
+Every PR (no secrets, ~30s)
+  Unit tests       — mocked I/O, deterministic logic
+  Eval gate        — calls tools directly, asserts on real outputs
 
-The regression job is the CI gate — it replays known-failing spans (tool, llm, or chain) from LangSmith anomaly datasets and hard-gates on `hard_error` examples only. `latency_spike`, `token_blowout`, and `step_count_spike` anomalies are tracked offline via `evaluate()`, not here. See `tests/test_regression.py` and `tests/test_anomaly_regression.py` for details.
+Weekly (LangSmith secrets)
+  Anomaly regression — replays production failures from LangSmith datasets
+```
+
+**PR gate (`eval/run_gate.py`)** — deterministic tool-level checks versioned in `eval/cases.json`. Cases come in two types:
+- `regression` — must hold 100%; any drop blocks merge (SSRF blocked, arXiv ID lookup, wiki integrity)
+- `capability` — tracked but not gate-blocking; promoted to regression once stable
+
+**Closed loop:** the `trace-analysis` skill fetches production traces weekly → runs anomaly detection → auto-generates candidate `cases.json` entries for tool hard errors → presents them for HITL review → appended in the same fix PR. Failures become regression tests automatically.
+
+**Weekly job** — replays known-failing spans from LangSmith anomaly datasets using `aevaluate()` with VCR cassette caching. Gates on `hard_error` only; `latency_spike`, `token_blowout`, and `step_count_spike` anomalies are tracked as experiment metrics.
 
 ```bash
-# unit (no secrets)
+# PR gate (no secrets needed)
+uv run python eval/run_gate.py
+
+# Unit tests
 uv run pytest -m "not integration and not slow and not langsmith" -q
 
-# regression gate
+# Weekly regression (requires LangSmith + Anthropic keys)
 LANGSMITH_TEST_SUITE="paper2wiki-regression" \
 LANGSMITH_TEST_CACHE=tests/cassettes \
 uv run pytest -m "langsmith and not slow" -q
-```
-
-Fixture-backed trace tests use `tests/fixtures/runs.json` when present and skip when missing. Generate locally with:
-
-```bash
-uv run --env-file .env python -m tests.save_fixtures
 ```
 
 ### Wiki Integrity (Linting)
