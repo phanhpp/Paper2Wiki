@@ -788,7 +788,7 @@ class TestWebSearch:
         ]
         monkeypatch.setattr(wt.registry, "get_search_provider", lambda: mock_provider)
 
-        results = wt.web_search("test", limit=5)
+        results = wt.web_search.invoke({"query": "test", "limit": 5})
 
         mock_provider.search.assert_called_once_with("test", 5)
         assert len(results) == 1
@@ -802,8 +802,8 @@ class TestWebSearch:
         mock_provider.search.return_value = []
         monkeypatch.setattr(wt.registry, "get_search_provider", lambda: mock_provider)
 
-        wt.web_search("q", limit=0)
-        wt.web_search("q", limit=999)
+        wt.web_search.invoke({"query": "q", "limit": 0})
+        wt.web_search.invoke({"query": "q", "limit": 999})
         calls = mock_provider.search.call_args_list
         assert calls[0].args[1] == 1    # clamped up from 0
         assert calls[1].args[1] == 100  # clamped down from 999
@@ -818,7 +818,7 @@ class TestWebSearch:
         monkeypatch.setattr(wt.registry, "list_available", lambda: [])
 
         with pytest.raises(RuntimeError, match="No search provider"):
-            wt.web_search("test")
+            wt.web_search.invoke({"query": "test"})
 
 
 class TestWebExtract:
@@ -826,7 +826,7 @@ class TestWebExtract:
     async def test_empty_url_list_returns_empty(self) -> None:
         from src.tools.web_tools import web_extract
 
-        assert await web_extract([]) == []
+        assert await web_extract.ainvoke({"urls": []}) == []
 
     @pytest.mark.unit
     async def test_returns_extract_results_from_provider(
@@ -840,7 +840,7 @@ class TestWebExtract:
         ])
         monkeypatch.setattr(wt.registry, "get_extract_provider", lambda: mock_provider)
 
-        results = await wt.web_extract(["https://example.com"], use_summarizer=False)
+        results = await wt.web_extract.ainvoke({"urls": ["https://example.com"], "use_summarizer": False})
 
         assert len(results) == 1
         assert results[0].content == "content here"
@@ -855,8 +855,8 @@ class TestWebExtract:
         mock_provider.extract = AsyncMock(return_value=[])
         monkeypatch.setattr(wt.registry, "get_extract_provider", lambda: mock_provider)
 
-        results = await wt.web_extract(
-            ["http://localhost/secret"], use_summarizer=False
+        results = await wt.web_extract.ainvoke(
+            {"urls": ["http://localhost/secret"], "use_summarizer": False}
         )
 
         assert len(results) == 1
@@ -875,9 +875,8 @@ class TestWebExtract:
         ])
         monkeypatch.setattr(wt.registry, "get_extract_provider", lambda: mock_provider)
 
-        results = await wt.web_extract(
-            ["https://good.com", "http://192.168.0.1/evil"],
-            use_summarizer=False,
+        results = await wt.web_extract.ainvoke(
+            {"urls": ["https://good.com", "http://192.168.0.1/evil"], "use_summarizer": False}
         )
 
         assert len(results) == 2
@@ -898,7 +897,7 @@ class TestWebExtract:
         monkeypatch.setattr(wt.registry, "list_available", lambda: [])
 
         with pytest.raises(RuntimeError, match="No extract provider"):
-            await wt.web_extract(["https://example.com"])
+            await wt.web_extract.ainvoke({"urls": ["https://example.com"]})
 
     @pytest.mark.unit
     async def test_summarizer_runs_and_stores_raw_content(
@@ -912,10 +911,10 @@ class TestWebExtract:
             ExtractResult(url="https://example.com", title="T", content=long_content)
         ])
         monkeypatch.setattr(wt.registry, "get_extract_provider", lambda: mock_provider)
-        monkeypatch.setattr(wt, "summarize", AsyncMock(return_value="summarized"))
+        monkeypatch.setattr("src.tools.web_tools.tools.summarize", AsyncMock(return_value="summarized"))
 
-        results = await wt.web_extract(
-            ["https://example.com"], use_summarizer=True, min_length=100
+        results = await wt.web_extract.ainvoke(
+            {"urls": ["https://example.com"], "use_summarizer": True, "min_length": 100}
         )
 
         assert results[0].content == "summarized"
@@ -934,9 +933,9 @@ class TestWebExtract:
         monkeypatch.setattr(wt.registry, "get_extract_provider", lambda: mock_provider)
 
         mock_summarize = AsyncMock(return_value="should not be called")
-        monkeypatch.setattr(wt, "summarize", mock_summarize)
+        monkeypatch.setattr("src.tools.web_tools.tools.summarize", mock_summarize)
 
-        results = await wt.web_extract(["https://example.com"], use_summarizer=False)
+        results = await wt.web_extract.ainvoke({"urls": ["https://example.com"], "use_summarizer": False})
 
         mock_summarize.assert_not_called()
         assert results[0].content == "raw content"
@@ -957,9 +956,9 @@ class TestWebExtract:
         monkeypatch.setattr(wt.registry, "get_extract_provider", lambda: mock_provider)
 
         mock_summarize = AsyncMock(return_value="should not be called")
-        monkeypatch.setattr(wt, "summarize", mock_summarize)
+        monkeypatch.setattr("src.tools.web_tools.tools.summarize", mock_summarize)
 
-        results = await wt.web_extract(["https://example.com"], use_summarizer=True)
+        results = await wt.web_extract.ainvoke({"urls": ["https://example.com"], "use_summarizer": True})
 
         mock_summarize.assert_not_called()
         assert results[0].error == "provider failed"

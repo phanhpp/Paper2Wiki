@@ -278,7 +278,7 @@ async def test_run_trace_report_async_uses_langsmith_filters_and_metadata(
         async def read_run(self, run_id: str) -> SimpleNamespace:
             return next(run for run in runs if run.id == run_id)
 
-    monkeypatch.setattr("src.tools.fetch_traces.AsyncClient", _FakeAsyncClient)
+    monkeypatch.setattr("src.tools.observability_eval_tools.fetch_traces.AsyncClient", _FakeAsyncClient)
 
     report = await _run_trace_report_async(
         project="paper2wiki-test",

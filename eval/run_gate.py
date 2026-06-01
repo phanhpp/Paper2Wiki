@@ -29,6 +29,10 @@ import sys
 import time
 from pathlib import Path
 
+# Add repo root to sys.path so `import src` works when the script is run directly
+# (pytest adds it automatically; plain `python eval/run_gate.py` does not).
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 # 1.00 = every regression case in that category must pass.
 # These are deterministic checks — there is no "sometimes passes."
 # If arXiv flakiness causes retrieval failures repeatedly, demote those

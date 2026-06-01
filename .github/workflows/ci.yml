@@ -16,29 +16,14 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write   # needed so eval-gate can post a PR comment
+  pull-requests: write   # needed so the eval gate can post a PR comment
 
 jobs:
-  unit:
-    name: Unit Tests
+  unit-and-eval:
+    name: Unit Tests & Eval Gate
     runs-on: ubuntu-latest
-    # Unit tests run on every trigger (PR, push to main, nightly).
-    # No secrets needed — all I/O is mocked.
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-          python-version: "3.11"
-      - run: uv sync --frozen
-      - run: uv run pytest -m "not integration and not slow and not langsmith" -q
-
-  eval-gate:
-    name: Eval Gate
-    runs-on: ubuntu-latest
-    needs: unit
-    # Skip on nightly schedule — eval-gate is a PR gate, not a nightly check.
-    if: github.event_name != 'schedule'
+    # Single job = one checkout + one uv sync. Unit tests run first;
+    # eval gate only runs on PRs/push (not nightly schedule).
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -47,18 +32,23 @@ jobs:
           python-version: "3.11"
       - run: uv sync --frozen
 
-      - name: Run deterministic eval gate
+      - name: Unit tests
+        run: uv run pytest -m "not integration and not slow and not langsmith" -q
+
+      - name: Eval gate
+        # Skip on nightly schedule — this is a PR gate, not a nightly check.
+        if: github.event_name != 'schedule'
         # Calls tools directly (no agent). Cases needing web provider API keys
         # are silently skipped when no key is set — see eval/run_gate.py.
         run: uv run python eval/run_gate.py
 
-      - name: Post results to PR
-        # Always post, even on failure — the comment shows what broke.
+      - name: Post eval results to PR
         if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
+            if (!fs.existsSync('eval/results.json')) return;
             const r = JSON.parse(fs.readFileSync('eval/results.json', 'utf8'));
             const emoji = r.gate_passed ? '🟢' : '🔴';
             const skippedNote = r.skipped > 0 ? `\n_(${r.skipped} case(s) skipped — no web provider key)_` : '';
@@ -86,7 +76,6 @@ jobs:
   nightly:
     name: Nightly (LangSmith regression)
     runs-on: ubuntu-latest
-    needs: unit
     # Only runs on schedule — not on PRs or push to main.
     # Fetches live traces, runs anomaly regression against LangSmith datasets.
     if: github.event_name == 'schedule'
