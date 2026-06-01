@@ -183,7 +183,7 @@ add it here first, then use it. This prevents tag sprawl.
 
 ### Hard Limits
 
-- Max **5 concepts** created — pick the most central ones only
+- Max **3 concepts** created — pick the most central ones only
 - For research paper, max **3 entities** for first author and organization (if any)
 
 ## Entity Pages
@@ -277,28 +277,25 @@ When the user provides a source (URL, file, paste), integrate it into the wiki:
 
 ① **Capture the raw source:**
 
-**Step 1 — determine the ingest mode.** Check for an explicit user preference in the current prompt first:
-- User says "quality", "docling", "careful parsing", "full PDF" → use **Option A**
-- User says "fast", "quick", "just the web version" → use **Option B**
-- No explicit instruction → call `get_ingest_mode()` which reads `ingest.mode` from `~/.paper2wiki/config.yaml` (default: `"fast"`)
+The ingest pipeline is set by config and cannot be changed via prompt. Check your available tools:
 
-**Option A — Quality (fetch_arxiv + parse_pdf_docling):**
-Best structural fidelity for research papers. Slower (~30–60s). Use for arXiv papers and PDFs where section structure matters.
-
+**If you have `fetch_arxiv` → quality mode:**
 - Call `fetch_arxiv(query)` with the arXiv ID, URL, or title → returns `pdf_path`, `title`, `metadata`
 - Call `parse_pdf_docling(pdf_path)` → returns clean markdown with preserved headings, tables, equations
+- Derive a slug from the title, save to `raw/papers/<slug>.md`
+
+**If you have `web_extract` → fast mode:**
+
+- If the user gave a direct URL → call `web_extract([url])` directly
+- If the user gave a title, arXiv ID, or partial info → call `web_search(query)` first to find the best URL, then call `web_extract([url])` on the result
+  - For arXiv papers prefer the HTML version (`https://arxiv.org/html/<id>`) over the abstract page — it returns full content
+  - Pick the most authoritative source (arXiv > project page > blog post)
+- Returns `ExtractResult` with `.content`, `.title`, `.url`
 - Derive a slug from the title
-- Save content to `raw/papers/<slug>.md`
+- Articles → `raw/articles/<slug>.md`, papers/PDFs → `raw/papers/<slug>.md`
 
-**Option B — Fast (web_extract):**
-Good enough for articles and paper previews. Faster (~3–10s). Providers (especially Firecrawl) handle PDFs server-side but with lower structural fidelity than Docling.
+**Pasted text:**
 
-- Call `web_extract([url])` → returns `ExtractResult` with `.content` (markdown), `.title`, `.url`
-- Derive a slug from the title
-- Articles → save to `raw/articles/<slug>.md`
-- Papers/PDFs → save to `raw/papers/<slug>.md`
-
-**Pasted text (either mode):**
 - Save directly to `raw/articles/<slug>.md` (or `raw/papers/` if it's a paper excerpt)
 - Derive a slug from the first heading or first line
 
@@ -307,7 +304,7 @@ Good enough for articles and paper previews. Faster (~3–10s). Providers (espec
 **IMPORTANT**: Check the wiki before extracting. If `raw/papers/<slug>.md` or `raw/articles/<slug>.md` already exists, compare its sha256 against a fresh fetch — skip extraction entirely if content is unchanged.
 
 ② **Discuss takeaways** with the user — what's interesting, what matters for
-   the domain. (Skip this in automated/cron contexts — proceed directly.)
+   the domain.
 
 ③ **Check what already exists** — search index.md and use `grep` to find existing pages for mentioned entities/concepts e.g. `grep(pattern="attention mechanism", path="/wiki/", glob="**/*.md")`
 
