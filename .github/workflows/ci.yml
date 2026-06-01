@@ -11,8 +11,9 @@ on:
       - 'config.example.yaml'
   push:
     branches: [main]
-  schedule:
-    - cron: "0 2 * * *"   # nightly at 02:00 UTC — runs the langsmith regression job
+  # schedule:
+  #   - cron: "0 2 * * 1"   # weekly on Monday at 02:00 UTC — uncomment when ready
+  workflow_dispatch:      # enables "Run workflow" button on GitHub Actions page
 
 permissions:
   contents: read
@@ -74,11 +75,11 @@ jobs:
             });
 
   nightly:
-    name: Nightly (LangSmith regression)
+    name: Weekly (LangSmith regression)
     runs-on: ubuntu-latest
     # Only runs on schedule — not on PRs or push to main.
     # Fetches live traces, runs anomaly regression against LangSmith datasets.
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     env:
       LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
