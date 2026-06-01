@@ -440,12 +440,9 @@ def build_target_function(dataset_name: str, client: Client | None = None) -> Ca
 @tool()
 async def run_evaluate(
     dataset_name: str,
-    evaluators: list[Callable] | None = None,
     *,
-    #summary_evaluators: list[Callable] | None = None,
     experiment_prefix: str | None = None,
     metadata_filter: dict | None = None,
-    client: Client | None = None,
 ):
     """Run an async LangSmith evaluation against a dataset.
 
@@ -460,31 +457,21 @@ async def run_evaluate(
 
     Args:
         dataset_name:       LangSmith dataset to evaluate against.
-        target:             Callable ``(inputs: dict) -> dict``.
-        evaluators:         List of evaluator functions from ``build_evaluators_for_signals``.
-        summary_evaluators: Optional experiment-level evaluators from ``build_pass_rate_evaluator``.
-                            Fires once after all runs complete.
         experiment_prefix:  Optional prefix for the experiment name in the LangSmith UI.
         metadata_filter:    If set, restricts examples by metadata (e.g. ``{"flow": "wiki-ingestion"}``).
-        client:             Optional pre-constructed LangSmith Client for test injection.
 
     Returns:
         ``ExperimentResults`` — call ``.url`` for the LangSmith UI link,
         ``.experiment_name`` to pass to ``apply_composite_scores`` later.
     """
-    ls = client or Client()
-    # For now middleware spans are skipped.
+    ls = Client()
     effective_filter = dict(metadata_filter or {})
     effective_filter.setdefault("context_name", None)
 
-    # check if dataset_name is valid
     if not ls.has_dataset(dataset_name=dataset_name):
         raise ValueError(f"Dataset {dataset_name} not found")
 
-    # if evaluators is not provided, build them from the dataset name
-    if evaluators is None:
-        evaluators = build_evaluators_for_errors(dataset_name, metadata_filter=effective_filter, client=ls)
-
+    evaluators = build_evaluators_for_errors(dataset_name, metadata_filter=effective_filter, client=ls)
     target = build_target_function(dataset_name, client=ls)
 
     data = (
@@ -497,7 +484,6 @@ async def run_evaluate(
         target,
         data=data,
         evaluators=evaluators,
-        #summary_evaluators=summary_evaluators or [],
         experiment_prefix=experiment_prefix,
         client=ls,
     )
