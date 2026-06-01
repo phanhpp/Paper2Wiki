@@ -1,0 +1,85 @@
+[
+  {
+    "id": "wiki_check_runs",
+    "type": "regression",
+    "category": "health",
+    "tool": "quick_wiki_integrity_check",
+    "inputs": {},
+    "expect_keys": ["wiki-check"],
+    "_note": "Tool returns a plain string starting with 'wiki-check:'. In CI, wiki/ is absent so returns 'wiki-check: OK' (no files = no errors)."
+  },
+  {
+    "id": "web_extract_empty_urls",
+    "type": "regression",
+    "category": "boundary",
+    "tool": "web_extract",
+    "inputs": {"urls": []},
+    "expect_empty": true,
+    "_note": "Empty URL list returns [] immediately before any provider call. No API key needed."
+  },
+  {
+    "id": "web_extract_localhost_blocked",
+    "type": "regression",
+    "category": "boundary",
+    "tool": "web_extract",
+    "inputs": {"urls": ["http://localhost/secret"]},
+    "expect_keys": ["blocked"],
+    "_note": "SSRF check runs before any provider call. Returns ExtractResult(error='Blocked: ...') — 'blocked' appears in JSON output. No API key needed."
+  },
+  {
+    "id": "web_extract_private_ip_blocked",
+    "type": "regression",
+    "category": "boundary",
+    "tool": "web_extract",
+    "inputs": {"urls": ["http://192.168.1.1"]},
+    "expect_keys": ["blocked"],
+    "_note": "Private IP range blocked by SSRF filter before any provider call. No API key needed."
+  },
+  {
+    "id": "fetch_arxiv_valid_id",
+    "type": "regression",
+    "category": "retrieval",
+    "tool": "fetch_arxiv",
+    "inputs": {"query": "1706.03762"},
+    "expect_keys": ["title", "pdf_path", "authors"],
+    "_note": "arXiv public API, no key needed. Hits network. ID path: exact match → downloads PDF."
+  },
+  {
+    "id": "fetch_arxiv_nonexistent_id",
+    "type": "regression",
+    "category": "retrieval",
+    "tool": "fetch_arxiv",
+    "inputs": {"query": "9999.99999"},
+    "expect_error": true,
+    "_note": "Valid ID format but nonexistent paper. arXiv returns 0 results → ValueError raised. No API key needed."
+  },
+  {
+    "id": "fetch_arxiv_by_title",
+    "type": "capability",
+    "category": "retrieval",
+    "tool": "fetch_arxiv",
+    "inputs": {"query": "attention is all you need"},
+    "expect_keys": ["title", "pdf_path"],
+    "_note": "Title search path. Result depends on arXiv ranking — capability (not regression) because top result may vary. No API key needed."
+  },
+  {
+    "id": "web_search_returns_results",
+    "type": "regression",
+    "category": "retrieval",
+    "tool": "web_search",
+    "inputs": {"query": "transformer architecture deep learning"},
+    "expect_keys": ["title", "url"],
+    "requires_web_provider": true,
+    "_note": "Needs at least one of FIRECRAWL_API_KEY, TAVILY_API_KEY, EXA_API_KEY. Skipped in CI if none set."
+  },
+  {
+    "id": "web_extract_arxiv_html",
+    "type": "capability",
+    "category": "retrieval",
+    "tool": "web_extract",
+    "inputs": {"urls": ["https://arxiv.org/html/1706.03762"], "use_summarizer": false},
+    "expect_keys": ["content", "url"],
+    "requires_web_provider": true,
+    "_note": "Capability — content quality varies by provider. use_summarizer=false avoids LLM cost. Skipped in CI if no provider key set."
+  }
+]

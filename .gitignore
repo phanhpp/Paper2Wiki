@@ -54,6 +54,9 @@ src/tools/trace_offloads/
 *.yaml
 !config.example.yaml
 *.json
+!eval/cases.json
+!eval/baseline.json
+!eval/judge_calibration.json
 marp-slides/
 memories/agents_md_template.md
 requirements.txt
@@ -72,3 +75,7 @@ web_tools_reference/
 
 # eval guide
 eval_guide/
+
+# context offload
+large_tool_results/
+test.md

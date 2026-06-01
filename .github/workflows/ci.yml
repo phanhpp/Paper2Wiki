@@ -2,35 +2,94 @@ name: CI
 
 on:
   pull_request:
+    # Only run when code or eval cases actually change — skip for README/doc-only edits.
+    paths:
+      - 'src/**'
+      - 'skills/**'
+      - 'eval/**'
+      - 'CLAUDE.md'
+      - 'config.example.yaml'
   push:
-    branches:
-      - main
+    branches: [main]
+  schedule:
+    - cron: "0 2 * * *"   # nightly at 02:00 UTC — runs the langsmith regression job
 
 permissions:
   contents: read
+  pull-requests: write   # needed so eval-gate can post a PR comment
 
 jobs:
   unit:
     name: Unit Tests
     runs-on: ubuntu-latest
-
+    # Unit tests run on every trigger (PR, push to main, nightly).
+    # No secrets needed — all I/O is mocked.
     steps:
-      - uses: actions/checkout@v4 # Checks out repo code onto the runner
-
-      - uses: astral-sh/setup-uv@v5 # Installs uv and puts it on PATH.
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
           python-version: "3.11"
-
       - run: uv sync --frozen
-
       - run: uv run pytest -m "not integration and not slow and not langsmith" -q
 
-  regression:
-    name: Regression (LangSmith)
+  eval-gate:
+    name: Eval Gate
     runs-on: ubuntu-latest
     needs: unit
+    # Skip on nightly schedule — eval-gate is a PR gate, not a nightly check.
+    if: github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.11"
+      - run: uv sync --frozen
 
+      - name: Run deterministic eval gate
+        # Calls tools directly (no agent). Cases needing web provider API keys
+        # are silently skipped when no key is set — see eval/run_gate.py.
+        run: uv run python eval/run_gate.py
+
+      - name: Post results to PR
+        # Always post, even on failure — the comment shows what broke.
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const r = JSON.parse(fs.readFileSync('eval/results.json', 'utf8'));
+            const emoji = r.gate_passed ? '🟢' : '🔴';
+            const skippedNote = r.skipped > 0 ? `\n_(${r.skipped} case(s) skipped — no web provider key)_` : '';
+            const lines = [
+              `## ${emoji} Eval Gate — ${r.passed}/${r.total} passed (${(r.overall*100).toFixed(0)}%)${skippedNote}`,
+              r.regression_detected ? '⚠️ **Regression detected vs baseline**' : '',
+              r.gate_failures.length
+                ? '### Gate failures\n' + r.gate_failures.map(f => `- ${f}`).join('\n')
+                : '',
+              r.case_failures.length
+                ? '### Case failures\n' + r.case_failures.map(f => `- \`${f}\``).join('\n')
+                : '',
+              Object.keys(r.capability_scores).length
+                ? '### Capability scores (tracked, not gate-blocking)\n' +
+                  Object.entries(r.capability_scores).map(([k,v]) => `- ${k}: ${(v*100).toFixed(0)}%`).join('\n')
+                : '',
+            ].filter(Boolean).join('\n');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: lines,
+            });
+
+  nightly:
+    name: Nightly (LangSmith regression)
+    runs-on: ubuntu-latest
+    needs: unit
+    # Only runs on schedule — not on PRs or push to main.
+    # Fetches live traces, runs anomaly regression against LangSmith datasets.
+    if: github.event_name == 'schedule'
     env:
       LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -40,16 +99,12 @@ jobs:
       LANGSMITH_TEST_CACHE: tests/cassettes
       LANGSMITH_EXPERIMENT_METADATA: >
         {"git_sha": "${{ github.sha }}", "branch": "${{ github.ref_name }}"}
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
           python-version: "3.11"
-
       - run: uv sync --frozen
-
-      - name: Run regression suite
+      - name: Run LangSmith anomaly regression
         run: uv run pytest -m "langsmith and not slow and not integration" -q
