@@ -105,7 +105,7 @@ def _normalize_example_inputs(raw_inputs: dict[str, Any]) -> dict[str, Any]:
 
 
 def _generate_PR_cases(report: AnomalyReport) -> list[dict[str, Any]]:
-    """Generate candidate eval/cases.json entries for tool hard errors only.
+    """Generate candidate eval/pr_gate_cases.json entries for tool hard errors only.
 
     Only hard_error spans with run_type == "tool" produce cases — these are
     deterministic failures: fix the crash, add a regression case, it must never
@@ -154,9 +154,9 @@ async def create_datasets_from_anomaly_report(
 
     Args:
         report: From ``detect_anomalies_async()``.
-        eval_cases: If True, also generate candidate ``eval/cases.json`` entries
+        eval_cases: If True, also generate candidate ``eval/pr_gate_cases.json`` entries
             for tool-level anomalies. Returned under ``suggested_cases`` — the
-            skill writes them to ``eval/cases.json`` after HITL approval.
+            skill writes them to ``eval/pr_gate_cases.json`` after HITL approval.
 
     Returns:
         ``{"datasets": {name: {"new": int, "total": int}}, "suggested_cases": [...]}``

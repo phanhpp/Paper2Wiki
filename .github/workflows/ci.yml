@@ -24,7 +24,7 @@ jobs:
     name: Unit Tests & Eval Gate
     runs-on: ubuntu-latest
     # Single job = one checkout + one uv sync. Unit tests run first;
-    # eval gate only runs on PRs/push (not nightly schedule).
+    # eval gate only runs on PRs/push (not weekly schedule).
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -37,7 +37,7 @@ jobs:
         run: uv run pytest -m "not integration and not slow and not langsmith" -q
 
       - name: Eval gate
-        # Skip on nightly schedule — this is a PR gate, not a nightly check.
+        # Skip on weekly schedule — this is a PR gate, not a weekly check.
         if: github.event_name != 'schedule'
         # Calls tools directly (no agent). Cases needing web provider API keys
         # are silently skipped when no key is set — see eval/run_gate.py.
@@ -74,7 +74,100 @@ jobs:
               body: lines,
             });
 
-  nightly:
+  detect-changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    # Skip on schedule — all eval jobs run unconditionally on schedule.
+    if: github.event_name != 'schedule'
+    outputs:
+      ingest: ${{ steps.filter.outputs.ingest_any_changed }}
+      query:  ${{ steps.filter.outputs.query_any_changed }}
+      marp:   ${{ steps.filter.outputs.marp_any_changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: tj-actions/changed-files@v46
+        id: filter
+        with:
+          files_yaml: |
+            ingest:
+              - skills/llm-wiki/**
+              - src/tools/arxiv_tool.py
+              - src/tools/docling_parser.py
+              - src/tools/wiki_integrity_check.py
+              - src/tools/web_tools/**
+              - src/tools/ingest_tools.py
+              - src/agents/agent.py
+              - eval/golden_datasets/ingest.json
+            query:
+              - skills/llm-wiki/**
+              - src/agents/agent.py
+              - eval/golden_datasets/query.json
+            marp:
+              - skills/marp-slide/**
+              - src/agents/daytona_agent.py
+              - eval/golden_datasets/marp.json
+
+  eval-ingest:
+    name: Eval — Ingest golden
+    needs: [detect-changes]
+    # always() lets this run even when detect-changes is skipped (schedule case).
+    if: always() && (needs.detect-changes.outputs.ingest == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    env:
+      LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      LANGSMITH_TRACING: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with: { enable-cache: true, python-version: "3.11" }
+      - run: uv sync --frozen
+      - name: Push ingest dataset
+        run: uv run python eval/push_golden_datasets.py --dataset ingest
+      - name: Run ingest eval
+        run: uv run --env-file .env python eval/run_weekly_eval.py --dataset ingest --no-gate
+
+  eval-query:
+    name: Eval — Query golden
+    needs: [detect-changes]
+    if: always() && (needs.detect-changes.outputs.query == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    env:
+      LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      LANGSMITH_TRACING: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with: { enable-cache: true, python-version: "3.11" }
+      - run: uv sync --frozen
+      - name: Push query dataset
+        run: uv run python eval/push_golden_datasets.py --dataset query
+      - name: Run query eval
+        run: uv run --env-file .env python eval/run_weekly_eval.py --dataset query --no-gate
+
+  eval-marp:
+    name: Eval — Marp golden
+    needs: [detect-changes]
+    if: always() && (needs.detect-changes.outputs.marp == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    env:
+      LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      DAYTONA_API_KEY: ${{ secrets.DAYTONA_API_KEY }}
+      LANGSMITH_TRACING: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with: { enable-cache: true, python-version: "3.11" }
+      - run: uv sync --frozen
+      - name: Push marp dataset
+        run: uv run python eval/push_golden_datasets.py --dataset marp
+      - name: Run marp eval
+        run: uv run --env-file .env python eval/run_weekly_eval.py --dataset marp --no-gate
+
+  weekly:
     name: Weekly (LangSmith regression)
     runs-on: ubuntu-latest
     # Only runs on schedule — not on PRs or push to main.
@@ -96,11 +189,12 @@ jobs:
           enable-cache: true
           python-version: "3.11"
       - run: uv sync --frozen
+
       - name: Update baselines and push anomalies to LangSmith
         # Fetches last 7 days of traces, updates memories/baselines.json,
         # detects anomalies, and pushes failing spans to LangSmith datasets.
         # Must run before pytest so test_anomaly_regression.py sees fresh examples.
-        run: uv run python eval/run_weekly.py
+        run: uv run python eval/run_weekly_baselines.py
 
       - name: Anomaly regression (pytest-langsmith)
         # Replays hard_error examples from the datasets populated above.

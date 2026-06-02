@@ -54,7 +54,7 @@ src/tools/trace_offloads/
 *.yaml
 !config.example.yaml
 *.json
-!eval/cases.json
+!eval/pr_gate_cases.json
 !eval/baseline.json
 !eval/judge_calibration.json
 marp-slides/

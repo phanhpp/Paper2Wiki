@@ -1,15 +1,15 @@
-"""Deterministic eval gate — reads eval/cases.json, calls each tool directly.
+"""Deterministic eval gate — reads eval/pr_gate_cases.json, calls each tool directly.
 
 This script bypasses the agent entirely. It imports tools from src/ and calls
 tool.ainvoke(inputs) directly, so it tests tool logic in isolation — not agent
 routing, not skill compliance.
 
-Two case types (set via "type" field in cases.json):
+Two case types (set via "type" field in pr_gate_cases.json):
   - "regression": - what the agent already does well - must hold 100% pass rate. Any drop blocks the merge.
   - "capability": - what the agent can do but not yet 100% - tracked in results.json but never gate-blocking. Promote to
     regression once the case holds 100% across 3+ consecutive runs.
 
-Each case supports one expect_* assertion (see cases.json for field schema).
+Each case supports one expect_* assertion (see pr_gate_cases.json for field schema).
 Cases with "requires_web_provider": true are silently skipped when no provider
 API key is configured — they run locally or in CI jobs that have secrets.
 
@@ -18,8 +18,8 @@ Run:
 
 Writes eval/results.json. Exits 1 if any regression threshold is breached.
 To update the baseline after a green run:
-    cp eval/results.json eval/baseline.json
-    git add eval/baseline.json && git commit -m "eval: update baseline"
+    cp eval/results.json eval/regression_baseline.json
+    git add eval/regression_baseline.json && git commit -m "eval: update baseline"
 """
 
 import asyncio
@@ -82,7 +82,7 @@ async def run_case(case: dict, tool_map: dict) -> dict:
 
     tool = tool_map.get(case["tool"])
     if tool is None:
-        # This should not happen — all tools in cases.json must be in _load_tool_map().
+        # This should not happen — all tools in pr_gate_cases.json must be in _load_tool_map().
         return {"id": case_id, "type": case_type, "passed": False,
                 "reason": f"tool {case['tool']!r} not found — add it to _load_tool_map()", "duration_ms": 0}
 
@@ -148,10 +148,10 @@ async def run_case(case: dict, tool_map: dict) -> dict:
 
 
 async def main():
-    cases   = json.loads(Path("eval/cases.json").read_text())
+    cases   = json.loads(Path("eval/pr_gate_cases.json").read_text())
     baseline = (
-        json.loads(Path("eval/baseline.json").read_text())
-        if Path("eval/baseline.json").exists()
+        json.loads(Path("eval/regression_baseline.json").read_text())
+        if Path("eval/regression_baseline.json").exists()
         else {}
     )
 
@@ -181,7 +181,7 @@ async def main():
     )
 
     # Regression detection: >5% drop vs baseline in any regression category.
-    # baseline.json keys are prefixed "regression_" so capability scores never
+    # regression_baseline.json keys are prefixed "regression_" so capability scores never
     # accidentally trigger a regression alert.
     regression_detected = any(
         reg_scores.get(cat, 1.0) < baseline.get(f"regression_{cat}", 0) - 0.05

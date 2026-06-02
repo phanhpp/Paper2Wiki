@@ -14,8 +14,8 @@ The weekly CI gate is pytest -m langsmith — it replays existing hard_error exa
 from LangSmith datasets that were already human-reviewed and approved.
 
 Run:
-    uv run --env-file .env python eval/run_weekly.py
-    uv run --env-file .env python eval/run_weekly.py --days 14 --limit 200
+    uv run --env-file .env python eval/run_weekly_baselines.py
+    uv run --env-file .env python eval/run_weekly_baselines.py --days 14 --limit 200
 """
 
 from __future__ import annotations
@@ -56,8 +56,9 @@ async def run(project: str, days: int, limit: int) -> int:
     # weekly keeps baselines from drifting as traffic patterns change.
     print("[weekly] Updating baselines...")
     baseline_result = await _baselines(report=report)
-    n_updated = len(baseline_result.get("by_name", {}))
-    print(f"[weekly] Baselines updated: {n_updated} run-name entries")
+    n_name = len(baseline_result.get("by_name", {}))
+    n_flow = len(baseline_result.get("by_flow", {}))
+    print(f"[weekly] Baselines updated: {n_name} run-name entries, {n_flow} flow entries")
 
     return 0
 
@@ -65,7 +66,7 @@ async def run(project: str, days: int, limit: int) -> int:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--project", default="paper2wiki", help="LangSmith project name")
-    p.add_argument("--days",    type=int, default=7,   help="Lookback window in days")
+    p.add_argument("--days",    type=int, default=30,  help="Lookback window in days")
     p.add_argument("--limit",   type=int, default=100, help="Max traces to fetch")
     return p.parse_args()
 

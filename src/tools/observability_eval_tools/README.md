@@ -23,7 +23,7 @@ create_eval_datasets.py
   create_datasets_from_anomaly_report()
         |
         ├──► LangSmith datasets  (one dataset per run_type/run_name/context)
-        └──► suggested eval/cases.json entries (HITL, written after approval)
+        └──► suggested eval/pr_gate_cases.json entries (HITL, written after approval)
         |
         v
 evaluation_tools.py
@@ -93,7 +93,7 @@ LangSmith API
 
 | Caller | Tools used | When |
 |---|---|---|
-| `eval/run_weekly.py` | `run_trace_report_async`, `compute_baselines_async` | Weekly CI — baseline refresh only |
+| `eval/run_weekly_baselines.py` | `run_trace_report_async`, `compute_baselines_async` | Weekly CI — baseline refresh only |
 | `pytest -m langsmith` | reads LangSmith datasets populated by HITL | Weekly CI — regression gate |
 | `trace-analysis` skill | all tools in order, with HITL between each step | On-demand (`"Analyze my traces"`) |
 | `eval/run_gate.py` | imports tools from `src/tools/` directly | Every PR — deterministic tool-level gate |
@@ -102,4 +102,4 @@ LangSmith API
 
 1. Add the tool name → flow label in `TOOL_FLOWS` (anomaly_detection.py).
 2. Add the tool name → eval category in `_TOOL_EVAL_CATEGORY` (create_eval_datasets.py).
-3. Add at least one case to `eval/cases.json` covering the happy path.
+3. Add at least one case to `eval/pr_gate_cases.json` covering the happy path.

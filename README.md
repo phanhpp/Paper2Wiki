@@ -136,8 +136,8 @@ Trigger with: *"Analyze my recent traces"* or *"What went wrong in the last few 
 1. **Fetch** — `run_trace_report_async` retrieves recent traces from LangSmith (pass `error=True` to scope to failures only).
 2. **Summarize** — `summarize_traces_async` batches traces into pages and condenses them in parallel into structured summaries.
 3. **Cluster & detect** — the agent groups findings by pattern (skill deviations, tool errors, HITL rejections), validates each against git history to skip already-fixed issues, then runs `detect_anomalies_async` to produce ground-truth anomaly signals (`hard_error`, `latency_spike`, `token_blowout`, `step_count_spike`). Presents a ranked report and **waits for your confirmation** before proceeding.
-4. **Push to datasets** — `create_datasets_from_anomaly_report` pushes failing spans to scoped LangSmith datasets (used by the weekly CI regression suite). For tool hard errors, it also generates candidate `eval/cases.json` entries, presents them with inferred assertions (`expect_error` or `expect_keys`), and **waits for your approval** before writing. Approved cases are added to `eval/cases.json` in the same commit — so the fix PR also hardens the PR gate against that failure recurring.
-5. **Commit & PR** — commits all changes (skill patches, `AGENTS.md` updates, `eval/cases.json` additions), opens a PR, and appends a watermark to `trace_analysis_log.md`.
+4. **Push to datasets** — `create_datasets_from_anomaly_report` pushes failing spans to scoped LangSmith datasets (used by the weekly CI regression suite). For tool hard errors, it also generates candidate `eval/pr_gate_cases.json` entries, presents them with inferred assertions (`expect_error` or `expect_keys`), and **waits for your approval** before writing. Approved cases are added to `eval/pr_gate_cases.json` in the same commit — so the fix PR also hardens the PR gate against that failure recurring.
+5. **Commit & PR** — commits all changes (skill patches, `AGENTS.md` updates, `eval/pr_gate_cases.json` additions), opens a PR, and appends a watermark to `trace_analysis_log.md`.
 
 ---
 
@@ -177,24 +177,31 @@ Every PR (no secrets, ~30s)
   Unit tests       — mocked I/O, deterministic logic
   Eval gate        — calls tools directly, asserts on real outputs
 
-Weekly (LangSmith secrets)
-  run_weekly.py    — fetch traces → update baselines only
+Every PR — path-conditional golden evals (LangSmith secrets)
+  PR touches ingest tools or llm-wiki skill  → eval-ingest runs
+  PR touches marp skill or daytona_agent     → eval-marp runs
+  PR touches llm-wiki skill or agent.py      → eval-query runs
+  PR touches only docs/README                → no golden evals run
+
+Weekly schedule / "Run workflow" button
+  All three golden evals run regardless of what changed
+  run_weekly_baselines.py    — fetch traces → update baselines only
   pytest-langsmith — replay hard_error examples from HITL-reviewed datasets, gate on no regressions
 ```
 
-**PR gate (`eval/run_gate.py`)** — deterministic tool-level checks versioned in `eval/cases.json`. Two case types:
+**PR gate (`eval/run_gate.py`)** — deterministic tool-level checks versioned in `eval/pr_gate_cases.json`. Two case types:
 
 - `regression` — must hold 100%; any drop blocks merge (SSRF protection, arXiv ID lookup, wiki integrity)
 - `capability` — tracked but not gate-blocking; promoted to regression once stable
 
-**Weekly pipeline (`eval/run_weekly.py`)** — refreshes baselines against the last 7 days of production traces:
+**Weekly pipeline (`eval/run_weekly_baselines.py`)** — refreshes baselines against the last 7 days of production traces:
 
 1. `compute_baselines_async` — updates rolling per-run-name latency/token/step medians in `memories/baselines.json`
 2. `pytest -m langsmith` — replays `hard_error` examples from LangSmith datasets (populated via HITL); gates on no regressions
 
 Anomaly detection and dataset writes are HITL-only (via `trace-analysis` skill) — pushing automatically risks committing infra noise as regression examples.
 
-**Closed loop:** running the `trace-analysis` skill surfaces failures across the full stack — tool and LLM hard errors, latency spikes, token blowouts, step-count anomalies, skill deviations, and HITL rejections. For hard errors, it auto-generates candidate `eval/cases.json` entries with inferred assertions and asks for HITL approval before committing. The fix and its regression case land in the same PR, permanently hardening the gate against that failure recurring.
+**Closed loop:** running the `trace-analysis` skill surfaces failures across the full stack — tool and LLM hard errors, latency spikes, token blowouts, step-count anomalies, skill deviations, and HITL rejections. For hard errors, it auto-generates candidate `eval/pr_gate_cases.json` entries with inferred assertions and asks for HITL approval before committing. The fix and its regression case land in the same PR, permanently hardening the gate against that failure recurring.
 
 ```bash
 # PR gate (no secrets needed)
@@ -204,7 +211,7 @@ uv run python eval/run_gate.py
 uv run pytest -m "not integration and not slow and not langsmith" -q
 
 # Weekly pipeline (requires LANGSMITH_API_KEY + ANTHROPIC_API_KEY)
-uv run --env-file .env python eval/run_weekly.py
+uv run --env-file .env python eval/run_weekly_baselines.py
 LANGSMITH_TEST_SUITE="paper2wiki-regression" \
 LANGSMITH_TEST_CACHE=tests/cassettes \
 uv run pytest -m "langsmith and not slow and not integration" -q

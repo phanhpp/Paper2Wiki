@@ -136,7 +136,7 @@ Every PR — unit tests only (pytest -m unit):
     lint logic, evaluator fns, is_failure, tool logic
     ~10s, no secrets, no network
 
-Nightly — real agent (GitHub Actions schedule):
+weekly — real agent (GitHub Actions schedule):
     fetch traces (last 24h)
     compute_baselines_async        ← update rolling baseline from fresh traffic
     detect_anomalies_async         ← compare current traces against baseline
@@ -147,10 +147,10 @@ Nightly — real agent (GitHub Actions schedule):
 ```
 
 The current regression job (langsmith and not slow and not integration) runs anomaly
-regression on every PR — move it to nightly. The PR gate should be unit tests only.
+regression on every PR — move it to weekly. The PR gate should be unit tests only.
 
 The meaningful part of this setup is not the PR gate but the closed loop:
-    production traces → trace-analyzer → anomaly datasets → nightly regression
-    → catch regressions → HITL + skill patch → nightly confirms fix holds
+    production traces → trace-analyzer → anomaly datasets → weekly regression
+    → catch regressions → HITL + skill patch → weekly confirms fix holds
 
-The PR gate protects logic regressions. The nightly loop catches agent failures.
+The PR gate protects logic regressions. The weekly loop catches agent failures.
