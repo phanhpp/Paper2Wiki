@@ -183,8 +183,8 @@ add it here first, then use it. This prevents tag sprawl.
 
 ### Hard Limits
 
-- Max **3 concepts** created — pick the most central ones only
-- For research paper, max **3 entities** for first author and organization (if any)
+- Max **4 concepts** created — pick the most central ones only
+- For research paper, max **2 entities** - must have first author and organization (if any)
 
 ## Entity Pages
 
