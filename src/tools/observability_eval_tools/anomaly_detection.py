@@ -23,10 +23,13 @@ Anomaly signals:
 
 Exclusion policy:
 - LangSmith evaluation runs (``ls_experiment_id`` in metadata) are fully skipped.
+- Spans with ``run_type == "chain"`` and ``name == "LangGraph"`` are fully
+  skipped. This is the top-level LangGraph framework span — errors here are
+  infra noise (state corruption, OOM), not user-code bugs. Other named chain
+  nodes are custom graph nodes and are left through.
 - LangGraph aggregate/internal span names ``model``, ``tools``, and
-  ``ChatAnthropic`` are excluded from baseline computation.
-- Hard errors are still detected for every parsed non-eval run, including
-  baseline-excluded names.
+  ``ChatAnthropic`` are excluded from baseline computation only (hard errors
+  on these names are still flagged by ``detect_anomalies_async``).
 """
 
 from __future__ import annotations
@@ -294,6 +297,13 @@ def _is_failure(run: dict, baselines: dict, trace_flow_counts: dict) -> tuple[bo
         the run is clean.
     """
     if _is_eval_run(run):
+        return False, [], []
+
+    # run_type=="chain", name=="LangGraph" is the top-level LangGraph framework
+    # span. Errors here are framework/infra noise (state corruption, OOM) — not
+    # user-code bugs. Other named chain nodes are custom graph nodes and can
+    # surface real agent logic failures worth tracking.
+    if run.get("run_type") == "chain" and run.get("name") == "LangGraph":
         return False, [], []
 
     errors: list[AnomalyError] = []
