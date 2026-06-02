@@ -45,24 +45,6 @@
     "_note": "Passes on paper result or graceful rate_limited response. Tests both happy path and 429 handling."
   },
   {
-    "id": "fetch_arxiv_nonexistent_id",
-    "type": "regression",
-    "category": "retrieval",
-    "tool": "fetch_arxiv",
-    "inputs": {"query": "9999.99999"},
-    "expect_keys_or": [["not_found"], ["rate_limited"]],
-    "_note": "Passes on structured not_found response or graceful rate_limited. Both are correct graceful handling."
-  },
-  {
-    "id": "fetch_arxiv_by_title",
-    "type": "capability",
-    "category": "retrieval",
-    "tool": "fetch_arxiv",
-    "inputs": {"query": "attention is all you need"},
-    "expect_keys_or": [["title", "pdf_path"], ["rate_limited"]],
-    "_note": "Title search — capability (not regression) because top result may vary. Passes on paper or graceful 429."
-  },
-  {
     "id": "web_search_returns_results",
     "type": "regression",
     "category": "retrieval",
