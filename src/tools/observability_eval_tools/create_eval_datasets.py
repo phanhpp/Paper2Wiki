@@ -10,12 +10,13 @@ Called after ``detect_anomalies_async()``:
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 import re
 from collections import defaultdict
 from typing import Any
 
-from langsmith import Client
+from langsmith import AsyncClient
 
 from src.tools.observability_eval_tools.anomaly_detection import AnomalyReport, AnomalySignal, FailedSpan
 from langchain_core.tools import tool
@@ -142,7 +143,7 @@ def _generate_PR_cases(report: AnomalyReport) -> list[dict[str, Any]]:
 
 
 @tool()
-def create_datasets_from_anomaly_report(
+async def create_datasets_from_anomaly_report(
     report: AnomalyReport,
     eval_cases: bool = True,
 ) -> dict[str, Any]:
@@ -160,7 +161,7 @@ def create_datasets_from_anomaly_report(
     Returns:
         ``{"datasets": {name: {"new": int, "total": int}}, "suggested_cases": [...]}``
     """
-    ls = Client()
+    ls = AsyncClient()
 
     # Group by dataset name so we can batch-create examples per dataset.
     groups_by_dataset: dict[str, list[tuple[str, FailedSpan]]] = defaultdict(list)
@@ -174,10 +175,11 @@ def create_datasets_from_anomaly_report(
         scope = _SCOPE_BY_RUN_TYPE.get(first_span.run_type or "", "tool")
         description = f"{_dataset_description(first_span)} Scope={scope}."
 
-        if ls.has_dataset(dataset_name=dataset_name):
-            dataset = ls.read_dataset(dataset_name=dataset_name)
-        else:
-            dataset = ls.create_dataset(
+        # AsyncClient has no has_dataset — attempt read, create on miss.
+        try:
+            dataset = await ls.read_dataset(dataset_name=dataset_name)
+        except Exception:
+            dataset = await ls.create_dataset(
                 dataset_name=dataset_name,
                 description=description,
                 metadata={
@@ -188,7 +190,7 @@ def create_datasets_from_anomaly_report(
             )
 
         existing_run_ids: set[str] = set()
-        for ex in ls.list_examples(dataset_id=dataset.id):
+        async for ex in ls.list_examples(dataset_id=dataset.id):
             rid = (ex.metadata or {}).get("run_id")
             if rid:
                 existing_run_ids.add(rid)
@@ -197,7 +199,6 @@ def create_datasets_from_anomaly_report(
         for trace_id, span in items:
             if span.id in existing_run_ids:
                 continue
-
             new_examples.append({
                 "inputs": _normalize_example_inputs(span.inputs),
                 "outputs": span.outputs,
@@ -214,8 +215,17 @@ def create_datasets_from_anomaly_report(
                 },
             })
 
+        # AsyncClient has no create_examples (plural) — create concurrently.
         if new_examples:
-            ls.create_examples(dataset_id=dataset.id, examples=new_examples)
+            await asyncio.gather(*[
+                ls.create_example(
+                    inputs=ex["inputs"],
+                    outputs=ex["outputs"],
+                    metadata=ex["metadata"],
+                    dataset_id=dataset.id,
+                )
+                for ex in new_examples
+            ])
 
         created[dataset_name] = {
             "new": len(new_examples),
