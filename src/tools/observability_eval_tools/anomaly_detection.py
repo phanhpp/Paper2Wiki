@@ -51,7 +51,7 @@ MINIMUM_SAMPLES = 3
 _SPIKE_MULTIPLIER = 3
 _LLM_RUN_TYPES = {"llm"}
 _EXCLUDE_NAMES = {"model", "tools", "ChatAnthropic"}
-BASELINES_PATH = Path(__file__).resolve().parents[2] / "memories" / "baselines.json"
+BASELINES_PATH = Path(__file__).resolve().parents[3] / "memories" / "baselines.json"
 
 # Extracts the JSON string (including {}) from lines like: [depth=2] {"key": "value"}
 _RUN_LINE_RE = re.compile(r"^\[depth=\d+\] (\{.+\})\s*$")
@@ -184,8 +184,9 @@ def _is_eval_run(run: dict) -> bool:
 async def compute_baselines_async(report: TraceReport) -> dict:
     """Compute per-name and per-flow baselines from a TraceReport and persist them.
 
-    Intended to run on a schedule (e.g. daily) so baselines reflect a rolling
-    window of real traffic. Overwrites BASELINES_PATH each run.
+    Intended to run on a schedule (weekly) so baselines reflect a rolling
+    window of real traffic. Merges into BASELINES_PATH — only entries with
+    >= MINIMUM_SAMPLES this window are updated; absent entries are preserved.
 
     Baselines computed:
     - by_name: median latency + median tokens per run name (llm runs only for tokens)
@@ -262,10 +263,17 @@ async def compute_baselines_async(report: TraceReport) -> dict:
             "sample_count": len(counts),
         }
 
-    baselines = {"by_name": by_name, "by_flow": by_flow}
+    # Merge into existing file — only overwrite entries that have fresh data
+    # (>= MINIMUM_SAMPLES this window). Entries absent from this run are left
+    # untouched so a quiet week doesn't wipe out hard-won baselines.
+    existing = _load_baselines()
+    merged = {
+        "by_name": {**existing.get("by_name", {}), **by_name},
+        "by_flow": {**existing.get("by_flow", {}), **by_flow},
+    }
     BASELINES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    BASELINES_PATH.write_text(json.dumps(baselines, indent=2))
-    return baselines
+    BASELINES_PATH.write_text(json.dumps(merged, indent=2))
+    return merged
 
 
 # ---------------------------------------------------------------------------
