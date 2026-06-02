@@ -96,5 +96,14 @@ jobs:
           enable-cache: true
           python-version: "3.11"
       - run: uv sync --frozen
-      - name: Run LangSmith anomaly regression
+      - name: Update baselines and push anomalies to LangSmith
+        # Fetches last 7 days of traces, updates memories/baselines.json,
+        # detects anomalies, and pushes failing spans to LangSmith datasets.
+        # Must run before pytest so test_anomaly_regression.py sees fresh examples.
+        run: uv run python eval/run_weekly.py
+
+      - name: Anomaly regression (pytest-langsmith)
+        # Replays hard_error examples from the datasets populated above.
+        # Gates on: hard_error spans must no longer error after a fix is merged.
+        # Tracks (but does not gate on): latency_spike, token_blowout, step_count_spike.
         run: uv run pytest -m "langsmith and not slow and not integration" -q
