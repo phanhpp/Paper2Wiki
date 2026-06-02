@@ -1,5 +1,6 @@
 import json
 import re
+import threading
 import time
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -11,6 +12,11 @@ WIKI_ROOT = get_wiki_root()
 
 RAW_PAPERS_DIR = WIKI_ROOT / "raw" / "papers"
 _ARXIV_CACHE_DIR = WIKI_ROOT / ".cache" / "arxiv"
+
+# Serialize arXiv API search calls across threads (e.g. run_gate fires cases concurrently
+# via asyncio.gather → thread pool). Each arxiv.Client has its own delay_seconds counter
+# so concurrent callers don't respect each other's throttle, causing 429s.
+_ARXIV_LOCK = threading.Lock()
 
 
 def _arxiv_cache_path(arxiv_id: str) -> Path:
@@ -37,6 +43,10 @@ def fetch_arxiv(query: str) -> dict:
           - authors (list[str]): author names
           - pdf_path (str): absolute path to the downloaded PDF under raw/papers/
           - metadata (dict): arxiv_id, doi, published, updated, categories, url
+
+        On failure, returns a structured error dict instead of raising:
+          - {"error": "rate_limited", "suggestion": "..."} — arXiv HTTP 429
+          - {"error": "not_found", "query": "..."} — no paper matched the query
     """
     arxiv_id = None
     url_match = re.search(r"arxiv\.org/(?:abs|pdf)/([0-9]+\.[0-9]+)", query)
@@ -54,33 +64,45 @@ def fetch_arxiv(query: str) -> dict:
             if Path(cached["pdf_path"]).is_file():
                 return cached
 
-    # Be kind to arxiv: 3s between requests, retry on transient errors
-    client = arxiv.Client(page_size=10, delay_seconds=3.0, num_retries=2)
+    # 3s delay between requests + serialize across threads so concurrent callers
+    # (e.g. run_gate asyncio.gather) don't fire simultaneously and trigger 429.
+    # NOTE: do not patch urllib opener here — install_opener strips feedparser's
+    # Accept headers, causing arXiv to return HTTP 406.
+    client = arxiv.Client(page_size=10, delay_seconds=3.0, num_retries=3)
 
-    if arxiv_id:
-        results = list(client.results(arxiv.Search(id_list=[arxiv_id])))
-    else:
-        # Try title-scoped first, only fall back to general if no good match
-        title_results = list(
-            client.results(arxiv.Search(query=f'ti:"{query}"', max_results=10))
-        )
-        if title_results:
-            top_ratio = SequenceMatcher(
-                a=norm_title(query), b=norm_title(title_results[0].title)
-            ).ratio()
-            if top_ratio > 0.8:
-                results = title_results
+    try:
+        with _ARXIV_LOCK:
+            if arxiv_id:
+                results = list(client.results(arxiv.Search(id_list=[arxiv_id])))
             else:
-                seen = {r.entry_id for r in title_results}
-                results = list(title_results)
-                for r in client.results(arxiv.Search(query=query, max_results=10)):
-                    if r.entry_id not in seen:
-                        results.append(r)
-        else:
-            results = list(client.results(arxiv.Search(query=query, max_results=10)))
+                # Try title-scoped first, only fall back to general if no good match
+                title_results = list(
+                    client.results(arxiv.Search(query=f'ti:"{query}"', max_results=10))
+                )
+                if title_results:
+                    top_ratio = SequenceMatcher(
+                        a=norm_title(query), b=norm_title(title_results[0].title)
+                    ).ratio()
+                    if top_ratio > 0.8:
+                        results = title_results
+                    else:
+                        seen = {r.entry_id for r in title_results}
+                        results = list(title_results)
+                        for r in client.results(arxiv.Search(query=query, max_results=10)):
+                            if r.entry_id not in seen:
+                                results.append(r)
+                else:
+                    results = list(client.results(arxiv.Search(query=query, max_results=10)))
+    except Exception as exc:
+        if "429" in str(exc) or "Too Many Requests" in str(exc):
+            return {
+                "error": "rate_limited",
+                "suggestion": "arXiv rate limit exceeded. Retry later or switch to quick ingest mode (use a cached paper ID).",
+            }
+        raise
 
     if not results:
-        raise ValueError(f"No arXiv paper found for: {query}")
+        return {"error": "not_found", "query": query}
 
     paper = results[0] if arxiv_id else max(results, key=lambda r: title_score(query, r.title))
 

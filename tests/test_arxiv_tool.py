@@ -12,7 +12,7 @@ Covered cases:
 - Cache hit: valid cache JSON + PDF on disk → returns payload, never constructs Client
 - Cache miss (stale): cache JSON exists but PDF is gone → re-fetches and downloads fresh PDF
 - URL input: ``arxiv.org/abs/...`` URL → ID extracted, paper fetched, PDF downloaded
-- No results: arXiv returns empty list → raises ``ValueError``
+- No results: arXiv returns empty list → returns ``{"error": "not_found", "query": ...}``
 """
 from __future__ import annotations
 
@@ -148,13 +148,13 @@ def test_fetch_arxiv_ignores_cache_when_pdf_missing(
 
 
 @pytest.mark.unit
-def test_fetch_arxiv_raises_when_no_results(
+def test_fetch_arxiv_returns_not_found_when_no_results(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify a miss from arXiv fails clearly instead of returning bad metadata.
+    """Verify a miss from arXiv returns a structured not_found dict instead of crashing.
 
-    The ingest agent needs an explicit ``ValueError`` when neither cache nor
-    search results can produce a paper for the requested query.
+    The agent can inspect result["error"] == "not_found" and report gracefully
+    rather than having to catch an exception.
     """
     monkeypatch.setattr(arxiv_tool, "_ARXIV_CACHE_DIR", tmp_path / ".cache")
     monkeypatch.setattr(arxiv_tool, "RAW_PAPERS_DIR", tmp_path / "raw" / "papers")
@@ -168,5 +168,6 @@ def test_fetch_arxiv_raises_when_no_results(
 
     monkeypatch.setattr(arxiv_tool.arxiv, "Client", _Client)
 
-    with pytest.raises(ValueError, match="No arXiv paper found"):
-        arxiv_tool.fetch_arxiv.invoke({"query": "1706.03762"})
+    result = arxiv_tool.fetch_arxiv.invoke({"query": "1706.03762"})
+    assert result["error"] == "not_found"
+    assert "query" in result

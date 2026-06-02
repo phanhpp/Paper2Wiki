@@ -108,6 +108,19 @@ async def run_case(case: dict, tool_map: dict) -> dict:
                 return {"id": case_id, "type": case_type, "passed": False,
                         "reason": f"missing keys: {missing}", "duration_ms": duration_ms}
 
+        # expect_keys_or: pass if ANY of the provided key-sets all appear in the output.
+        # Use when a tool can return multiple valid structured responses (e.g. paper fields
+        # on success, {"error": "rate_limited"} when arXiv throttles).
+        if "expect_keys_or" in case:
+            result_str = json.dumps(result, default=str).lower()
+            matched = any(
+                all(k.lower() in result_str for k in key_set)
+                for key_set in case["expect_keys_or"]
+            )
+            if not matched:
+                return {"id": case_id, "type": case_type, "passed": False,
+                        "reason": f"no key-set matched: {case['expect_keys_or']}", "duration_ms": duration_ms}
+
         # expect_value: result must be one of the listed values (exact match).
         if "expect_value" in case and result not in case["expect_value"]:
             return {"id": case_id, "type": case_type, "passed": False,
