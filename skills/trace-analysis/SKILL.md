@@ -147,9 +147,9 @@ The tool returns:
 - Idempotent — already-pushed run_ids are skipped automatically
 - `suggested_cases` contains candidates for `run_type == "tool"` + `hard_error` only — tool crashes are deterministic: fix it, prove it stays fixed. 
 
-#### `eval/cases.json` field schema
+#### `eval/pr_gate_cases.json` field schema
 
-Each case in `eval/cases.json` has these fields:
+Each case in `eval/pr_gate_cases.json` has these fields:
 
 | Field | Required | Description |
 |---|---|---|
@@ -171,7 +171,7 @@ At least one `expect_*` field is required for `run_gate.py` to assert anything m
 Auto-generated cases have `_review` set and no `expect_*` field. Before presenting to the user, **use the anomaly signal and tool name to suggest the missing assertion:**
 
 - Read `span.signals` for the error message. If it contains an HTTP error, invalid ID, malformed input → the input was invalid → suggest `"expect_error": true`
-- If the error looks like a bug on valid input (connection error, parsing crash, unexpected None) → suggest `"expect_keys": [<known output fields for this tool>]` — check the tool's return type or other passing cases in `eval/cases.json` for reference
+- If the error looks like a bug on valid input (connection error, parsing crash, unexpected None) → suggest `"expect_keys": [<known output fields for this tool>]` — check the tool's return type or other passing cases in `eval/pr_gate_cases.json` for reference
 - Strip `_review` from the final case before writing
 
 Known output fields per tool (for `expect_keys` suggestions):
@@ -187,7 +187,7 @@ Known output fields per tool (for `expect_keys` suggestions):
 **HITL presentation format** — present one case at a time if multiple, or all together if ≤3:
 
 ```
-## Suggested eval/cases.json entries (N cases from tool hard errors)
+## Suggested eval/pr_gate_cases.json entries (N cases from tool hard errors)
 
 For each case, I've inferred the missing assertion from the error signal:
 
@@ -200,10 +200,10 @@ For each case, I've inferred the missing assertion from the error signal:
    {"id": "regression_fetch_arxiv_a3f92c1", "type": "regression", "category": "retrieval",
     "tool": "fetch_arxiv", "inputs": {"query": "INVALID999"}, "expect_error": true}
 
-Approve writing these to eval/cases.json? (edit any case before confirming)
+Approve writing these to eval/pr_gate_cases.json? (edit any case before confirming)
 ```
 
-After approval, read `eval/cases.json`, append approved cases (with `_review` stripped), and write back. HITL fires automatically at `write_file`.
+After approval, read `eval/pr_gate_cases.json`, append approved cases (with `_review` stripped), and write back. HITL fires automatically at `write_file`.
 
 Skip this step entirely if there are no anomalies in the report (pure skill_deviation findings with no failed spans).
 
