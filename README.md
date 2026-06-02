@@ -8,7 +8,7 @@ A research assistant that transforms research papers into durable artifacts — 
 
 - **LLM-Wiki**: builds and maintains a graph-structured knowledge base from academic papers
 - **Marp slides**: generates presentation decks from papers or wiki content (sandboxed via Daytona)
-- **Self-improvement**: analyzes LangSmith traces to surface failures, then proposes fixes to **skills** and `AGENTS.md`
+- **Self-improvement**: fetches its own LangSmith traces, detects metric anomalies (tool crashes, token blowouts, latency/step spikes) and qualitative patterns (skill deviations, HITL rejections, tool misuse), then patches its own **skill prompts** and `AGENTS.md` — HITL approval required before any change is committed
 - **General assistance**: answers questions, writes/edits code, and runs repo tools (with HITL where configured)
 
 ---
@@ -131,14 +131,13 @@ Three operations:
 
 ## How Trace Analysis Works
 
-The agent uses the `trace-analysis` skill to self-improve by analyzing its own performance:
+Trigger with: *"Analyze my recent traces"* or *"What went wrong in the last few runs?"*
 
-1. **Fetch**: Retrieves recent execution traces from LangSmith (filtered by success or failure).
-2. **Summarize**: Uses an LLM to condense traces into a structured report of what happened.
-3. **Analyze**: Identifies patterns, anomalies, skill deviations, or tool misuse.
-4. **Validate**: Checks git history to ensure findings haven't already been fixed.
-5. **Propose**: Suggests actionable improvements to `/skills/` or `AGENTS.md`.
-6. **Apply**: Implements approved changes after human confirmation.
+1. **Fetch** — `run_trace_report_async` retrieves recent traces from LangSmith (pass `error=True` to scope to failures only).
+2. **Summarize** — `summarize_traces_async` batches traces into pages and condenses them in parallel into structured summaries.
+3. **Cluster & detect** — the agent groups findings by pattern (skill deviations, tool errors, HITL rejections), validates each against git history to skip already-fixed issues, then runs `detect_anomalies_async` to produce ground-truth anomaly signals (`hard_error`, `latency_spike`, `token_blowout`, `step_count_spike`). Presents a ranked report and **waits for your confirmation** before proceeding.
+4. **Push to datasets** — `create_datasets_from_anomaly_report` pushes failing spans to scoped LangSmith datasets (used by the weekly CI regression suite). For tool hard errors, it also generates candidate `eval/cases.json` entries, presents them with inferred assertions (`expect_error` or `expect_keys`), and **waits for your approval** before writing. Approved cases are added to `eval/cases.json` in the same commit — so the fix PR also hardens the PR gate against that failure recurring.
+5. **Commit & PR** — commits all changes (skill patches, `AGENTS.md` updates, `eval/cases.json` additions), opens a PR, and appends a watermark to `trace_analysis_log.md`.
 
 ---
 
@@ -173,22 +172,29 @@ llm_wiki/
 
 CI uses a two-layer eval strategy with a closed feedback loop from production:
 
-```
+```text
 Every PR (no secrets, ~30s)
   Unit tests       — mocked I/O, deterministic logic
   Eval gate        — calls tools directly, asserts on real outputs
 
 Weekly (LangSmith secrets)
-  Anomaly regression — replays production failures from LangSmith datasets
+  run_weekly.py    — fetch traces → update baselines only
+  pytest-langsmith — replay hard_error examples from HITL-reviewed datasets, gate on no regressions
 ```
 
-**PR gate (`eval/run_gate.py`)** — deterministic tool-level checks versioned in `eval/cases.json`. Cases come in two types:
-- `regression` — must hold 100%; any drop blocks merge (SSRF blocked, arXiv ID lookup, wiki integrity)
+**PR gate (`eval/run_gate.py`)** — deterministic tool-level checks versioned in `eval/cases.json`. Two case types:
+
+- `regression` — must hold 100%; any drop blocks merge (SSRF protection, arXiv ID lookup, wiki integrity)
 - `capability` — tracked but not gate-blocking; promoted to regression once stable
 
-**Closed loop:** the `trace-analysis` skill fetches production traces weekly → runs anomaly detection → auto-generates candidate `cases.json` entries for tool hard errors → presents them for HITL review → appended in the same fix PR. Failures become regression tests automatically.
+**Weekly pipeline (`eval/run_weekly.py`)** — refreshes baselines against the last 7 days of production traces:
 
-**Weekly job** — replays known-failing spans from LangSmith anomaly datasets using `aevaluate()` with VCR cassette caching. Gates on `hard_error` only; `latency_spike`, `token_blowout`, and `step_count_spike` anomalies are tracked as experiment metrics.
+1. `compute_baselines_async` — updates rolling per-run-name latency/token/step medians in `memories/baselines.json`
+2. `pytest -m langsmith` — replays `hard_error` examples from LangSmith datasets (populated via HITL); gates on no regressions
+
+Anomaly detection and dataset writes are HITL-only (via `trace-analysis` skill) — pushing automatically risks committing infra noise as regression examples.
+
+**Closed loop:** running the `trace-analysis` skill surfaces failures across the full stack — tool and LLM hard errors, latency spikes, token blowouts, step-count anomalies, skill deviations, and HITL rejections. For hard errors, it auto-generates candidate `eval/cases.json` entries with inferred assertions and asks for HITL approval before committing. The fix and its regression case land in the same PR, permanently hardening the gate against that failure recurring.
 
 ```bash
 # PR gate (no secrets needed)
@@ -197,10 +203,11 @@ uv run python eval/run_gate.py
 # Unit tests
 uv run pytest -m "not integration and not slow and not langsmith" -q
 
-# Weekly regression (requires LangSmith + Anthropic keys)
+# Weekly pipeline (requires LANGSMITH_API_KEY + ANTHROPIC_API_KEY)
+uv run --env-file .env python eval/run_weekly.py
 LANGSMITH_TEST_SUITE="paper2wiki-regression" \
 LANGSMITH_TEST_CACHE=tests/cassettes \
-uv run pytest -m "langsmith and not slow" -q
+uv run pytest -m "langsmith and not slow and not integration" -q
 ```
 
 ### Wiki Integrity (Linting)
