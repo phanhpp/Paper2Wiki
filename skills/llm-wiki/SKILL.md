@@ -280,6 +280,7 @@ When the user provides a source (URL, file, paste), integrate it into the wiki:
 The ingest pipeline is set by config and cannot be changed via prompt. Check your available tools:
 
 **If you have `fetch_arxiv` → quality mode:**
+
 - Call `fetch_arxiv(query)` with the arXiv ID, URL, or title → returns `pdf_path`, `title`, `metadata`
 - Call `parse_pdf_docling(pdf_path)` → returns clean markdown with preserved headings, tables, equations
 - Derive a slug from the title, save to `raw/papers/<slug>.md`

@@ -36,11 +36,23 @@ class FirecrawlProvider:
 
         return Firecrawl(api_key=os.getenv("FIRECRAWL_API_KEY", "").strip())
 
-    def search(self, query: str, limit: int = 3) -> list[SearchResult]:
+    # Maps the normalized category value to the firecrawl API param.
+    # "research"/"github"/"pdf" go via categories=[]; "news" goes via sources=[].
+    _CATEGORY_MAP: dict[str, dict] = {
+        "research": {"categories": ["research"]},
+        "github":   {"categories": ["github"]},
+        "pdf":      {"categories": ["pdf"]},
+        "news":     {"sources": ["news"]},
+    }
+
+    def search(self, query: str, limit: int = 3, **kwargs) -> list[SearchResult]:
         """Search via Firecrawl. Sync."""
         client = self._get_client()
-        # v2 SDK: limit is a direct kwarg; response has .web attribute (not a dict)
-        raw = client.search(query, limit=limit)
+        call_kwargs: dict = {"limit": limit}
+        cat = kwargs.get("category")
+        if cat:
+            call_kwargs.update(self._CATEGORY_MAP.get(cat, {}))
+        raw = client.search(query, **call_kwargs)
 
         results = []
         for i, item in enumerate(raw.web or []):

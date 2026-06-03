@@ -64,7 +64,7 @@ class SearchProvider(Protocol):
         """Return True when this provider's credentials are configured."""
         ...
 
-    def search(self, query: str, limit: int = 5) -> list[SearchResult]:
+    def search(self, query: str, limit: int = 5, **kwargs) -> list[SearchResult]:
         """Search the web. Returns metadata only."""
         ...
 

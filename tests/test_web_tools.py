@@ -790,7 +790,7 @@ class TestWebSearch:
 
         results = wt.web_search.invoke({"query": "test", "limit": 5})
 
-        mock_provider.search.assert_called_once_with("test", 5)
+        mock_provider.search.assert_called_once_with("test", 5, category=None)
         assert len(results) == 1
         assert results[0].url == "https://example.com"
 

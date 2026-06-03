@@ -36,11 +36,25 @@ class ExaProvider:
 
         return Exa(api_key=os.getenv("EXA_API_KEY", "").strip())
 
-    def search(self, query: str, limit: int = 3) -> list[SearchResult]:
+    # Normalised → exa category string.
+    # "research" is the canonical cross-provider value; "research paper" is the exa native.
+    _CATEGORY_MAP: dict[str, str] = {
+        "research":          "research paper",
+        "news":              "news",
+        "company":           "company",
+        "financial report":  "financial report",
+        "personal site":     "personal site",
+    }
+
+    def search(self, query: str, limit: int = 3, **kwargs) -> list[SearchResult]:
         """Search via Exa. Sync."""
         client = self._get_client()
-        # Request highlights so description is populated; basic search returns no text/snippet
-        raw = client.search(query, num_results=limit, contents={"highlights": True})
+        call_kwargs: dict = {"num_results": limit, "contents": {"highlights": True}}
+        cat = kwargs.get("category")
+        if cat:
+            exa_cat = self._CATEGORY_MAP.get(cat, cat)
+            call_kwargs["category"] = exa_cat
+        raw = client.search(query, **call_kwargs)
 
         results = []
         for i, item in enumerate(raw.results):

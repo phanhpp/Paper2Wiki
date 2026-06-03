@@ -37,10 +37,22 @@ class TavilyProvider:
 
         return TavilyClient(api_key=os.getenv("TAVILY_API_KEY", "").strip())
 
-    def search(self, query: str, limit: int = 3) -> list[SearchResult]:
+    # Tavily has no academic category — only "news" and "finance" map cleanly.
+    _CATEGORY_MAP: dict[str, str] = {
+        "news":    "news",
+        "finance": "finance",
+    }
+
+    def search(self, query: str, limit: int = 3, **kwargs) -> list[SearchResult]:
         """Search via Tavily. Sync."""
         client = self._get_client()
-        raw = client.search(query=query, max_results=limit)
+        call_kwargs: dict = {"query": query, "max_results": limit}
+        cat = kwargs.get("category")
+        if cat:
+            topic = self._CATEGORY_MAP.get(cat)
+            if topic:
+                call_kwargs["topic"] = topic
+        raw = client.search(**call_kwargs)
 
         results = []
         for i, item in enumerate(raw.get("results", [])):

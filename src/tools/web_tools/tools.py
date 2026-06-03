@@ -22,13 +22,32 @@ from src.tools.web_tools.types import ExtractResult, SearchResult
 logger = logging.getLogger(__name__)
 
 
-@tool()
-def web_search(query: str, limit: int = 5) -> list[SearchResult]:
-    """Search the web for information. Returns metadata only (no page content).
+def _web_search_description() -> str:
+    """Build the tool description at import time based on the active provider."""
+    provider = registry.get_search_provider()
+    name = provider.name if provider else "none"
+    category_docs = {
+        "firecrawl": "'research' (arXiv/Nature/IEEE/PubMed), 'github', 'pdf', 'news'",
+        "exa":       "'research' (→ 'research paper'), 'news', 'company', 'financial report'",
+        "tavily":    "'news', 'finance'  (no academic category)",
+    }.get(name, "provider-specific — see web_tools_reference/provider_params.md")
+    return (
+        "Search the web. Returns title, url, description per result (no page content).\n"
+        f"Active provider: {name}\n"
+        f"category values: {category_docs}"
+    )
+
+
+@tool("web_search", description=_web_search_description())
+def web_search(query: str, limit: int = 5, category: str | None = None) -> list[SearchResult]:
+    """Search the web for information.
 
     Args:
         query: Search query string.
         limit: Max results (clamped to 1–100).
+        category: Optional content-type filter. Normalised value passed to the
+            active provider which converts it automatically. See description for
+            valid values per provider.
 
     Returns:
         List of SearchResult with title, url, description.
@@ -47,8 +66,8 @@ def web_search(query: str, limit: int = 5) -> list[SearchResult]:
             f"Currently available: {available or 'none'}"
         )
 
-    logger.info("web_search via %s: '%s' (limit=%d)", provider.name, query, limit)
-    return provider.search(query, limit)
+    logger.info("web_search via %s: '%s' (limit=%d, category=%s)", provider.name, query, limit, category)
+    return provider.search(query, limit, category=category)
 
 
 @tool()
