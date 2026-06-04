@@ -4,7 +4,6 @@ exa.py — Exa provider (search + extract).
 Third priority in the default walk. Exa is strong for academic/technical
 content which makes it relevant for Paper2Wiki.
 
-Hermes equivalent: plugins/web/exa/provider.py
 We skip: _get_exa_client cache slot. Straight SDK calls.
 
 Requires: pip install exa-py

@@ -4,7 +4,6 @@ firecrawl.py — Firecrawl provider (search + extract).
 Highest priority in the default walk because it handles both search
 and extract well, including PDF→markdown conversion server-side.
 
-Hermes equivalent: plugins/web/firecrawl/provider.py
 We skip: _FirecrawlProxy lazy loading, gateway auth, dual-auth config,
 response-shape normalizers. Straight SDK calls.
 

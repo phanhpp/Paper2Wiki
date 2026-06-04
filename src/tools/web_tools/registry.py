@@ -34,7 +34,7 @@ from src.tools.web_tools.types import SearchProvider
 
 logger = logging.getLogger(__name__)
 
-# Default provider priority — same order as Hermes _get_backend()
+# Default provider priority — same order as 
 # First available wins when no config override is set.
 DEFAULT_PRIORITY = ["firecrawl", "tavily", "exa"]
 
@@ -53,7 +53,6 @@ def _find_config_path() -> Path | None:
 def load_config() -> dict[str, Any]:
     """Load config.yaml. Returns empty dict if not found.
 
-    Hermes equivalent: hermes_cli.config.load_config() → .get("web", {})
     """
     path = _find_config_path()
     if path is None:
@@ -115,7 +114,6 @@ class ProviderRegistry:
         """Walk DEFAULT_PRIORITY, return first provider that is available
         AND supports the requested capability.
 
-        Hermes equivalent: _get_backend() backend_candidates walk.
         """
         for name in DEFAULT_PRIORITY:
             provider = self._providers.get(name)
@@ -138,7 +136,6 @@ class ProviderRegistry:
     def _resolve(self, capability: str) -> SearchProvider | None:
         """Three-level fallback resolution.
 
-        Hermes equivalent: _get_capability_backend(capability)
           1. web.<capability>_backend config override
           2. web.backend shared config
           3. priority walk (first available)

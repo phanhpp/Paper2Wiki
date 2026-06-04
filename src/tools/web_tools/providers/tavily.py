@@ -4,7 +4,6 @@ tavily.py — Tavily provider (search + extract).
 Second priority in the default walk. Good general-purpose search,
 extract returns pre-cleaned content.
 
-Hermes equivalent: plugins/web/tavily/provider.py
 We skip: _normalize_tavily_documents, _normalize_tavily_search_results,
 _tavily_request helpers. Straight SDK calls.
 

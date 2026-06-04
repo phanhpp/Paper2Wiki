@@ -4,9 +4,6 @@ types.py — Data contracts for the web tools package.
 Every provider implements SearchProvider.
 Every consumer works with SearchResult / ExtractResult.
 Nothing in this file does I/O or imports vendor SDKs.
-
-Hermes equivalent: spread across tools/web_tools.py (result shapes)
-and plugins/web/<vendor>/provider.py (provider interface).
 We centralize it here so providers and consumers share one contract.
 """
 
@@ -20,7 +17,6 @@ from typing import Protocol, runtime_checkable
 class SearchResult:
     """One search hit — metadata only, no page content.
 
-    Hermes shape: {"title": str, "url": str, "description": str, "position": int}
     """
 
     title: str

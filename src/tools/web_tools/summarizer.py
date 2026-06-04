@@ -1,16 +1,14 @@
 """
 summarizer.py — Tiered LLM compression for extracted web content.
 
-Same architecture as Hermes process_content_with_llm():
+Same architecture as 
   < 5k chars   → skip (return None, caller keeps raw content)
   5k–500k      → single LLM call → structured markdown summary
   500k–2M      → chunked: split → parallel LLM per chunk → synthesis
   > 2M         → refuse
 
 Uses Anthropic SDK with Haiku as the auxiliary model.
-Hermes uses OpenRouter + Gemini Flash — same role, different provider.
 
-Hermes equivalents:
 - process_content_with_llm()            → summarize()
 - _call_summarizer_llm()                → _call_llm()
 - _process_large_content_chunked()      → _chunked_summarize()
@@ -40,7 +38,7 @@ CHUNK_SIZE = 100_000       # chars per chunk
 MAX_CONTENT = 2_000_000    # refuse above this
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
-# Hermes uses separate system prompts for full-doc vs chunk summarization.
+# 
 # We do the same.
 
 _SYSTEM_FULL = (
@@ -108,8 +106,7 @@ async def _call_llm(
 ) -> str | None:
     """Single LLM call with retry. Returns summary text or None.
 
-    Hermes equivalent: _call_summarizer_llm()
-    Two retries with exponential backoff — same as Hermes.
+    Two retries with exponential backoff — same as 
     """
     cfg = _resolve_config()
     effective_model = model or cfg["model"]
@@ -155,7 +152,6 @@ async def _chunked_summarize(
 ) -> str | None:
     """Split large content into chunks, summarize in parallel, synthesize.
 
-    Hermes equivalent: _process_large_content_chunked()
     Same flow: chunk → parallel _call_llm → synthesis _call_llm
     """
     # Split into chunks
@@ -247,7 +243,6 @@ async def summarize(
     Returns:
         Summarized markdown, or None if content is short enough to use raw.
 
-    Hermes equivalent: process_content_with_llm()
     """
     cfg = _resolve_config()
     effective_min = min_length if min_length is not None else cfg["min_length"]
@@ -285,7 +280,7 @@ async def summarize(
     try:
         result = await _call_llm(prompt, _SYSTEM_FULL, model)
     except Exception as e:
-        # Fallback: truncated raw content (same as Hermes)
+        # Fallback: truncated raw content (same as 
         logger.warning("Summarization failed: %s — returning truncated raw", str(e)[:120])
         truncated = content[:MAX_OUTPUT]
         if content_len > MAX_OUTPUT:
