@@ -170,37 +170,37 @@ llm_wiki/
 
 ### Tests & CI
 
-A three-tier eval harness with an end-to-end feedback loop from production traces to regression datasets.
+A three-track eval system turns production failures into regression coverage. Unit tests still run as a fast preflight, but the core CI design is the three-track harness below.
 
 ```text
-Tier 1 — Every PR (no secrets, ~10s)
-  pytest -m unit          Mocked I/O, deterministic logic, path guards, evaluator functions
+Preflight — Every PR
+  pytest -m unit            Mocked I/O, deterministic logic, path guards
 
-Tier 2 — Every PR (path-conditional, LangSmith secrets)
-  eval/run_gate.py        Deterministic tool-level assertions — 100% pass required to merge
-  eval/run_weekly_eval.py  LLM-as-judge golden evals (ingest / query / marp)
-                           Triggered only when relevant source files change
+Track 1 — PR Gate (every PR, no agent, no LLM, no secrets)
+  eval/pr_gate_cases.json   Tool inputs + assertions
+  eval/run_gate.py          Invoke tool calling directly, writes eval/results.json
+  regression_baseline.json  Score floor per category; regression drops block merge
 
-Tier 3 — Weekly schedule
-  run_weekly_baselines.py  Refresh rolling latency/token/step baselines from 7 days of traces
-  pytest -m langsmith      Replay hard_error examples from HITL-reviewed LangSmith datasets
+Track 2 — Golden Agent Eval (weekly, or path-conditional on PR)
+  golden_datasets/*.json    Versioned ingest/query/marp cases
+  push_golden_datasets.py   Syncs cases to LangSmith datasets
+  run_weekly_eval.py        Runs the agent end-to-end with appropriate-scoped HITL auto-approval
+  golden_evaluators.py      Code checks + LLM judges over LangSmith experiment results
+
+Track 3 — Anomaly Replay Loop (weekly + HITL only)
+  run_weekly_baselines.py   Fetches traces and refreshes latency/token/step medians
+  trace-analysis skill      HITL-approved anomaly detection + dataset creation
+  test_anomaly_regression.py Replays hard_error examples; fixed bugs must stay fixed
 ```
 
-**LLM-as-judge golden evals** (`eval/run_weekly_eval.py`) — the agent runs end-to-end against versioned LangSmith golden datasets. Per-example evaluators include:
+**Track 1: deterministic PR gate** — fast, secret-free regression checks that exercise tools directly with versioned inputs and assertions. This catches boundary bugs, retrieval failures, and schema regressions before any LLM or agent runtime is involved.
 
-- `trajectory_subsequence` — partial-credit order-sensitive matching of expected tool call sequences; also emits `trajectory_no_forbidden` to gate on prohibited tool usage
-- `answer_quality` — single rubric call scoring grounded and correctness dimensions together
-- `maintenance_files_updated` — code check: `graph.json`, `citations.json`, `index.md`, `log.md` all written
-- `wiki_faithfulness`, `no_hallucination`, `ingest_outcome_correct` — case-specific LLM judges with per-example pass criteria defined in the dataset JSON
+**Track 2: golden agent evals** — end-to-end agent runs over curated ingest, query, and slide-generation scenarios. Code checks validate trajectories and required artifacts, while LLM judges score groundedness, faithfulness, and task-specific quality.
 
-Per-case evaluator gating: each dataset example opts into specific evaluators via `metadata["evaluators"]`. Non-applicable evaluators record `score=None` rather than failing.
+**Track 3: anomaly replay loop** — weekly CI fetches recent LangSmith traces to update baselines, then replays HITL-approved `hard_error` examples from LangSmith datasets to confirm previously fixed failures do not recur.
 
-**PR gate** (`eval/run_gate.py`, `eval/pr_gate_cases.json`) — deterministic tool-level checks with no LLM calls:
+**Closed feedback loop** — the trace-analysis skill surfaces failures across the full stack (tool hard errors, latency spikes, token blowouts, step-count anomalies, HITL rejections). For hard errors it auto-generates candidate eval/pr_gate_cases.json entries with inferred assertions and waits for HITL approval before committing. The fix and its regression case land in the same PR, permanently hardening the gate against that failure recurring.
 
-- `regression` cases — must hold 100%; any drop blocks merge (SSRF protection, arXiv ID extraction, wiki integrity checks)
-- `capability` cases — tracked but not blocking; promoted to regression once stable
-
-**Closed feedback loop** — the `trace-analysis` skill surfaces failures across the full stack (tool hard errors, latency spikes, token blowouts, step-count anomalies, HITL rejections). For hard errors it auto-generates candidate `eval/pr_gate_cases.json` entries with inferred assertions and waits for HITL approval before committing. The fix and its regression case land in the same PR, permanently hardening the gate against that failure recurring.
 
 ### Wiki Integrity (Linting)
 
