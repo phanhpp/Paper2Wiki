@@ -59,6 +59,7 @@ memories/agents_md_template.md
 requirements.txt
 eval/cached_outputs/
 eval/golden_datasets/
+eval/todo.md
 
 # user profile
 USER.md
