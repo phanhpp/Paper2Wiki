@@ -70,8 +70,12 @@ cross-referenced by the agent.
 When the user has an existing wiki, **always orient yourself before doing anything**:
 
 ① **Read `SCHEMA.md`** — understand the domain, conventions, and tag taxonomy.
-② **Read `index.md`** — learn what pages exist and their summaries.
+② **Read `index.md`** — learn what pages exist and their summaries. This help you find out the already parsed soure (if any)
 ③ **Scan recent `log.md`** — read the last 20-30 entries to understand recent activity.
+④ **Check `raw/`** — if the source already exists in `raw/`, use that as the source of truth. Do **not** call web
+tools again unless the user explicitly asks to refresh/re-ingest from the web.
+⑤ **Inform the user** — briefly state what you found (existing raw file, related wiki pages) and your next steps before writing.
+in
 
 ```bash
 WIKI="${WIKI_PATH:-$(pwd)/wiki}"
@@ -157,7 +161,9 @@ sha256: <hex digest of the raw content below the frontmatter>
 
 The `sha256:` lets a future re-ingest of the same URL skip processing when content is unchanged,
 and flag drift when it has changed. Compute over the body only (everything after the closing
-`---`), not the frontmatter itself.
+`---`), not the frontmatter itself. Use `compute_sha256(text=<raw body>)`, which defaults to
+the wiki convention `body.lstrip("\n")`. Do **not** use `execute`, `python -c`, or shell commands
+to compute this hash.
 
 ## Tag Taxonomy
 
@@ -262,50 +268,38 @@ a `_meta/topic-map.md` that groups pages by theme for faster navigation.
 - Structure created with SCHEMA.md, index.md, log.md
 ```
 
-### Update graphs
-
-Update these after ingest:
-
-- `wiki/graph/graph.json`: node list (concepts, entities, comparisons, queries, summaries, and source-doc nodes) + directed edges between them (e.g. `introduces`, `uses`, `authored_by`) with `confidence: EXTRACTED|INFERRED`.
-- `wiki/graph/citations.json`: per source-doc citation metadata (`title`, `authors`, `year`, optional `arxiv_id`) + `references` and `cited_by` lists (by source-doc id).
-
 ## Core Operations
 
-### 1. Ingest
-
-When the user provides a source (URL, file, paste), integrate it into the wiki:
+### 1. Ingest - only for ingesting new source - SKIP this if resuming/fixing existing wiki
 
 ① **Capture the raw source:**
 
-The ingest pipeline is set by config and cannot be changed via prompt. Check your available tools:
+**Research paper:**
 
-**If you have `fetch_arxiv` → quality mode:**
+- **Only if `fetch_arxiv` and `parse_pdf_docling` are available:** use them for any paper with an arXiv ID, arXiv URL, clear paper title, or URL that `fetch_arxiv` can resolve. Do **not** use web tools for those cases:
+  - Call `fetch_arxiv(query)` with the arXiv ID, URL, or title → returns `pdf_path`, `title`, `metadata`
+  - Call `parse_pdf_docling(pdf_path)` → returns clean markdown with preserved headings, tables, equations
 
-- Call `fetch_arxiv(query)` with the arXiv ID, URL, or title → returns `pdf_path`, `title`, `metadata`
-- Call `parse_pdf_docling(pdf_path)` → returns clean markdown with preserved headings, tables, equations
-- Derive a slug from the title, save to `raw/papers/<slug>.md`
+- Otherwise, use web tools :
+  - Direct paper URL/PDF URL → call `web_extract([url])`
+  - Title or partial info → call `web_search(query)` at most **2 times** (preferably 1 only), then `web_extract([url])` on the best relevant result
+  - If no relevant result is found after 2 searches, stop and inform the user instead of guessing
 
-**If you have `web_extract` → fast mode:**
+**Article, blog, docs, project page, news, Medium/Substack, or any non-paper web source:**
 
-- If the user gave a direct URL → call `web_extract([url])` directly
-- If the user gave a title, arXiv ID, or partial info → call `web_search(query)` first to find the best URL, then call `web_extract([url])` on the result
-  - For arXiv papers prefer the HTML version (`https://arxiv.org/html/<id>`) over the abstract page — it returns full content
-  - Pick the most authoritative source (arXiv > project page > blog post)
-- Returns `ExtractResult` with `.content`, `.title`, `.url`
-- Derive a slug from the title
-- Articles → `raw/articles/<slug>.md`, papers/PDFs → `raw/papers/<slug>.md`
+- If the user gave a direct URL → call `web_extract([url])` directly. If the result shows sign-in/payment is required, stop and inform user immediately.
+- If the URL is missing or ambiguous → call `web_search(query)` first, then `web_extract([url])`.
+- Save articles and general web sources to `raw/articles/<slug>.md`.
 
 **Pasted text:**
 
 - Save directly to `raw/articles/<slug>.md` (or `raw/papers/` if it's a paper excerpt)
 - Derive a slug from the first heading or first line
-
-**After saving:** prepend the raw frontmatter block (see `### raw/ Frontmatter` in the SCHEMA.md template above).
+- **After saving:** prepend the raw frontmatter block
 
 **IMPORTANT**: Check the wiki before extracting. If `raw/papers/<slug>.md` or `raw/articles/<slug>.md` already exists, compare its sha256 against a fresh fetch — skip extraction entirely if content is unchanged.
 
-② **Discuss takeaways** with the user — what's interesting, what matters for
-   the domain.
+② **Discuss takeaways** with the user — what's interesting, what matters.
 
 ③ **Check what already exists** — search index.md and use `grep` to find existing pages for mentioned entities/concepts e.g. `grep(pattern="attention mechanism", path="/wiki/", glob="**/*.md")`
 
@@ -431,6 +425,12 @@ read_file(file_path="/wiki/log.md")  # check total_lines from result
 read_file(file_path="/wiki/log.md", offset=<total_lines - 20>, limit=20)
 ```
 
+⑬ Update 2 files under `wiki/graph/`:
+
+- `wiki/graph/graph.json`: node list (concepts, entities, comparisons, queries, summaries, and source-doc nodes) + directed edges between them (e.g. `introduces`, `uses`, `authored_by`) with `confidence: EXTRACTED|INFERRED`.
+
+- `wiki/graph/citations.json`: per source-doc citation metadata (`title`, `authors`, `year`, optional `arxiv_id`) + `references` and `cited_by` lists (by source-doc id).
+
 ### Bulk Ingest
 
 When ingesting multiple sources at once, batch the updates:
@@ -457,8 +457,7 @@ When content is fully superseded or the domain scope changes:
 - **Never modify files in `raw/`** — sources are immutable. Corrections go in wiki pages.
 - **Always orient first** — read SCHEMA + index + recent log before any operation in a new session.
   Skipping this causes duplicates and missed cross-references.
-- **Always update index.md and log.md** — skipping this makes the wiki degrade. These are the
-  navigational backbone.
+- **Always update index.md, log.md and wiki/graph/** — skipping this makes the wiki degrade. These are the navigational backbone.
 - **Don't create pages for passing mentions** — follow the Page Thresholds in SCHEMA.md. A name
   appearing once in a footnote doesn't warrant an entity page.
 - **Don't create pages without cross-references** — isolated pages are invisible. Every page must link to at least 2 other pages.
@@ -470,3 +469,4 @@ When content is fully superseded or the domain scope changes:
   The agent should check log size during lint.
 - **Handle contradictions explicitly** — don't silently overwrite. Note both claims with dates, mark in frontmatter, flag for user review.
 - **Remember to add sha256**
+- **Avoid using web tools** for resuming and existing wiki unless user explicitly ask you to.

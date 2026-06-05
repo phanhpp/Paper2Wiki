@@ -1,3 +1,36 @@
+from src.ingest_mode import get_ingest_mode
+from src.tools import all_tools
+
+
+def _tool_name(tool) -> str:
+    """Return the LangChain-visible tool name for prompt documentation."""
+    return getattr(tool, "name", getattr(tool, "__name__", type(tool).__name__))
+
+
+def get_ingest_mode_prompt(ingest_mode: str, tool_names: list[str]) -> str:
+    """Return a prompt section that makes active ingest tools explicit."""
+    available = ", ".join(sorted(tool_names))
+    has_quality_tools = "fetch_arxiv" in tool_names and "parse_pdf_docling" in tool_names
+    paper_route = (
+        "For research papers with an arXiv ID, arXiv URL, clear paper title, or URL "
+        "that fetch_arxiv can resolve: use fetch_arxiv, then parse_pdf_docling. "
+        "Do not use web tools for those paper cases."
+        if has_quality_tools
+        else "No fetch_arxiv or parse_pdf_docling available"
+    )
+    return f"""## Tool Availability
+- Available tools: {available}
+- Current ingest mode: `{ingest_mode}`.
+{paper_route}
+"""
+
+
+INGEST_MODE_PROMPT = get_ingest_mode_prompt(
+    get_ingest_mode(),
+    [_tool_name(tool) for tool in all_tools],
+)
+
+
 # SkillsMiddleware already inject skill-index into prompt
 # since backend use virtual mode, file operations are limited to the current directory
 PHASE_1_SUPERVISOR_PROMPT = f"""
@@ -47,6 +80,8 @@ update the correct file BEFORE responding.
 Rule: if it's about the *project or environment*, write to AGENTS.md.
 If it's about the *person*, write to USER.md.
 Skip saving anything trivial, transient, or already in context.
+
+{INGEST_MODE_PROMPT}
 """
 
 DAYTONA_SUBAGENT_BASE = """You are a visual-coding agent with Daytona sandbox access.

@@ -23,8 +23,10 @@ web:
 
 ingest:
   # Parsing strategy for research papers and PDFs.
-  # "quality" = fetch_arxiv + parse_pdf_docling  (slower, best structural fidelity for papers)
-  # "fast"    = web_extract via web tools         (faster, good enough for articles/previews)
+  # Web tools (web_search/web_extract) are always available for articles and generic URLs.
+  # "quality" = add fetch_arxiv + parse_pdf_docling for high-fidelity arXiv/PDF parsing
+  # "fast"    = web tools only; no arXiv/Docling dependency
   # Default: fast
+  # Override without a config file: PAPER2WIKI_INGEST_MODE=fast (env var takes priority)
   # Note: explicit user instructions in the prompt override this setting.
   mode: fast
