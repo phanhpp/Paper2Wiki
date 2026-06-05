@@ -63,6 +63,9 @@ eval/golden_datasets/
 # user profile
 USER.md
 
+# agent memory — contains session notes that may reference sensitive info
+memories/*
+
 # private notes
 notes.md
 

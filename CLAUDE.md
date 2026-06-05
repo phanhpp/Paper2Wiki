@@ -85,32 +85,57 @@ Three skills are available to the supervisor:
 
 ## Testing Strategy
 
-Two layers — they catch different bugs and are both necessary:
+Three tiers — each catches a different class of failure.
 
-**Unit tests** (`tests/test_arxiv_tool.py`, `tests/test_wiki_integrity_check.py`, etc.) — mock all I/O, never touch the network or real files. Fast and deterministic. Catch regressions in **your logic**: cache hit/miss decisions, ID extraction, error paths, schema validation. Use `@pytest.mark.unit`. Run in CI without secrets.
+### Tier 1 — Unit tests (every PR, no secrets, ~10s)
 
-**Regression/integration tests** (`tests/test_regression.py`, `tests/test_anomaly_regression.py`) — hit real external services or real wiki files. Catch a different class of failure: **the external world drifting away from your assumptions** — arXiv API changes, LangSmith dataset schema changes, wiki pages going stale, Docling output format changes. Unit tests can't catch these because mocks assume the behavior you already observed.
+`pytest -m unit` — mock all I/O, never touch network or real files. Test your logic: cache hit/miss, ID extraction, error paths, evaluator functions, path guards, schema validation. Fast and deterministic.
 
-Rule: unit tests are not useless just because they mock — they test your logic. Integration tests are not redundant just because unit tests pass — they test the contract with the outside world.
+### Tier 2 — PR gate + path-conditional golden evals (every PR, LangSmith secrets optional)
 
-**CI jobs:**
-- `unit` job: `not integration and not slow and not langsmith` — no secrets, always runs
-- `regression` job: `langsmith and not slow` — needs `LANGSMITH_API_KEY` + `ANTHROPIC_API_KEY` + `LANGSMITH_TRACING=true`, runs after unit passes
-- `slow` / `integration`: opt-in locally only
+**PR gate** (`eval/run_gate.py`, `eval/pr_gate_cases.json`): deterministic tool-level checks with no LLM calls. Two case types:
+- `regression` — must hold 100%; any drop blocks merge
+- `capability` — tracked but not blocking; promoted to regression once stable
 
-**Required env vars for regression job** (all must be set or tests fail at runtime):
-- `LANGSMITH_API_KEY` — authenticates LangSmith API calls; missing = 401 at collection time
-- `LANGSMITH_TRACING=true` — enables `t.log_inputs/outputs/feedback`; missing = `ValueError` at test runtime
-- `ANTHROPIC_API_KEY` — needed by the LLM judge in `test_anomaly_regression`
-- `LANGSMITH_TEST_CACHE` — path to cassette dir for caching LLM calls; missing `vcrpy` package = `ImportError`
+**Golden evals** (`eval/run_weekly_eval.py`): run the full agent against LangSmith golden datasets (ingest / query / marp) with LLM-as-judge evaluators. Path-conditional — only triggered when relevant files change (avoids burning LLM calls on doc-only PRs).
+
+Evaluator gating: each golden dataset example lists the evaluators it opts into via `metadata["evaluators"]`. The `_gate()` wrapper skips evaluators not listed for a given case and records `score=None` instead of failing.
+
+### Tier 3 — Weekly golden evals + baseline refresh (scheduled)
+
+All three golden eval datasets run regardless of what changed:
+- `eval/run_weekly_baselines.py` — `compute_baselines_async` updates rolling latency/token/step medians from the last 7 days of production traces
+- `pytest -m langsmith` — replays `hard_error` examples from HITL-reviewed LangSmith datasets; gates on no regressions
+
+### Closed feedback loop
+
+`trace-analysis` skill → surfaces hard errors, latency spikes, token blowouts, HITL rejections → auto-generates candidate `eval/pr_gate_cases.json` entries with inferred assertions → HITL approval → fix and regression case land in the same PR, permanently hardening the gate.
+
+### Commands
+
+```bash
+# Tier 1 — unit (no secrets)
+uv run pytest -m unit
+
+# Tier 2 — PR gate (no secrets)
+uv run python eval/run_gate.py
+
+# Tier 2 — golden evals (requires LANGSMITH_API_KEY + ANTHROPIC_API_KEY)
+uv run --env-file .env python eval/run_weekly_eval.py --dataset ingest
+uv run --env-file .env python eval/run_weekly_eval.py --dataset query --use-cached-transformer-query
+
+# Tier 3 — weekly baselines + langsmith regression
+uv run --env-file .env python eval/run_weekly_baselines.py
+uv run --env-file .env pytest -m "langsmith and not slow and not integration" -q
+```
 
 **Known CI constraints:**
-- `wiki/` is not committed — `test_existing_wiki_pages_quality` skips gracefully when pages are absent (passes in CI, runs fully locally)
-- `test_fetch_arxiv_downloads_paper` hits the real arXiv network — marked `integration`, excluded from regression job to avoid 429 rate limits
+- `wiki/` is not committed — wiki-dependent tests skip gracefully when pages are absent
+- `test_fetch_arxiv_downloads_paper` hits real arXiv network — marked `integration`, excluded from CI to avoid 429s
 
-**When adding a new tool**, add both:
+**When adding a new tool**, add:
 1. A unit test with mocked I/O covering the main logic branches
-2. A `@pytest.mark.integration` or `@pytest.mark.langsmith` test that calls the real thing at least once
+2. A golden dataset example in the appropriate `eval/golden_datasets/*.json`
 
 ## Pending Cleanup
 
@@ -118,39 +143,7 @@ Rule: unit tests are not useless just because they mock — they test your logic
 
 ## Todos
 
-- Integrate anomaly_detection and create_eval_dataset to Trace_analyzer skill
 - Capacity limit for /memories/
-- Wrap agent into Cli
+- Wrap agent into ClI
 - Consolidation agent + cron
 - RL
-
-## Next Steps — CI Restructure (blocked on web extraction tool)
-
-**Step 1 (current):** Build web extraction tool to replace `fetch_arxiv` + `parse_pdf_docling`.
-Input: URL. Output: parsed markdown. No PDF download, no arXiv API dependency.
-
-**Step 2:** Once web extraction lands, restructure CI:
-
-```
-Every PR — unit tests only (pytest -m unit):
-    lint logic, evaluator fns, is_failure, tool logic
-    ~10s, no secrets, no network
-
-weekly — real agent (GitHub Actions schedule):
-    fetch traces (last 24h)
-    compute_baselines_async        ← update rolling baseline from fresh traffic
-    detect_anomalies_async         ← compare current traces against baseline
-    run_evaluate (per dataset)     ← regression check on known failure datasets
-    full URL ingest (1 paper, web extraction)
-    query flow (read-only, 1 LLM call)
-    marp creation (1 LLM call)
-```
-
-The current regression job (langsmith and not slow and not integration) runs anomaly
-regression on every PR — move it to weekly. The PR gate should be unit tests only.
-
-The meaningful part of this setup is not the PR gate but the closed loop:
-    production traces → trace-analyzer → anomaly datasets → weekly regression
-    → catch regressions → HITL + skill patch → weekly confirms fix holds
-
-The PR gate protects logic regressions. The weekly loop catches agent failures.

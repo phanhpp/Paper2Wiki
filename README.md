@@ -170,52 +170,37 @@ llm_wiki/
 
 ### Tests & CI
 
-CI uses a two-layer eval strategy with a closed feedback loop from production:
+A three-tier eval harness with an end-to-end feedback loop from production traces to regression datasets.
 
 ```text
-Every PR (no secrets, ~30s)
-  Unit tests       — mocked I/O, deterministic logic
-  Eval gate        — calls tools directly, asserts on real outputs
+Tier 1 — Every PR (no secrets, ~10s)
+  pytest -m unit          Mocked I/O, deterministic logic, path guards, evaluator functions
 
-Every PR — path-conditional golden evals (LangSmith secrets)
-  PR touches ingest tools or llm-wiki skill  → eval-ingest runs
-  PR touches marp skill or daytona_agent     → eval-marp runs
-  PR touches llm-wiki skill or agent.py      → eval-query runs
-  PR touches only docs/README                → no golden evals run
+Tier 2 — Every PR (path-conditional, LangSmith secrets)
+  eval/run_gate.py        Deterministic tool-level assertions — 100% pass required to merge
+  eval/run_weekly_eval.py  LLM-as-judge golden evals (ingest / query / marp)
+                           Triggered only when relevant source files change
 
-Weekly schedule / "Run workflow" button
-  All three golden evals run regardless of what changed
-  run_weekly_baselines.py    — fetch traces → update baselines only
-  pytest-langsmith — replay hard_error examples from HITL-reviewed datasets, gate on no regressions
+Tier 3 — Weekly schedule
+  run_weekly_baselines.py  Refresh rolling latency/token/step baselines from 7 days of traces
+  pytest -m langsmith      Replay hard_error examples from HITL-reviewed LangSmith datasets
 ```
 
-**PR gate (`eval/run_gate.py`)** — deterministic tool-level checks versioned in `eval/pr_gate_cases.json`. Two case types:
+**LLM-as-judge golden evals** (`eval/run_weekly_eval.py`) — the agent runs end-to-end against versioned LangSmith golden datasets. Per-example evaluators include:
 
-- `regression` — must hold 100%; any drop blocks merge (SSRF protection, arXiv ID lookup, wiki integrity)
-- `capability` — tracked but not gate-blocking; promoted to regression once stable
+- `trajectory_subsequence` — partial-credit order-sensitive matching of expected tool call sequences; also emits `trajectory_no_forbidden` to gate on prohibited tool usage
+- `answer_quality` — single rubric call scoring grounded and correctness dimensions together
+- `maintenance_files_updated` — code check: `graph.json`, `citations.json`, `index.md`, `log.md` all written
+- `wiki_faithfulness`, `no_hallucination`, `ingest_outcome_correct` — case-specific LLM judges with per-example pass criteria defined in the dataset JSON
 
-**Weekly pipeline (`eval/run_weekly_baselines.py`)** — refreshes baselines against the last 7 days of production traces:
+Per-case evaluator gating: each dataset example opts into specific evaluators via `metadata["evaluators"]`. Non-applicable evaluators record `score=None` rather than failing.
 
-1. `compute_baselines_async` — updates rolling per-run-name latency/token/step medians in `memories/baselines.json`
-2. `pytest -m langsmith` — replays `hard_error` examples from LangSmith datasets (populated via HITL); gates on no regressions
+**PR gate** (`eval/run_gate.py`, `eval/pr_gate_cases.json`) — deterministic tool-level checks with no LLM calls:
 
-Anomaly detection and dataset writes are HITL-only (via `trace-analysis` skill) — pushing automatically risks committing infra noise as regression examples.
+- `regression` cases — must hold 100%; any drop blocks merge (SSRF protection, arXiv ID extraction, wiki integrity checks)
+- `capability` cases — tracked but not blocking; promoted to regression once stable
 
-**Closed loop:** running the `trace-analysis` skill surfaces failures across the full stack — tool and LLM hard errors, latency spikes, token blowouts, step-count anomalies, skill deviations, and HITL rejections. For hard errors, it auto-generates candidate `eval/pr_gate_cases.json` entries with inferred assertions and asks for HITL approval before committing. The fix and its regression case land in the same PR, permanently hardening the gate against that failure recurring.
-
-```bash
-# PR gate (no secrets needed)
-uv run python eval/run_gate.py
-
-# Unit tests
-uv run pytest -m "not integration and not slow and not langsmith" -q
-
-# Weekly pipeline (requires LANGSMITH_API_KEY + ANTHROPIC_API_KEY)
-uv run --env-file .env python eval/run_weekly_baselines.py
-LANGSMITH_TEST_SUITE="paper2wiki-regression" \
-LANGSMITH_TEST_CACHE=tests/cassettes \
-uv run pytest -m "langsmith and not slow and not integration" -q
-```
+**Closed feedback loop** — the `trace-analysis` skill surfaces failures across the full stack (tool hard errors, latency spikes, token blowouts, step-count anomalies, HITL rejections). For hard errors it auto-generates candidate `eval/pr_gate_cases.json` entries with inferred assertions and waits for HITL approval before committing. The fix and its regression case land in the same PR, permanently hardening the gate against that failure recurring.
 
 ### Wiki Integrity (Linting)
 
