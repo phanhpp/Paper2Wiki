@@ -68,7 +68,7 @@ from eval.eval_utils import message_text
 from eval.golden_evaluators import (
     no_crash, trajectory_subsequence, ingest_outcome_correct, min_page_count, has_wikilinks,
     maintenance_files_updated, wiki_faithfulness, no_hallucination,
-    answer_grounded, answer_correctness,
+    answer_quality,
     has_marp_frontmatter, has_lead_slide, has_content_slides,
     css_embedded, file_saved, used_web_search, slide_quality,
 )
@@ -76,7 +76,8 @@ from eval.golden_evaluators import (
 REPO_ROOT = Path(__file__).resolve().parents[1]  # repo root — paths from agent are relative to this
 CACHED_PARTIAL_INGEST_OUTPUT = REPO_ROOT / "eval/cached_outputs/paper2web_partial_ingest.json"
 CACHED_FULL_INGEST_OUTPUT = REPO_ROOT / "eval/cached_outputs/graphrag_full_ingest.json"
-
+CACHED_ATTENTION_CONTRIBUTION_QUERY_OUTPUT = REPO_ROOT / "eval/cached_outputs/attention_contribution_query.json"
+CACHED_TRANSFORMER_ARCHITECTURE_QUERY_OUTPUT = REPO_ROOT / "eval/cached_outputs/transformer_architecture_query.json"
 
 # ---------------------------------------------------------------------------
 # Target function helpers
@@ -207,6 +208,7 @@ async def _stream_agent(
         - files_written: list of paths written
         - final_message: final message from the agent
     """
+    print("===Stream agent running===")
     thread_id = (config.get("configurable") or {}).get("thread_id")
     if not thread_id:
         thread_id = f"eval-{uuid7()}"
@@ -288,7 +290,7 @@ async def _stream_agent(
         final_message = message_text(getattr(last, "content", ""))
 
     # Debugging
-    print(f"Trajectory: {trajectory}")
+    print(f"\nTrajectory: {trajectory}")
     print(f"Files written: {files_written}")
     print(f"Final message: {final_message}")
     return trajectory, files_written, final_message
@@ -354,6 +356,20 @@ async def run_query(inputs: dict) -> dict:
     Expects inputs["message"]. Read-only queries should not write wiki files;
     returns trajectory and final_message for grounding / correctness judges.
     """
+    msg = inputs.get("message", "").lower()
+    if (
+        os.environ.get("PAPER2WIKI_USE_CACHED_ATTENTION_CONTRIBUTION_QUERY") == "1"
+        and "key contributions of the attention" in msg
+    ):
+        print(f"Using cached attention contribution query output: {CACHED_ATTENTION_CONTRIBUTION_QUERY_OUTPUT}")
+        return json.loads(CACHED_ATTENTION_CONTRIBUTION_QUERY_OUTPUT.read_text())
+    if (
+        os.environ.get("PAPER2WIKI_USE_CACHED_TRANSFORMER_ARCHITECTURE_QUERY") == "1"
+        and "architecture of the transformer" in msg
+    ):
+        print(f"Using cached transformer architecture query output: {CACHED_TRANSFORMER_ARCHITECTURE_QUERY_OUTPUT}")
+        return json.loads(CACHED_TRANSFORMER_ARCHITECTURE_QUERY_OUTPUT.read_text())
+
     config = {"configurable": {"thread_id": str(uuid7())}}
     trajectory, _, final_message = await _stream_agent(inputs["message"], config)
     return {"trajectory": trajectory, "final_message": final_message}
@@ -394,10 +410,22 @@ async def run_marp(inputs: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 def _gate(fn):
-    """Wrap an evaluator so it only fires when its name is listed in
-    example.metadata['evaluators']. If the field is absent, all evaluators run
-    (backwards-compatible). When gated out, returns score=None so LangSmith
-    records the key as N/A rather than a failure.
+    """Wrap an evaluator with per-case gating based on example.metadata["evaluators"].
+
+    Every evaluator in DATASETS should be wrapped with _gate() so that per-case
+    evaluator lists defined in the golden dataset JSON are respected:
+
+        metadata["evaluators"]: ["no_crash", "trajectory_subsequence", "answer_quality"]
+
+    Behaviour:
+    - If metadata["evaluators"] is absent: evaluator always runs (backwards-compatible).
+    - If metadata["evaluators"] is present and fn.__name__ IS listed: evaluator runs.
+    - If metadata["evaluators"] is present and fn.__name__ is NOT listed: evaluator is
+      skipped and returns score=None so LangSmith records the key as N/A, not a failure.
+
+    This allows the same evaluator pool to serve all cases in a dataset while individual
+    cases opt in/out of specific evaluators (e.g. negative query cases skip answer_quality;
+    already-ingested ingest cases skip min_page_count).
     """
     @wraps(fn)
     def wrapper(run, example) -> dict:
@@ -450,10 +478,10 @@ DATASETS: dict[str, dict] = {
     "query": {
         "dataset": "paper2wiki-golden-query",
         "target": run_query,
-        "evaluators": [
+        "evaluators": [_gate(fn) for fn in [
             no_crash, trajectory_subsequence,
-            answer_grounded, answer_correctness
-        ],
+            answer_quality,
+        ]],
         "hard_gate_keys": {"no_crash", "trajectory_no_forbidden"},
         "threshold": 0.75,
         "num_repetitions": 1,
@@ -461,10 +489,10 @@ DATASETS: dict[str, dict] = {
     "marp": {
         "dataset": "paper2wiki-golden-marp",
         "target": run_marp,
-        "evaluators": [
+        "evaluators": [_gate(fn) for fn in [
             has_marp_frontmatter, has_lead_slide, has_content_slides,
             css_embedded, file_saved, used_web_search, slide_quality,
-        ],
+        ]],
         "hard_gate_keys": {"has_marp_frontmatter", "file_saved"},
         "threshold": 0.67,
         "num_repetitions": 1,
@@ -568,6 +596,10 @@ def main() -> None:
                    help="Temporarily use cached Paper2Web partial-ingest output for evaluator debugging")
     p.add_argument("--use-cached-full-ingest", action="store_true",
                    help="Temporarily use cached GraphRAG full-ingest output for evaluator debugging")
+    p.add_argument("--use-cached-attention-query", action="store_true",
+                   help="Temporarily use cached attention contribution query output for evaluator debugging")
+    p.add_argument("--use-cached-transformer-query", action="store_true",
+                   help="Temporarily use cached transformer architecture query output for evaluator debugging")
     p.add_argument("--filter-type", help="Run only examples with metadata.type == this value")
     args = p.parse_args()
 
@@ -575,6 +607,10 @@ def main() -> None:
         os.environ["PAPER2WIKI_USE_CACHED_PARTIAL_INGEST"] = "1"
     if args.use_cached_full_ingest:
         os.environ["PAPER2WIKI_USE_CACHED_FULL_INGEST"] = "1"
+    if args.use_cached_attention_query:
+        os.environ["PAPER2WIKI_USE_CACHED_ATTENTION_CONTRIBUTION_QUERY"] = "1"
+    if args.use_cached_transformer_query:
+        os.environ["PAPER2WIKI_USE_CACHED_TRANSFORMER_ARCHITECTURE_QUERY"] = "1"
 
     if args.dataset == "marp" and not os.getenv("DAYTONA_API_KEY"):
         print("DAYTONA_API_KEY not set — skipping marp eval (tracking only)")

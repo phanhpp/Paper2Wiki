@@ -65,7 +65,7 @@ from pathlib import Path
 
 from langsmith.schemas import Run, Example
 
-from eval.eval_utils import call_matches, get_ingest_mode, llm_judge, message_text
+from eval.eval_utils import call_matches, get_ingest_mode, llm_judge, llm_judge_multi, message_text
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -289,27 +289,39 @@ def ingest_outcome_correct(run: Run, example: Example) -> dict:
 # QUERY — LLM judges
 # ---------------------------------------------------------------------------
 
-def answer_grounded(inputs: dict, outputs: dict) -> dict:
-    """LLM judge: query answer cites wiki pages via at least one [[...]] wikilink."""
-    system = (
-        "You are checking whether an AI agent's answer cites wiki pages.\n"
-        "Score 1 if the answer contains at least one [[...]] wikilink, 0 if it gives information without citing sources.\n"
-        'Reply with JSON only: {"score": 0|1, "reason": "<15 words>"}'
-    )
-    return llm_judge(system, outputs.get("final_message", "")[:3000], "answer_grounded")
 
+def answer_quality(run: Run, example: Example) -> list[dict]:
+    """LLM judge: score answer on grounded and correctness in a single rubric call.
 
-def answer_correctness(inputs: dict, outputs: dict, reference_outputs: dict) -> dict:
-    """LLM judge: answer addresses ≥⅔ of reference_outputs["expected_concepts"]."""
-    concepts = reference_outputs.get("expected_concepts", [])
-    if not concepts:
-        return {"key": "answer_correctness", "score": 1.0, "comment": "no reference"}
-    system = (
-        f"You are checking whether an answer covers these concepts: {concepts}\n"
-        "Score 1 if at least two-thirds of the concepts are addressed, 0 otherwise.\n"
-        'Reply with JSON only: {"score": 0|1, "reason": "<15 words>"}'
+    Emits two LangSmith result keys: ``answer_grounded`` and ``answer_correctness``.
+
+    Uses metadata["judge_criteria"] for case-specific pass criteria when defined;
+    falls back to generic wikilink-presence and concept-coverage checks otherwise.
+    """
+    outputs = run.outputs or {}
+    ref_outputs = example.outputs or {}
+    judge_criteria = (example.metadata or {}).get("judge_criteria", {})
+
+    grounded_criteria = judge_criteria.get(
+        "answer_grounded",
+        "Answer contains at least one [[...]] wikilink citing a wiki page.",
     )
-    return llm_judge(system, outputs.get("final_message", "")[:3000], "answer_correctness")
+    concepts = ref_outputs.get("expected_concepts", [])
+    correctness_criteria = judge_criteria.get(
+        "answer_correctness",
+        f"Answer addresses at least two-thirds of these concepts: {concepts}." if concepts else "Answer is relevant and helpful.",
+    )
+
+    rubric = f"""Evaluate a wiki query agent's answer on two dimensions. Score each 0 or 1. Return ONLY valid JSON.
+
+Dimensions:
+1. answer_grounded: {grounded_criteria}
+2. answer_correctness: {correctness_criteria}
+
+Return JSON: {{"answer_grounded": 0|1, "answer_grounded_reason": "<15 words>", "answer_correctness": 0|1, "answer_correctness_reason": "<15 words>"}}"""
+
+    final = outputs.get("final_message", "")[:6000]
+    return llm_judge_multi(rubric, final, ["answer_grounded", "answer_correctness"])
 
 
 # ---------------------------------------------------------------------------

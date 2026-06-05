@@ -91,3 +91,36 @@ def llm_judge(system: str, user_content: str, key: str, max_input_chars: int = 1
     except Exception:
         preview = raw.replace("\n", " ")[:120]
         return {"key": key, "score": 0.0, "comment": f"parse error: {preview!r}"}
+
+
+def llm_judge_multi(rubric: str, answer: str, keys: list[str], max_input_chars: int = 12000) -> list[dict]:
+    """Call the Sonnet judge with a multi-dimension rubric; return one LangSmith result dict per key.
+
+    The rubric must instruct the model to return JSON with a float/int score and optional reason
+    field for each key, e.g. {"grounded": 1, "grounded_reason": "...", "correctness": 0, ...}.
+    Keys with missing scores default to 0.0.
+    """
+    compacted = compact_text(answer)
+    client = anthropic.Anthropic()
+    resp = client.messages.create(
+        model=JUDGE_MODEL,
+        max_tokens=512,
+        messages=[{"role": "user", "content": (rubric + "\n\nAnswer to evaluate:\n" + compacted)[:max_input_chars]}],
+    )
+    raw = resp.content[0].text
+    try:
+        scores = parse_judge_json(raw)
+    except Exception:
+        preview = raw.replace("\n", " ")[:120]
+        return [{"key": k, "score": 0.0, "comment": f"parse error: {preview!r}"} for k in keys]
+
+    results = []
+    for key in keys:
+        score = scores.get(key, 0.0)
+        reason = scores.get(f"{key}_reason", scores.get("reason", ""))
+        try:
+            score = float(bool(score) if isinstance(score, bool) else score)
+        except (TypeError, ValueError):
+            score = 0.0
+        results.append({"key": key, "score": score, "comment": str(reason)})
+    return results
