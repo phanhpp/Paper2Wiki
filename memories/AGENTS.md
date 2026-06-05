@@ -70,3 +70,5 @@ When resuming a wiki job, the parsed source file is already in `raw/`. Use it as
 
 **DO NOT exceed hard limits for wiki creation**
 Follow the hard limits of 2 entities and 4 concepts in `skills/llm-wiki/SKILL.md`.
+
+**DO NOT forget to cite wiki pages** used for answering user's query.

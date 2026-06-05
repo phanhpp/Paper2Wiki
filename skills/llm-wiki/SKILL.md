@@ -57,7 +57,10 @@ wiki/
 ├── entities/           # Layer 2: Entity pages (people, orgs, products, models)
 ├── concepts/           # Layer 2: Concept/topic pages
 ├── comparisons/        # Layer 2: Side-by-side analyses
-└── queries/            # Layer 2: Filed query results worth keeping
+├── queries/            # Layer 2: Filed query results worth keeping
+└── graph/              # Layer 2: Knowledge graph index
+    ├── graph.json      # Node/edge graph with confidence (EXTRACTED|INFERRED)
+    └── citations.json  # Per-source citation metadata (title, authors, references, cited_by)
 ```
 
 **Layer 1 — Raw Sources:** Immutable. The agent reads but never modifies these.
@@ -327,9 +330,15 @@ This is the difference between a growing wiki and a pile of duplicates.
 - Append to `log.md`: `## [YYYY-MM-DD] ingest | Source Title`
 - List every file created or updated in the log entry
 
-⑥ **Quick check (default after ingest):** Run `quick_wiki_integrity_check` which only catches broken `[[wikilinks]]` and frontmatter/tag issues. This is the standard post-ingest validation; do not run the full health check unless the user explicitly asks for a lint/audit.
+⑥ **Update graph files** under `wiki/graph/`:
 
-⑦ **Report what changed** — list every file created or updated to the user.
+- `wiki/graph/graph.json`: node list (concepts, entities, comparisons, queries, summaries, and source-doc nodes) + directed edges between them (e.g. `introduces`, `uses`, `authored_by`) with `confidence: EXTRACTED|INFERRED`.
+
+- `wiki/graph/citations.json`: per source-doc citation metadata (`title`, `authors`, `year`, optional `arxiv_id`) + `references` and `cited_by` lists (by source-doc id).
+
+⑦ **Quick check (default after ingest):** Run `quick_wiki_integrity_check` which only catches broken `[[wikilinks]]` and frontmatter/tag issues. This is the standard post-ingest validation; do not run the full health check unless the user explicitly asks for a lint/audit.
+
+⑧ **Report what changed** — list every file created or updated to the user.
 
 A single source can trigger updates across 5-15 wiki pages. This is normal
 and desired — it's the compounding effect.
@@ -342,7 +351,7 @@ When the user asks a question about the wiki's domain:
 ② **For wikis with 50+ pages**, also `grep` across all `.md` files
    for key terms — the index alone may miss relevant content.
 ③ **Read the relevant pages** using `read_file`.
-④ **Synthesize an answer** from the compiled knowledge. Cite the wiki pages
+④ **Must cite the answer** At then end of your answer, must cite the wiki pages
    you drew from: "Based on [[page-a]] and [[page-b]]..."
 ⑤ **File valuable answers back** — if the answer is a substantial comparison,
    deep dive, or novel synthesis, create a page in `queries/` or `comparisons/`.
@@ -351,55 +360,10 @@ When the user asks a question about the wiki's domain:
 
 ### 3. Lint - Full Health Check
 
-Only run this section when the user explicitly asks to lint / health-check / audit the wiki.
-For normal ingest flows, `quick_wiki_integrity_check` is enough (see Ingest step ⑥).
+Only run when the user explicitly asks to lint / health-check / audit the wiki.
+For normal ingest, `quick_wiki_integrity_check` (step ⑥ of Ingest) is enough.
 
-① Run `quick_wiki_integrity_check` tool which only checks:
-
-- **Broken wikilinks:** use `files=None` (or no args) to scan wikilinks in all files
-- **Frontmatter validation:** Every wiki page must have all required fields
-   (title, created, updated, type, tags, sources). Tags must be in the taxonomy.
-
-② **Orphan pages:** Find pages with no inbound `[[wikilinks]]` from other pages.
-
-```python
-# Use execute_code for this — programmatic scan across all wiki pages
-import os, re
-from collections import defaultdict
-wiki = "<WIKI_PATH>"
-# Scan all .md files in entities/, concepts/, comparisons/, queries/
-# Extract all [[wikilinks]] — build inbound link map
-# Pages with zero inbound links are orphans
-```
-
-③ **Index completeness:** Every wiki page should appear in `index.md`. Compare the filesystem against index entries.
-
-④ **Stale content:** Pages whose `updated` date is >90 days older than the most
-   recent source that mentions the same entities.
-
-⑤ **Contradictions:** Pages on the same topic with conflicting claims. Look for
-   pages that share tags/entities but state different facts. Surface all pages
-   with `contested: true` or `contradictions:` frontmatter for user review.
-
-⑥ **Quality signals:** List pages with `confidence: low` and any page that cites
-   only a single source but has no confidence field set — these are candidates
-   for either finding corroboration or demoting to `confidence: medium`.
-
-⑦ **Source drift:** For each file in `raw/` with a `sha256:` frontmatter, recompute
-   the hash and flag mismatches. Mismatches indicate the raw file was edited
-   (shouldn't happen — raw/ is immutable) or ingested from a URL that has since
-   changed. Not a hard error, but worth reporting.
-
-⑧ **Page size:** Flag pages over 200 lines — candidates for splitting.
-
-⑨ **Tag audit:** List all tags in use, flag any not in the SCHEMA.md taxonomy.
-
-⑩ **Log rotation:** If log.md exceeds 500 entries, rotate it.
-
-⑪ **Report findings** with specific file paths and suggested actions, grouped by
-   severity (broken links > orphans > source drift > contested pages > stale content > style issues).
-
-⑫ **Append to log.md:** `## [YYYY-MM-DD] lint | N issues found`
+For the full 12-step procedure, read: [references/lint-full-health-check.md](references/lint-full-health-check.md)
 
 ## Working with the Wiki
 
@@ -424,12 +388,6 @@ read_file(file_path="/wiki/log.md")  # check total_lines from result
 # Step 2 — read last 20
 read_file(file_path="/wiki/log.md", offset=<total_lines - 20>, limit=20)
 ```
-
-⑬ Update 2 files under `wiki/graph/`:
-
-- `wiki/graph/graph.json`: node list (concepts, entities, comparisons, queries, summaries, and source-doc nodes) + directed edges between them (e.g. `introduces`, `uses`, `authored_by`) with `confidence: EXTRACTED|INFERRED`.
-
-- `wiki/graph/citations.json`: per source-doc citation metadata (`title`, `authors`, `year`, optional `arxiv_id`) + `references` and `cited_by` lists (by source-doc id).
 
 ### Bulk Ingest
 
@@ -470,3 +428,4 @@ When content is fully superseded or the domain scope changes:
 - **Handle contradictions explicitly** — don't silently overwrite. Note both claims with dates, mark in frontmatter, flag for user review.
 - **Remember to add sha256**
 - **Avoid using web tools** for resuming and existing wiki unless user explicitly ask you to.
+- **DO NOT forget to cite the wiki pages** used for Query flow.
