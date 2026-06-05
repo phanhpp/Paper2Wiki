@@ -81,3 +81,50 @@ def test_edit_blocks_sensitive_paths() -> None:
     result = backend.edit("keys/server.key", "old", "new")
 
     assert result.error == "Editing keys/server.key is blocked"
+
+
+@pytest.mark.unit
+def test_eval_mode_allows_absolute_wiki_paths(tmp_path) -> None:
+    """Eval mode treats /wiki paths as virtual repo-root paths."""
+    wiki_dir = tmp_path / "wiki" / "concepts"
+    wiki_dir.mkdir(parents=True)
+    page = wiki_dir / "example.md"
+    page.write_text("hello", encoding="utf-8")
+
+    backend = GuardedLocalShellBackend(
+        root_dir=tmp_path,
+        virtual_mode=True,
+        eval_mode=True,
+    )
+
+    assert backend._eval_read_blocked("/wiki") is None
+    assert backend._eval_read_blocked("/wiki/concepts") is None
+
+    listed = backend.ls("/wiki/concepts")
+    read = backend.read("/wiki/concepts/example.md")
+    write = backend.write("/wiki/new.md", "new")
+
+    assert listed.error is None
+    assert [entry["path"] for entry in listed.entries] == ["/wiki/concepts/example.md"]
+    assert read.error is None
+    assert read.file_data["content"] == "hello"
+    assert write.error is None
+    assert (tmp_path / "wiki" / "new.md").read_text(encoding="utf-8") == "new"
+
+
+@pytest.mark.unit
+def test_eval_mode_blocks_absolute_non_wiki_paths(tmp_path) -> None:
+    """Eval mode still blocks reads and writes outside allowed roots."""
+    backend = GuardedLocalShellBackend(
+        root_dir=tmp_path,
+        virtual_mode=True,
+        eval_mode=True,
+    )
+
+    read = backend.read("/src/agents/agent.py")
+    listed = backend.ls("/src")
+    write = backend.write("/src/new.py", "print('nope')")
+
+    assert read.error.startswith("[eval_mode] Reading /src/agents/agent.py is blocked")
+    assert listed.error.startswith("[eval_mode] Reading /src is blocked")
+    assert write.error.startswith("[eval_mode] Writing /src/new.py is blocked")

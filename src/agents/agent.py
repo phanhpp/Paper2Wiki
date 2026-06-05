@@ -11,7 +11,7 @@ from langchain_core.utils.uuid import uuid7
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from src.sessions.sessions_db_setup import SESSIONS_DIR
 from pathlib import Path
-from langchain.agents.middleware import PIIMiddleware, ModelCallLimitMiddleware #, AnthropicPromptCachingMiddleware
+from langchain.agents.middleware import PIIMiddleware, ModelCallLimitMiddleware, ToolCallLimitMiddleware
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2] 
@@ -47,67 +47,65 @@ async def close_checkpointer() -> None:
         _checkpointer = None
 
 
-async def create_supervisor(thread_id: str | None = None):
+async def create_supervisor(thread_id: str | None = None, eval_mode: bool = False):
     """
     Create the main supervisor agent for a conversation thread.
 
-    This supervisor runs on the local guarded shell backend and is configured with:
-    - project skills from `skills/`
-    - long-lived memory instructions from `memories/AGENTS.md`
-    - a checkpoint saver for human-in-the-loop interrupt/resume
-    - a single compiled subagent (`marp-agent`) whose runnable is a Daytona-sandboxed agent
-
     Args:
         thread_id: Identifier used to locate or create the Daytona sandbox for the
-            visualization subagent.
+            visualization subagent. Ignored in eval_mode (no sandbox created).
+        eval_mode: When True, creates a leaner agent safe for automated ingest/query eval:
+            - No Daytona sandbox / marp-slide-creator subagent (use eval_mode=False for marp).
+            - HITL still enabled on execute / write_file / edit_file (auto-approved in
+              eval/run_weekly_eval.py).
+            - GuardedLocalShellBackend limits reads to wiki/skills/memories (+ config.yaml)
+              and writes to wiki/; shell commands gated by HITL in run_weekly_eval.py.
 
     Returns:
         A DeepAgent supervisor instance produced by `create_deep_agent(...)`.
     """
-    # Need thread id to restore the sandbox from the previous session
     if not thread_id:
         thread_id = str(uuid7())
 
-    # Create Daytona agent for marp slide creation
-    _daytona_backend, daytona_sandbox, visual_agent = create_daytona_agent(
-        model=set_up_llms("claude-haiku-4-5-20251001"),
-        thread_id=thread_id,
-        skills=[str(REPO_ROOT / "skills/marp-slide")], # not using virture mode so can use absolute path
-    )
-    register_sandbox(thread_id, daytona_sandbox.id)
+    subagents = []
+    if not eval_mode:
+        # Create Daytona agent for marp slide creation (production only)
+        _daytona_backend, daytona_sandbox, visual_agent = create_daytona_agent(
+            model=set_up_llms("claude-haiku-4-5-20251001"),
+            thread_id=thread_id,
+            skills=[str(REPO_ROOT / "skills/marp-slide")],
+        )
+        register_sandbox(thread_id, daytona_sandbox.id)
+        subagents = [CompiledSubAgent(
+            name="marp-slide-creator",
+            description="For creating Marp slides/ presentations",
+            runnable=visual_agent,
+            interrupt_on={"execute": True, "write_file": True, "edit_file": True},
+        )]
 
-    # Each subagent can have its own interrupt_on configuration that overrides the main agent’s settings
-    custom_subagent = CompiledSubAgent(
-        name="marp-slide-creator",
-        description="For creating Marp slides/ presentations",
-        runnable=visual_agent,
-        interrupt_on={ 
-            "execute": True,
-            "write_file": True,
-            "edit_file": True,
-        },
+    supervisor_backend = GuardedLocalShellBackend(
+        root_dir=str(REPO_ROOT),
+        virtual_mode=True,
+        eval_mode=eval_mode,
     )
 
-    # Backend
-    supervisor_backend = GuardedLocalShellBackend(root_dir=str(REPO_ROOT), virtual_mode=True)
-    
     checkpointer = await _get_async_checkpointer()
 
     supervisor = create_deep_agent(
-        model=set_up_llms("claude-haiku-4-5-20251001"),
+        model=set_up_llms("claude-sonnet-4-6"), #claude-haiku-4-5-20251001
         skills=["/skills/"],
         memory=["memories/AGENTS.md","memories/USER.md"],
         system_prompt=PHASE_1_SUPERVISOR_PROMPT,
         backend=supervisor_backend,
         tools=all_tools,
         store=InMemoryStore(),
-        checkpointer=checkpointer,  # Required!
-        subagents=[custom_subagent],
+        checkpointer=checkpointer,
+        subagents=subagents,
         interrupt_on={
             "execute": True,
             "write_file": True,
             "edit_file": True,
-            },
+        },
         middleware=[
             # Redact emails in user input before sending to model
             PIIMiddleware(
@@ -129,9 +127,14 @@ async def create_supervisor(thread_id: str | None = None):
                 apply_to_input=True,
             ),
             ModelCallLimitMiddleware(
-                run_limit=15,        # sized for ingest worst case
+                run_limit=20,        # sized for ingest worst case
                 #thread_limit=100,    # generous for long query sessions
                 exit_behavior="end"
+            ),
+            ToolCallLimitMiddleware(
+                tool_name="web_extract",
+                thread_limit=4, # across all runs in the thread
+                run_limit=2, # across all calls in a single run
             ),
             # AnthropicPromptCachingMiddleware(
             #     ttl="10m",
