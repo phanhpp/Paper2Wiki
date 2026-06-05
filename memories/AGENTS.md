@@ -50,7 +50,23 @@ or use `uv`, e.g. `uv run ...`
 
 ## Known pitfalls
 
-- sha256 re-computation needs `body.lstrip('\n')` to match the stored value - hashlib.sha256(body.lstrip('\n').encode('utf-8')).hexdigest() where body = everything after the closing --- delimiter
-- trace-analysis skill: when user says "analyze errors/failures/traces with errors", MUST pass `error=True` to `run_trace_report_async` — do NOT omit it and fetch all traces
-- trace-analysis skill: MUST clean up offloaded trace files (remove `traces_path`) after analysis is complete and results are presented. Do NOT leave offloaded JSON files in the repo
-- CancelledError in traces usually indicates user manually cancelled execution, not an actual tool/code error. Check trace context before proposing fixes.
+**DO NOT skip `lstrip('\n')` when computing sha256**
+Raw-body hash is `hashlib.sha256(body.lstrip('\n').encode('utf-8')).hexdigest()` where `body` is everything after the closing `---` delimiter. Omitting the strip produces a mismatched hash.
+
+**DO NOT omit `error=True` when the user asks about errors/failures**
+When user says "analyze errors/failures/traces with errors", pass `error=True` to `run_trace_report_async`. Omitting it fetches all traces, not just failing ones.
+
+**DO NOT leave offloaded trace files in the repo**
+After trace analysis is complete and results are presented, delete the offloaded `traces_path` JSON file. Leaving it behind pollutes the repo.
+
+**DO NOT treat `CancelledError` in traces as a code bug**
+`CancelledError` usually means the user manually cancelled execution. Check trace context before proposing fixes.
+
+**DO NOT skip reading the relevant skill before starting a task**
+Always load the skill first — e.g. before any wiki job, read `skills/llm-wiki/SKILL.md`; before trace analysis, read `skills/trace-analysis/SKILL.md`.
+
+**DO NOT re-fetch a source that is already in `raw/`**
+When resuming a wiki job, the parsed source file is already in `raw/`. Use it as the source of truth; do not call web tools again unless the user explicitly requests a refresh.
+
+**DO NOT exceed hard limits for wiki creation**
+Follow the hard limits of 2 entities and 4 concepts in `skills/llm-wiki/SKILL.md`.
