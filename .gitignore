@@ -38,9 +38,6 @@ Thumbs.db
 
 # Logs
 *.log
-
-# User data
-wiki/
 raw/
 
 # Local scratch todos (personal / ephemeral)
@@ -60,6 +57,8 @@ src/tools/trace_offloads/
 marp-slides/
 memories/agents_md_template.md
 requirements.txt
+eval/cached_outputs/
+eval/golden_datasets/
 
 # user profile
 USER.md
