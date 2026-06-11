@@ -11,7 +11,18 @@ on:
     branches: [main]
   # schedule:
   #   - cron: "0 2 * * 1"   # weekly on Monday at 02:00 UTC — uncomment when ready
-  workflow_dispatch:      # enables "Run workflow" button on GitHub Actions page
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: 'Eval dataset to run (leave blank for all)'
+        required: false
+        default: ''
+        type: choice
+        options:
+          - ''
+          - ingest
+          - query
+          - marp
 
 permissions:
   contents: read
@@ -21,6 +32,7 @@ jobs:
   unit-and-eval:
     name: Unit Tests & Eval Gate
     runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.dataset == ''
     # Single job = one checkout + one uv sync. Unit tests run first;
     # eval gate only runs on PRs/push (not weekly schedule).
     steps:
@@ -75,8 +87,7 @@ jobs:
   detect-changes:
     name: Detect changed paths
     runs-on: ubuntu-latest
-    # Skip on schedule — all eval jobs run unconditionally on schedule.
-    if: github.event_name != 'schedule'
+    if: github.event_name != 'schedule' && (github.event_name != 'workflow_dispatch' || github.event.inputs.dataset == '')
     outputs:
       ingest: ${{ steps.filter.outputs.ingest_any_changed }}
       query:  ${{ steps.filter.outputs.query_any_changed }}
@@ -109,8 +120,11 @@ jobs:
   eval-ingest:
     name: Eval — Ingest golden
     needs: [detect-changes]
-    # always() lets this run even when detect-changes is skipped (schedule case).
-    if: always() && (needs.detect-changes.outputs.ingest == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    if: >
+      !cancelled() &&
+      (needs.detect-changes.outputs.ingest == 'true' ||
+       github.event_name == 'schedule' ||
+       (github.event_name == 'workflow_dispatch' && (github.event.inputs.dataset == '' || github.event.inputs.dataset == 'ingest')))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -132,12 +146,16 @@ jobs:
         run: uv run python eval/push_golden_datasets.py --dataset ingest
       - name: Run ingest eval
         timeout-minutes: 15
-        run: uv run python eval/run_weekly_eval.py --dataset ingest --use-cached-all --filter-id already_ingested
+        run: uv run python eval/run_weekly_eval.py --dataset ingest --use-cached-all --filter-type already-ingested
 
   eval-query:
     name: Eval — Query golden
     needs: [detect-changes]
-    if: always() && (needs.detect-changes.outputs.query == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    if: >
+      !cancelled() &&
+      (needs.detect-changes.outputs.query == 'true' ||
+       github.event_name == 'schedule' ||
+       (github.event_name == 'workflow_dispatch' && (github.event.inputs.dataset == '' || github.event.inputs.dataset == 'query')))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -158,7 +176,11 @@ jobs:
   eval-marp:
     name: Eval — Marp golden
     needs: [detect-changes]
-    if: always() && (needs.detect-changes.outputs.marp == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    if: >
+      !cancelled() &&
+      (needs.detect-changes.outputs.marp == 'true' ||
+       github.event_name == 'schedule' ||
+       (github.event_name == 'workflow_dispatch' && (github.event.inputs.dataset == '' || github.event.inputs.dataset == 'marp')))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -182,7 +204,7 @@ jobs:
     runs-on: ubuntu-latest
     # Only runs on schedule — not on PRs or push to main.
     # Fetches live traces, runs anomaly regression against LangSmith datasets.
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dataset == '')
     env:
       LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
