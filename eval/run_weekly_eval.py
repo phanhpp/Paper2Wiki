@@ -530,7 +530,7 @@ DATASETS: dict[str, dict] = {
         "target": run_query,
         "evaluators": [_gate(fn) for fn in [
             no_crash, trajectory_subsequence,
-            answer_quality,
+            answer_quality
         ]],
         "hard_gate_keys": {"no_crash", "trajectory_no_forbidden"},
         "threshold": 0.75,

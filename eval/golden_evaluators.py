@@ -298,6 +298,7 @@ def answer_quality(run: Run, example: Example) -> list[dict]:
     Uses metadata["judge_criteria"] for case-specific pass criteria when defined;
     falls back to generic wikilink-presence and concept-coverage checks otherwise.
     """
+    print("===Answer quality running===")
     outputs = run.outputs or {}
     ref_outputs = example.outputs or {}
     judge_criteria = (example.metadata or {}).get("judge_criteria", {})

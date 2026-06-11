@@ -81,27 +81,21 @@ def llm_judge(system: str, user_content: str, key: str, max_input_chars: int = 1
 
 def llm_judge_multi(rubric: str, answer: str, keys: list[str], max_input_chars: int = 12000) -> list[dict]:
     """Call the Sonnet judge with a multi-dimension rubric; return one LangSmith result dict per key."""
+    from pydantic import create_model as _create_model, Field as _Field
     compacted = compact_text(answer)
 
-    fields_desc = ", ".join(f'"{k}": <0 or 1>, "{k}_reason": "<reason>"' for k in keys)
-    system = (
-        f"You are an evaluator. Score each dimension 0 or 1.\n"
-        f"Return a JSON object with these exact keys: {{{fields_desc}}}.\n"
-        "No markdown, no extra keys."
-    )
+    # Required fields (no default) so the model must return them — optional fields default to 0.
+    field_defs: dict = {k: (int, _Field(..., description="0 or 1")) for k in keys}
+    field_defs.update({f"{k}_reason": (str, _Field(...)) for k in keys})
+    _Output = _create_model("_MultiJudgeOutput", **field_defs)
 
     client = anthropic.Anthropic()
-
-    class _DynamicOutput(BaseModel):
-        model_config = {"extra": "allow"}
-
     try:
         resp = client.messages.parse(
             model=JUDGE_MODEL,
             max_tokens=512,
-            system=system,
             messages=[{"role": "user", "content": (rubric + "\n\nAnswer to evaluate:\n" + compacted)[:max_input_chars]}],
-            output_format=_DynamicOutput,
+            output_format=_Output,
         )
         scores = resp.parsed_output.model_dump()
     except Exception as exc:
