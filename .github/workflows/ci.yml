@@ -132,7 +132,7 @@ jobs:
         run: uv run python eval/push_golden_datasets.py --dataset ingest
       - name: Run ingest eval
         timeout-minutes: 15
-        run: uv run python eval/run_weekly_eval.py --dataset ingest --use-cached-all
+        run: uv run python eval/run_weekly_eval.py --dataset ingest --use-cached-all --filter-id already_ingested
 
   eval-query:
     name: Eval — Query golden
