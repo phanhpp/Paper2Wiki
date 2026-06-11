@@ -570,6 +570,7 @@ async def _run(dataset_key: str, no_gate: bool, filter_metadata: dict | None = N
     Returns 0 on pass (or calibration mode), 1 when pass rate is below threshold.
     """
     from langsmith import Client as LangSmithClient
+    client = LangSmithClient()
     cfg = DATASETS[dataset_key]
     dataset_name = cfg["dataset"]
     print(f"Evaluating: {dataset_name}" + (f" (filter: {filter_metadata})" if filter_metadata else ""))
@@ -579,7 +580,7 @@ async def _run(dataset_key: str, no_gate: bool, filter_metadata: dict | None = N
     # Materialize to list — list_examples returns a sync generator which aevaluate
     # (async) cannot iterate; passing a concrete list avoids StopAsyncIteration.
     if filter_metadata:
-        examples = list(LangSmithClient().list_examples(dataset_name=dataset_name, metadata=filter_metadata))
+        examples = list(client.list_examples(dataset_name=dataset_name, metadata=filter_metadata))
         print(f"Filter {filter_metadata} matched {len(examples)} example(s)")
         if not examples:
             print("No examples matched — check that metadata fields exist on the pushed examples")
@@ -587,13 +588,14 @@ async def _run(dataset_key: str, no_gate: bool, filter_metadata: dict | None = N
         data = examples
     else:
         data = dataset_name
-        
+
     results = await aevaluate(
         cfg["target"],
         data=data,
         evaluators=cfg["evaluators"],
         experiment_prefix=f"golden-{dataset_key}",
         num_repetitions=cfg["num_repetitions"],
+        client=client,
     )
     print(f"Results: {results.url}")
 
@@ -603,12 +605,15 @@ async def _run(dataset_key: str, no_gate: bool, filter_metadata: dict | None = N
         aggregated_results = []
         async for example_result in results:
             aggregated_results.append(example_result)
-        
-        # Separate loop to avoid logging at the same time as logs from evaluate()
+
         for result in aggregated_results:
             print("Input:", result["run"].inputs)
             print("Evaluation Results:", result["evaluation_results"]["results"])
             print("--------------------------------")
+        print("Flushing client...")
+        t0 = __import__("time").time()
+        client.flush()
+        print(f"Flush done in {__import__('time').time() - t0:.1f}s")
         return 0
 
     hard_keys = cfg["hard_gate_keys"]
@@ -628,6 +633,10 @@ async def _run(dataset_key: str, no_gate: bool, filter_metadata: dict | None = N
     threshold = cfg["threshold"]
     print(f"Pass rate: {passed}/{total} = {pass_rate:.0%} (threshold {threshold:.0%})")
 
+    print("Flushing client...")
+    t0 = __import__("time").time()
+    client.flush()
+    print(f"Flush done in {__import__('time').time() - t0:.1f}s")
     if pass_rate < threshold:
         print("FAIL")
         return 1
