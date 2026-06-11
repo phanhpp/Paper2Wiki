@@ -690,7 +690,10 @@ def main() -> None:
     filter_metadata = {}
     filter_metadata.update({"type": args.filter_type} if args.filter_type else {})
     filter_metadata.update({"id": args.filter_id} if args.filter_id else {})
-    sys.exit(asyncio.run(_run(args.dataset, args.no_gate, filter_metadata=filter_metadata)))
+
+    exit_code = asyncio.run(_run(args.dataset, args.no_gate, filter_metadata=filter_metadata))
+    # os._exit skips thread cleanup so LangSmith background sync threads don't hang the process.
+    os._exit(exit_code)
 
 
 if __name__ == "__main__":
