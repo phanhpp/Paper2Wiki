@@ -2,8 +2,15 @@
 
 from daytona import Daytona
 
-_client = Daytona()
+_client: Daytona | None = None
 _sandbox_ids: dict[str, str] = {}
+
+
+def _get_client() -> Daytona:
+    global _client
+    if _client is None:
+        _client = Daytona()
+    return _client
 
 
 def register_sandbox(thread_id: str, sandbox_id: str) -> None:
@@ -22,7 +29,7 @@ def get_sandbox_id(thread_id: str) -> str:
 def get_sandbox(thread_id: str):
     """Reconstruct sandbox object from Daytona API."""
     sandbox_id = get_sandbox_id(thread_id)
-    return _client.get(sandbox_id)
+    return _get_client().get(sandbox_id)
 
 
 def clear_sandbox(thread_id: str) -> None:

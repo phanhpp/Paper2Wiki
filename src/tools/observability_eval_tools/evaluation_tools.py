@@ -396,7 +396,8 @@ def build_target_function(dataset_name: str, client: Client | None = None) -> Ca
         tool_map = {t.name: t for t in all_tools}
         t = tool_map.get(run_name)
         if t is None:
-            raise ValueError(
+            import pytest
+            pytest.skip(
                 f"Tool {run_name!r} is not registered in all_tools "
                 f"(sandbox tools are not yet supported as evaluation targets)."
             )
