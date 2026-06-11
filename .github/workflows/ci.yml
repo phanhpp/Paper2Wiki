@@ -112,6 +112,7 @@ jobs:
     # always() lets this run even when detect-changes is skipped (schedule case).
     if: always() && (needs.detect-changes.outputs.ingest == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -130,6 +131,7 @@ jobs:
       - name: Push ingest dataset
         run: uv run python eval/push_golden_datasets.py --dataset ingest
       - name: Run ingest eval
+        timeout-minutes: 15
         run: uv run python eval/run_weekly_eval.py --dataset ingest --use-cached-all
 
   eval-query:
@@ -137,6 +139,7 @@ jobs:
     needs: [detect-changes]
     if: always() && (needs.detect-changes.outputs.query == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -149,6 +152,7 @@ jobs:
       - name: Push query dataset
         run: uv run python eval/push_golden_datasets.py --dataset query
       - name: Run query eval
+        timeout-minutes: 8
         run: uv run python eval/run_weekly_eval.py --dataset query --use-cached-all
 
   eval-marp:
@@ -156,6 +160,7 @@ jobs:
     needs: [detect-changes]
     if: always() && (needs.detect-changes.outputs.marp == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -169,6 +174,7 @@ jobs:
       - name: Push marp dataset
         run: uv run python eval/push_golden_datasets.py --dataset marp
       - name: Run marp eval
+        timeout-minutes: 8
         run: uv run python eval/run_weekly_eval.py --dataset marp --use-cached-all
 
   weekly:
