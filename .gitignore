@@ -38,13 +38,11 @@ Thumbs.db
 
 # Logs
 *.log
-raw/
 
 # Local scratch todos (personal / ephemeral)
 notebooks/
 .aws/
 skills/deprecated/
-wiki_legacy_20260425/
 project_overview.md
 prompt.yaml
 src/tools/trace_offloads/
@@ -54,11 +52,15 @@ src/tools/trace_offloads/
 !eval/pr_gate_cases.json
 !eval/baseline.json
 !eval/judge_calibration.json
+!eval/cached_outputs/*.json
 marp-slides/
 memories/agents_md_template.md
 requirements.txt
-eval/cached_outputs/
 eval/golden_datasets/
+eval/todo.md
+src/agents/prompt_builder.py
+wiki/raw/assets/
+wiki/raw/papers/graphrag-query-focused-summarization.md
 
 # user profile
 USER.md

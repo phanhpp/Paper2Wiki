@@ -10,7 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 def make_download_and_save_tool(backend: DaytonaSandbox):
     """Create a tool that copies sandbox output files to host safely."""
 
-    @tool()
+    @tool("save_output")
     def save_sandbox_output(sandbox_path: str, host_relative_path: str) -> str:
         """Download a file from sandbox and save under repo root.
 

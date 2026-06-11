@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import re
+from typing import Any
 
 import anthropic
+from pydantic import BaseModel
 
 from src.ingest_mode import get_ingest_mode
 
@@ -47,72 +48,59 @@ def compact_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def parse_judge_json(text: str) -> dict:
-    """Parse judge JSON from model output; tolerate markdown fences and extra prose."""
-    text = text.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"\s*```$", "", text.strip())
-
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        start, end = text.find("{"), text.rfind("}")
-        if start >= 0 and end > start:
-            return json.loads(text[start : end + 1])
-        raise
+class _JudgeOutput(BaseModel):
+    score: int
+    reason: str
 
 
-def judge_score(result: dict) -> float:
-    score = result.get("score")
-    if isinstance(score, bool):
-        return float(score)
-    return float(score)
+class _MultiJudgeOutput(BaseModel):
+    scores: dict[str, Any]
 
 
 def llm_judge(system: str, user_content: str, key: str, max_input_chars: int = 12000) -> dict:
-    """Call the Sonnet judge; return a LangSmith result dict."""
+    """Call the Sonnet judge with structured output; return a LangSmith result dict."""
     compacted_content = compact_text(user_content)
     client = anthropic.Anthropic()
-    resp = client.messages.create(
-        model=JUDGE_MODEL,
-        max_tokens=256,
-        system=system,
-        messages=[{"role": "user", "content": compacted_content[:max_input_chars]}],
-    )
-    raw = resp.content[0].text
     try:
-        result = parse_judge_json(raw)
+        resp = client.messages.parse(
+            model=JUDGE_MODEL,
+            max_tokens=512,
+            system=system,
+            messages=[{"role": "user", "content": compacted_content[:max_input_chars]}],
+            output_format=_JudgeOutput,
+        )
+        result = resp.parsed_output
         return {
             "key": key,
-            "score": judge_score(result),
-            "comment": result.get("reason") or result.get("comment") or "",
+            "score": float(result.score),
+            "comment": result.reason,
         }
-    except Exception:
-        preview = raw.replace("\n", " ")[:120]
-        return {"key": key, "score": 0.0, "comment": f"parse error: {preview!r}"}
+    except Exception as exc:
+        return {"key": key, "score": 0.0, "comment": f"judge error: {str(exc)[:120]}"}
 
 
 def llm_judge_multi(rubric: str, answer: str, keys: list[str], max_input_chars: int = 12000) -> list[dict]:
-    """Call the Sonnet judge with a multi-dimension rubric; return one LangSmith result dict per key.
-
-    The rubric must instruct the model to return JSON with a float/int score and optional reason
-    field for each key, e.g. {"grounded": 1, "grounded_reason": "...", "correctness": 0, ...}.
-    Keys with missing scores default to 0.0.
-    """
+    """Call the Sonnet judge with a multi-dimension rubric; return one LangSmith result dict per key."""
+    from pydantic import create_model as _create_model, Field as _Field
     compacted = compact_text(answer)
+
+    # Required fields (no default) so the model must return them — optional fields default to 0.
+    field_defs: dict = {k: (int, _Field(..., description="0 or 1")) for k in keys}
+    field_defs.update({f"{k}_reason": (str, _Field(...)) for k in keys})
+    _Output = _create_model("_MultiJudgeOutput", **field_defs)
+
     client = anthropic.Anthropic()
-    resp = client.messages.create(
-        model=JUDGE_MODEL,
-        max_tokens=512,
-        messages=[{"role": "user", "content": (rubric + "\n\nAnswer to evaluate:\n" + compacted)[:max_input_chars]}],
-    )
-    raw = resp.content[0].text
     try:
-        scores = parse_judge_json(raw)
-    except Exception:
-        preview = raw.replace("\n", " ")[:120]
-        return [{"key": k, "score": 0.0, "comment": f"parse error: {preview!r}"} for k in keys]
+        resp = client.messages.parse(
+            model=JUDGE_MODEL,
+            max_tokens=512,
+            messages=[{"role": "user", "content": (rubric + "\n\nAnswer to evaluate:\n" + compacted)[:max_input_chars]}],
+            output_format=_Output,
+        )
+        scores = resp.parsed_output.model_dump()
+    except Exception as exc:
+        preview = str(exc)[:120]
+        return [{"key": k, "score": 0.0, "comment": f"judge error: {preview}"} for k in keys]
 
     results = []
     for key in keys:
