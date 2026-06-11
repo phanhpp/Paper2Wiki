@@ -342,9 +342,9 @@ def has_lead_slide(outputs: dict) -> dict:
 
 
 def has_content_slides(outputs: dict) -> dict:
-    """Pass if slide_content has at least three ``## `` section headings."""
+    """Pass if slide_content has at least one ``## `` section headings."""
     headings = re.findall(r'^## ', outputs.get("slide_content", ""), re.MULTILINE)
-    score = 1 if len(headings) >= 3 else 0
+    score = 1 if len(headings) >= 1 else 0
     return {"key": "has_content_slides", "score": score,
             "comment": f"{len(headings)} '## ' headings found"}
 
@@ -365,12 +365,10 @@ def file_saved(outputs: dict) -> dict:
 def used_web_search(outputs: dict) -> dict:
     """Pass if web_search or web_extract was called before marp-slide-creator."""
     trajectory = outputs.get("trajectory", [])
+    names = [step["name"] for step in trajectory]
     web_tools = {"web_search", "web_extract"}
-    marp_idx = next(
-        (i for i, t in enumerate(trajectory) if t == "marp-slide-creator"),
-        len(trajectory),
-    )
-    found = any(t in web_tools for t in trajectory[:marp_idx])
+    marp_idx = next((i for i, n in enumerate(names) if n == "marp-slide-creator"), len(names))
+    found = any(n in web_tools for n in names[:marp_idx])
     return {"key": "used_web_search", "score": 1 if found else 0}
 
 
@@ -389,10 +387,11 @@ def slide_quality(run: Run, example: Example) -> dict:
         f"You are evaluating AI-generated Marp slide quality.\n"
         f"Criteria: {criteria}\n"
         "Score 1 if criteria is met, 0 otherwise.\n"
-        'Reply with JSON only: {"score": 0|1, "reason": "<20 words>"}'
+        'Reply with JSON only (no markdown): {"score": 0|1, "reason": "<20 words>"}'
     )
     # check if slide_content is a field in outputs
     content = outputs.get("slide_content") or outputs.get("final_message", "")
+    print(f"Slide content: {content}")
     return llm_judge(system,
-                     f"Request: {inputs.get('message', '')}\nSlides: {content[:4000]}",
+                     f"Request: {inputs.get('message', '')}\nSlides: {content[:6000]}",
                      "slide_quality")

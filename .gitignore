@@ -57,9 +57,9 @@ src/tools/trace_offloads/
 marp-slides/
 memories/agents_md_template.md
 requirements.txt
-eval/cached_outputs/
 eval/golden_datasets/
 eval/todo.md
+src/agents/prompt_builder.py
 
 # user profile
 USER.md

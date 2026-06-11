@@ -37,6 +37,9 @@ Usage:
     uv run --env-file .env python eval/run_weekly_eval.py --dataset marp
     uv run --env-file .env python eval/run_weekly_eval.py --dataset ingest --no-gate
     uv run --env-file .env python eval/run_weekly_eval.py --dataset ingest --use-cached-full-ingest
+    uv run --env-file .env python eval/run_weekly_eval.py --dataset query --use-cached-attention-query --filter-id 
+    uv run --env-file .env python eval/run_weekly_eval.py --dataset marp --use-cached-pug-marp --use-cached-transformer-business-theme-marp --no-gate --filter-id transformer-business-theme
+    uv run --env-file .env python eval/run_weekly_eval.py --dataset marp --use-cached-pug-marp --no-gate --filter-id pugs-colorful-two-slide
 
 Exit codes:
     0 — pass (or --no-gate)
@@ -47,6 +50,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import ast
 import json
 import os
 import re
@@ -78,6 +82,8 @@ CACHED_PARTIAL_INGEST_OUTPUT = REPO_ROOT / "eval/cached_outputs/paper2web_partia
 CACHED_FULL_INGEST_OUTPUT = REPO_ROOT / "eval/cached_outputs/graphrag_full_ingest.json"
 CACHED_ATTENTION_CONTRIBUTION_QUERY_OUTPUT = REPO_ROOT / "eval/cached_outputs/attention_contribution_query.json"
 CACHED_TRANSFORMER_ARCHITECTURE_QUERY_OUTPUT = REPO_ROOT / "eval/cached_outputs/transformer_architecture_query.json"
+CACHED_PUG_MARP_OUTPUT = REPO_ROOT / "eval/cached_outputs/pug_marp.json"
+CACHED_TRANSFORMER_BUSINESS_THEME_MARP_OUTPUT = REPO_ROOT / "eval/cached_outputs/transformer_marp.json"
 
 # ---------------------------------------------------------------------------
 # Target function helpers
@@ -128,6 +134,14 @@ def _path_allowed_write(path: str, write_prefixes: tuple[str, ...]) -> bool:
 def _action_path(args: dict) -> str:
     """Return the file path from DeepAgents action args (`file_path`) or legacy `path`."""
     return args.get("file_path") or args.get("path") or ""
+
+
+def _tool_args_preview(tool_name: str, args: dict) -> str:
+    """Return compact tool args for trajectory logging, preserving args needed by evaluators."""
+    text = str(args or {})
+    if tool_name == "save_output":
+        return text
+    return text[:80]
 
 
 def _execute_allowed(command: str, read_prefixes: tuple[str, ...]) -> bool:
@@ -218,7 +232,7 @@ async def _stream_agent(
     payload: dict | Command = {
         "messages": [{"role": "user", "content": message}]
     }
-    trajectory: list[str] = []
+    trajectory: list[dict] = []
     files_written: list[str] = []
     final_message = ""
 
@@ -253,7 +267,7 @@ async def _stream_agent(
                     for msg in messages:
                         if hasattr(msg, "tool_calls") and msg.tool_calls:
                             for tc in msg.tool_calls:
-                                args_preview = str(tc.get("args", ""))[:80]
+                                args_preview = _tool_args_preview(tc["name"], tc.get("args") or {})
                                 print(f"\n🔧 {tc['name']}({args_preview})", flush=True)
                                 trajectory.append({"name": tc["name"], "args": args_preview})
                                 if tc["name"] in ("write_file", "edit_file"):
@@ -312,6 +326,25 @@ def _read_wiki_pages(files_written: list[str]) -> str:
         if full.exists():
             content += full.read_text() + "\n\n"
     return content
+
+
+def _extract_marp_slide_path(trajectory: list[dict], final_message: str) -> str:
+    """Return the host-relative Marp output path saved by the Daytona subagent."""
+    for step in trajectory:
+        if step.get("name") != "save_output":
+            continue
+        try:
+            args = ast.literal_eval(step.get("args", ""))
+        except (SyntaxError, ValueError):
+            args = {}
+        host_path = args.get("host_relative_path", "")
+        if host_path.endswith(".md") and host_path.startswith("marp-slides/"):
+            return host_path
+
+    match = re.search(r"`?(/?marp-slides/[^`\s]+\.md)`?", final_message)
+    if match:
+        return match.group(1).lstrip("/")
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -381,15 +414,27 @@ async def run_marp(inputs: dict) -> dict:
     Expects inputs["message"]. Routes through the marp-slide-creator subagent
     (Daytona sandbox). Returns slide_path, slide_content, and trajectory.
     """
+    msg = inputs.get("message", "").lower()
+    if (
+        os.environ.get("PAPER2WIKI_USE_CACHED_PUG_MARP") == "1"
+        and "cute pug" in msg
+    ):
+        print(f"Using cached pug marp output: {CACHED_PUG_MARP_OUTPUT}")
+        return json.loads(CACHED_PUG_MARP_OUTPUT.read_text())
+    
+    if (
+        os.environ.get("PAPER2WIKI_USE_CACHED_TRANSFORMER_BUSINESS_THEME_MARP") == "1"
+        and "transformer architecture" in msg
+    ):
+        print(f"Using cached transformer business theme marp output: {CACHED_TRANSFORMER_BUSINESS_THEME_MARP_OUTPUT}")
+        return json.loads(CACHED_TRANSFORMER_BUSINESS_THEME_MARP_OUTPUT.read_text())
+    
     config = {"configurable": {"thread_id": str(uuid7())}}
     trajectory, files_written, final_message = await _stream_agent(
         inputs["message"], config, eval_mode=False,
     )
 
-    slide_path = next(
-        (p for p in files_written if p.endswith(".md") and "marp" in p.lower()),
-        "",
-    )
+    slide_path = _extract_marp_slide_path(trajectory, final_message)
     slide_content = ""
     if slide_path:
         full = REPO_ROOT / slide_path.lstrip("/")
@@ -398,6 +443,7 @@ async def run_marp(inputs: dict) -> dict:
 
     return {
         "trajectory": trajectory,
+        "files_written": files_written,
         "slide_path": slide_path,
         "slide_content": slide_content,
         "final_message": final_message,
@@ -427,7 +473,10 @@ def _gate(fn):
     cases opt in/out of specific evaluators (e.g. negative query cases skip answer_quality;
     already-ingested ingest cases skip min_page_count).
     """
-    @wraps(fn)
+    # Do NOT use @wraps here — it sets __wrapped__ which causes inspect.signature
+    # to follow the chain to the original fn signature. LangSmith would then see
+    # e.g. (outputs) and call wrapper(outputs_value), binding it to `run` and
+    # raising "missing 1 required positional argument: 'example'".
     def wrapper(run, example) -> dict:
         allowed = (example.metadata or {}).get("evaluators")
         if allowed is not None and fn.__name__ not in allowed:
@@ -449,6 +498,7 @@ def _gate(fn):
         else:
             return fn(run, example)
 
+    wrapper.__name__ = fn.__name__  # for LangSmith key naming only, not signature inspection
     return wrapper
 
 
@@ -490,7 +540,7 @@ DATASETS: dict[str, dict] = {
         "dataset": "paper2wiki-golden-marp",
         "target": run_marp,
         "evaluators": [_gate(fn) for fn in [
-            has_marp_frontmatter, has_lead_slide, has_content_slides,
+            trajectory_subsequence, has_marp_frontmatter, has_lead_slide, has_content_slides,
             css_embedded, file_saved, used_web_search, slide_quality,
         ]],
         "hard_gate_keys": {"has_marp_frontmatter", "file_saved"},
@@ -568,7 +618,7 @@ async def _run(dataset_key: str, no_gate: bool, filter_metadata: dict | None = N
         total += 1
         scores = [
             ev.score
-            for ev in example_result.evaluation_results.results
+            for ev in example_result["evaluation_results"]["results"]
             if ev.key in hard_keys and ev.score is not None
         ]
         if not scores or (sum(scores) / len(scores)) >= 0.5:
@@ -592,6 +642,7 @@ def main() -> None:
     p.add_argument("--dataset", choices=["ingest", "query", "marp"], required=True)
     p.add_argument("--no-gate", action="store_true",
                    help="Track results without blocking on pass rate (calibration mode)")
+    # Cached outputs for evaluator debugging
     p.add_argument("--use-cached-partial-ingest", action="store_true",
                    help="Temporarily use cached Paper2Web partial-ingest output for evaluator debugging")
     p.add_argument("--use-cached-full-ingest", action="store_true",
@@ -600,9 +651,25 @@ def main() -> None:
                    help="Temporarily use cached attention contribution query output for evaluator debugging")
     p.add_argument("--use-cached-transformer-query", action="store_true",
                    help="Temporarily use cached transformer architecture query output for evaluator debugging")
+    p.add_argument("--use-cached-transformer-business-theme-marp", action="store_true",
+                   help="Temporarily use cached transformer business theme marp output for evaluator debugging")
+    p.add_argument("--use-cached-pug-marp", action="store_true",
+                   help="Temporarily use cached pug marp output for evaluator debugging")
+    p.add_argument("--use-cached-all", action="store_true",
+                   help="Temporarily use cached all outputs for evaluator debugging")
+    # Filter type for evaluator debugging
     p.add_argument("--filter-type", help="Run only examples with metadata.type == this value")
-    args = p.parse_args()
+    # Filter id for evaluator debugging
+    p.add_argument("--filter-id", help="Run only examples with metadata.id == this value")
 
+    args = p.parse_args()
+    if args.use_cached_all:
+        os.environ["PAPER2WIKI_USE_CACHED_PARTIAL_INGEST"] = "1"
+        os.environ["PAPER2WIKI_USE_CACHED_FULL_INGEST"] = "1"
+        os.environ["PAPER2WIKI_USE_CACHED_ATTENTION_CONTRIBUTION_QUERY"] = "1"
+        os.environ["PAPER2WIKI_USE_CACHED_TRANSFORMER_ARCHITECTURE_QUERY"] = "1"
+        os.environ["PAPER2WIKI_USE_CACHED_TRANSFORMER_BUSINESS_THEME_MARP"] = "1"
+        os.environ["PAPER2WIKI_USE_CACHED_PUG_MARP"] = "1"
     if args.use_cached_partial_ingest:
         os.environ["PAPER2WIKI_USE_CACHED_PARTIAL_INGEST"] = "1"
     if args.use_cached_full_ingest:
@@ -611,12 +678,18 @@ def main() -> None:
         os.environ["PAPER2WIKI_USE_CACHED_ATTENTION_CONTRIBUTION_QUERY"] = "1"
     if args.use_cached_transformer_query:
         os.environ["PAPER2WIKI_USE_CACHED_TRANSFORMER_ARCHITECTURE_QUERY"] = "1"
+    if args.use_cached_transformer_business_theme_marp:
+        os.environ["PAPER2WIKI_USE_CACHED_TRANSFORMER_BUSINESS_THEME_MARP"] = "1"
+    if args.use_cached_pug_marp:
+        os.environ["PAPER2WIKI_USE_CACHED_PUG_MARP"] = "1"
 
     if args.dataset == "marp" and not os.getenv("DAYTONA_API_KEY"):
         print("DAYTONA_API_KEY not set — skipping marp eval (tracking only)")
         sys.exit(0)
 
-    filter_metadata = {"type": args.filter_type} if args.filter_type else None
+    filter_metadata = {}
+    filter_metadata.update({"type": args.filter_type} if args.filter_type else {})
+    filter_metadata.update({"id": args.filter_id} if args.filter_id else {})
     sys.exit(asyncio.run(_run(args.dataset, args.no_gate, filter_metadata=filter_metadata)))
 
 

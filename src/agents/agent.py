@@ -69,7 +69,9 @@ async def create_supervisor(thread_id: str | None = None, eval_mode: bool = Fals
 
     subagents = []
     if not eval_mode:
-        # Create Daytona agent for marp slide creation (production only)
+        # Todo: turn this to log 
+        print("Creating Daytona agent for marp slide creation")
+        # Create Daytona agent for marp slide creation 
         _daytona_backend, daytona_sandbox, visual_agent = create_daytona_agent(
             model=set_up_llms("claude-haiku-4-5-20251001"),
             thread_id=thread_id,

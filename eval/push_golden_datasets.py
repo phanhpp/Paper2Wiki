@@ -13,7 +13,7 @@ Datasets pushed:
 
 Usage:
     uv run --env-file .env python eval/push_golden_datasets.py
-    uv run --env-file .env python eval/push_golden_datasets.py --dataset ingest
+    uv run --env-file .env python eval/push_golden_datasets.py --dataset marp
     uv run --env-file .env python eval/push_golden_datasets.py --dry-run
 
 Exit codes:
