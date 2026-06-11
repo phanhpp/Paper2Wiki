@@ -54,6 +54,7 @@ src/tools/trace_offloads/
 !eval/pr_gate_cases.json
 !eval/baseline.json
 !eval/judge_calibration.json
+!eval/cached_outputs/*.json
 marp-slides/
 memories/agents_md_template.md
 requirements.txt

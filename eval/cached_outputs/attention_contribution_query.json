@@ -1,0 +1,33 @@
+{
+    "final_message": "Here are the key contributions of **\"Attention Is All You Need\"** (Vaswani et al., 2017), drawn from our wiki:\n\n---\n\n## 1. The Transformer Architecture\nThe paper introduced the **first sequence transduction model built entirely on attention**, removing recurrence (RNNs/LSTMs) and convolutions entirely. This was the central conceptual break from prior SOTA models like RNN/LSTM/GRU and ConvS2S.\n→ [[transformer-architecture]]\n\n---\n\n## 2. Scaled Dot-Product Attention\nA fast, efficient attention formula:\n```\nAttention(Q, K, V) = softmax(QKᵀ / √d_k) · V\n```\nThe `√d_k` scaling prevents softmax saturation at large dimensions. Compared to additive (Bahdanau) attention, it is significantly faster and more memory-efficient due to optimized matrix multiplication.\n→ [[scaled-dot-product-attention]]\n\n---\n\n## 3. Multi-Head Attention\nInstead of a single attention function, the paper runs **h parallel attention heads** on different linear projections of Q/K/V, then concatenates results. This lets the model jointly attend to information from **different representation subspaces**, which a single averaged attention head cannot do. The paper found 8 heads optimal (25.8 BLEU), with diminishing returns beyond that.\n→ [[multi-head-attention]]\n\n---\n\n## 4. Full Parallelization\nBy replacing recurrent layers with self-attention, the Transformer enables **fully parallel training** — no sequential hidden state dependencies. This collapses the maximum dependency path between any two positions from O(n) to **O(1)**, making long-range dependencies dramatically easier to learn.\n\n| Layer Type | Sequential Ops | Max Path Length |\n|---|---|---|\n| Self-Attention | O(1) | O(1) |\n| Recurrent (RNN) | O(n) | O(n) |\n\n---\n\n## 5. Sinusoidal Positional Encoding\nSince self-attention is permutation-invariant (treats input as a set), the paper added **fixed sinusoidal position signals** to embeddings. The key property: PE(pos+k) is a linear function of PE(pos), giving the model relative position awareness. Interestingly, learned embeddings performed nearly identically (BLEU 25.8 vs 25.7).\n→ [[positional-encoding]]\n\n---\n\n## 6. SOTA Results at Lower Cost\n- **WMT 2014 EN→DE:** 28.4 BLEU — **+2 BLEU** over prior ensemble SOTA\n- **WMT 2014 EN→FR:** 41.8 BLEU — new single-model SOTA, trained in **3.5 days on 8 P100s**\n- **WSJ Parsing:** 92.7 F1 — competitive without task-specific tuning\n\nThe big model beat prior SOTA at a fraction of the training cost, validating the efficiency claims.\n\n---\n\n**Bottom line:** The paper's lasting contribution is proving that attention alone is sufficient — and superior — for sequence modeling, which directly enabled BERT, GPT, and every major LLM that followed.",
+    "trajectory": [
+      {
+        "args": "{'file_path': '/skills/llm-wiki/SKILL.md', 'limit': 1000}",
+        "name": "read_file"
+      },
+      {
+        "args": "{'file_path': '/wiki/index.md'}",
+        "name": "read_file"
+      },
+      {
+        "args": "{'file_path': '/wiki/concepts/transformer-architecture.md'}",
+        "name": "read_file"
+      },
+      {
+        "args": "{'file_path': '/wiki/concepts/self-attention.md'}",
+        "name": "read_file"
+      },
+      {
+        "args": "{'file_path': '/wiki/concepts/multi-head-attention.md'}",
+        "name": "read_file"
+      },
+      {
+        "args": "{'file_path': '/wiki/concepts/scaled-dot-product-attention.md'}",
+        "name": "read_file"
+      },
+      {
+        "args": "{'file_path': '/wiki/concepts/positional-encoding.md'}",
+        "name": "read_file"
+      }
+    ]
+  }

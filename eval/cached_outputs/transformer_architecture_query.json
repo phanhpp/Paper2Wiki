@@ -1,0 +1,33 @@
+{
+    "final_message": "Here's the Transformer architecture based on our wiki:\n\n---\n\n## Transformer Architecture\n\nIntroduced in *\"Attention Is All You Need\"* (Vaswani et al., 2017), the Transformer is the first sequence transduction model built **entirely on attention** — no recurrence, no convolutions.\n\n---\n\n### The Core Problem It Solved\n\nRNNs/LSTMs require sequential computation — position *t* depends on position *t-1*. This makes training slow and long-range dependency learning expensive (O(n) path length). The Transformer replaces all of that with [[self-attention]], achieving:\n\n- **Full parallelization** — no sequential hidden state dependencies\n- **O(1) dependency paths** between any two positions in the sequence\n- Better translation quality at lower training cost\n\n---\n\n### Building Blocks (Bottom-Up)\n\n**1. Scaled Dot-Product Attention**\nThe atomic operation:\n```\nAttention(Q, K, V) = softmax(QKᵀ / √d_k) · V\n```\nQueries are matched against keys to produce weights, then used to sum values. The `√d_k` scaling prevents softmax saturation when dimension is large.\n\n**2. Self-Attention**\nAttention where Q, K, and V all come from the *same* sequence — every position can attend to every other. Fully parallelizable, with inspectable attention maps (unlike RNN hidden states).\n\n**3. Multi-Head Attention (MHA)**\nInstead of one attention operation, run **h = 8 heads in parallel** on lower-dimensional projections:\n```\nMultiHead(Q, K, V) = Concat(head₁, …, head₈) · Wᴼ\nwhere headᵢ = Attention(Q·Wᵢᴼ, K·Wᵢᴷ, V·Wᵢᵛ)\n```\nEach head specializes in a different representation subspace. d_k = d_model / h = 64, so cost ≈ single full-dim attention.\n\n**4. Positional Encoding**\nSelf-attention is permutation-invariant (it sees a set, not a sequence), so position must be injected explicitly via sinusoidal signals:\n```\nPE(pos, 2i)   = sin(pos / 10000^(2i / d_model))\nPE(pos, 2i+1) = cos(pos / 10000^(2i / d_model))\n```\nAdded to token embeddings at the bottom of both stacks. Key property: PE(pos+k) is a linear function of PE(pos), giving the model natural relative position awareness.\n\n---\n\n### Encoder–Decoder Structure\n\n**Encoder** (6 identical layers):\n1. Multi-Head Self-Attention\n2. Position-wise FFN: `FFN(x) = max(0, xW₁ + b₁)W₂ + b₂`\n\nEach sub-layer is wrapped with a residual connection + LayerNorm: `LayerNorm(x + Sublayer(x))`\n\n**Decoder** (6 identical layers):\n1. **Masked** Multi-Head Self-Attention — causal mask sets future positions to −∞, enforcing the auto-regressive property\n2. Multi-Head **Cross-Attention** — decoder queries attend to encoder outputs\n3. Position-wise FFN\n\n**Output:** Linear projection + softmax over the vocabulary. The embedding weight matrix is shared across both embedding layers and the output projection.\n\n---\n\n### Key Hyperparameters (Base Model)\n\n| Parameter | Value |\n|-----------|-------|\n| Layers (N) | 6 |\n| d_model | 512 |\n| d_ff | 2048 |\n| Heads (h) | 8 |\n| d_k = d_v | 64 |\n| Dropout | 0.1 |\n\n---\n\n### Why Self-Attention Beats RNNs\n\n| | Self-Attention | Recurrent | Conv |\n|---|---|---|---|\n| Complexity/layer | O(n²·d) | O(n·d²) | O(k·n·d²) |\n| Sequential ops | **O(1)** | O(n) | O(1) |\n| Max path length | **O(1)** | O(n) | O(log n) |\n\nFor typical NLP where n < d, self-attention is both faster and better at long-range dependencies.\n\n---\n\n**Based on:** [[transformer-architecture]], [[self-attention]], [[multi-head-attention]], [[scaled-dot-product-attention]], [[positional-encoding]]",
+    "trajectory": [
+      {
+        "args": "{'file_path': '/skills/llm-wiki/SKILL.md', 'limit': 1000}",
+        "name": "read_file"
+      },
+      {
+        "args": "{'file_path': '/wiki/index.md'}",
+        "name": "read_file"
+      },
+      {
+        "args": "{'file_path': '/wiki/concepts/transformer-architecture.md'}",
+        "name": "read_file"
+      },
+      {
+        "args": "{'file_path': '/wiki/concepts/multi-head-attention.md'}",
+        "name": "read_file"
+      },
+      {
+        "args": "{'file_path': '/wiki/concepts/scaled-dot-product-attention.md'}",
+        "name": "read_file"
+      },
+      {
+        "args": "{'file_path': '/wiki/concepts/self-attention.md'}",
+        "name": "read_file"
+      },
+      {
+        "args": "{'file_path': '/wiki/concepts/positional-encoding.md'}",
+        "name": "read_file"
+      }
+    ]
+  }
