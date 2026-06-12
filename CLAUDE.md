@@ -33,7 +33,7 @@ uv run pytest -m "not integration"  # skip tests needing external services
 python scripts/lint.py --wiki-dir wiki/
 ```
 
-Required `.env` vars: `ANTHROPIC_API_KEY`, `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT`, `DAYTONA_API_KEY`
+Required `.env` vars: `ANTHROPIC_API_KEY`, `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT`, `DAYTONA_API_KEY` (Marp). Web ingest needs at least one of `FIRECRAWL_API_KEY`, `TAVILY_API_KEY`, `EXA_API_KEY`. Optional: `WIKI_PATH` (defaults to `./wiki`), `PAPER2WIKI_INGEST_MODE` (`fast` | `quality`). See `.env.example`.
 
 ## Architecture
 
@@ -45,7 +45,7 @@ The supervisor agent is constructed in `src/agents/agent.py:create_supervisor()`
 2. **`marp-slide-creator` subagent** — a Daytona-sandboxed Deep Agent for slide creation. Constructed in `src/agents/daytona_agent.py`. Skills are uploaded to `/home/daytona/skills/` in the sandbox at startup. Sandbox is persisted and restored per `thread_id`.
 3. **HITL interrupts** — both agents use `interrupt_on` for `execute`, `write_file`, and `edit_file`. `stream.py:_handle_interrupts()` prompts the user at the CLI; typing `yolo` enables session-scoped auto-approve.
 
-**LLMs** (`src/agents/llms.py`): `haiku_llm` (claude-haiku-4-5) is the default for both agents. `expensive_llm` (claude-sonnet-4-6 with adaptive thinking) is available for heavier tasks.
+**LLMs** (`src/agents/llms.py`): models are built via the `set_up_llms(model, **kwargs)` factory, which reads per-model settings (retries, timeout, max_tokens, effort) from `MODEL_CONFIG`. The supervisor runs on `claude-sonnet-4-6` (effort `medium`); the `marp-slide-creator` subagent runs on `claude-haiku-4-5`. A `HarnessProfile` for sonnet is registered (disables the general-purpose subagent, adds a "read the relevant skill first" system-prompt suffix).
 
 ### Persistence (two SQLite databases in `.sessions/`)
 
@@ -54,15 +54,25 @@ The supervisor agent is constructed in `src/agents/agent.py:create_supervisor()`
 
 ### Tools (`src/tools/`)
 
-All tools exposed to the supervisor are aggregated in `src/tools/ingest_tools.py:all_tools`. Adding a new tool: implement it there and add it to the list.
+All tools exposed to the supervisor are aggregated in `src/tools/__init__.py:all_tools`, built by `_build_tools()`. Adding a new tool: implement it under `src/tools/` and add it to the `_build_tools()` return list.
 
-| Tool | Purpose |
-|---|---|
-| `fetch_arxiv` | Download papers from arXiv by ID |
-| `parse_pdf_docling` | Parse PDFs to markdown via Docling |
-| `quick_wiki_integrity_check` | Validate wiki frontmatter, links, index/log consistency |
-| `run_trace_report_async` | Fetch LangSmith traces (pass `error=True` for error-only runs) |
-| `summarize_traces_async` | Summarize fetched traces for self-improvement |
+**Ingest mode** (`src/ingest_mode.py:get_ingest_mode()`, resolved as env `PAPER2WIKI_INGEST_MODE` > config file > default `fast`) gates which ingest tools are registered:
+- `fast` (default) — web tools only (`web_search`, `web_extract`).
+- `quality` — also registers `fetch_arxiv` and `parse_pdf_docling`.
+
+| Tool | Mode | Purpose |
+|---|---|---|
+| `web_search` | all | Web search over Firecrawl / Tavily / Exa (provider routed via config) |
+| `web_extract` | all | Extract/scrape page content from a URL |
+| `fetch_arxiv` | quality | Download papers from arXiv by ID |
+| `parse_pdf_docling` | quality | Parse PDFs to markdown via Docling |
+| `compute_sha256` | all | Compute the `raw/` body sha256 (see Wiki structure) |
+| `quick_wiki_integrity_check` | all | Validate wiki frontmatter, links, index/log consistency |
+| `run_trace_report_async` | all | Fetch LangSmith traces (pass `error=True` for error-only runs) |
+| `summarize_traces_async` | all | Summarize fetched traces for self-improvement |
+| `detect_anomalies_async` | all | Flag `hard_error` / `latency_spike` / `token_blowout` / `step_count_spike` vs baselines |
+| `compute_baselines_async` | all | Refresh rolling latency/token/step medians from recent traces |
+| `create_datasets_from_anomaly_report` | all | Push failing spans to LangSmith datasets + generate candidate PR-gate cases |
 
 ### Wiki structure (`wiki/`)
 
@@ -78,10 +88,11 @@ Schema and conventions are in `wiki/SCHEMA.md`. Key rules:
 
 ### Skills (`skills/`)
 
-Three skills are available to the supervisor:
+Skills available to the supervisor:
 - `skills/llm-wiki/` — wiki building conventions
 - `skills/trace-analysis/` — LangSmith trace analysis workflow
-- `skills/marp-slide/` — Marp slide creation (injected into Daytona sandbox)
+- `skills/web-tools/` — web search/extract provider selection and call patterns (Firecrawl, Tavily, Exa)
+- `skills/marp-slide/` — Marp slide creation (injected into the Daytona sandbox)
 
 ## Testing Strategy
 
@@ -139,7 +150,7 @@ uv run --env-file .env pytest -m "langsmith and not slow and not integration" -q
 
 ## Pending Cleanup
 
-- `src/tools/trace_report_pickle_cache.py` is dev-only. It uses pickle to replay LangSmith runs locally and should not be used in production. `trace_report.py` is the production path.
+- `src/tools/trace_report_pickle_cache.py` is dev-only. It uses pickle to replay LangSmith runs locally and should not be used in production. The production trace path is `src/tools/observability_eval_tools/fetch_traces.py` (`run_trace_report_async`).
 
 ## Todos
 
