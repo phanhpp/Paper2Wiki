@@ -61,6 +61,7 @@ tests/cassettes/
 memories/*
 !memories/AGENTS.md
 !memories/trace_analysis_log.md
+!memories/baselines.json
 USER.md
 
 # Wiki — local/generated (wiki pages themselves are tracked)

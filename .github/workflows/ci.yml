@@ -218,8 +218,10 @@ jobs:
   weekly:
     name: Weekly (LangSmith regression)
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # commit refreshed memories/baselines.json back to main
     # Only runs on schedule — not on PRs or push to main.
-    # Fetches live traces, runs anomaly regression against LangSmith datasets.
+    # Refreshes anomaly baselines (committed to git) then replays LangSmith hard_error datasets.
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dataset == '')
     env:
       LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
@@ -238,11 +240,22 @@ jobs:
           python-version: "3.11"
       - run: uv sync --frozen
 
-      - name: Update baselines and push anomalies to LangSmith
-        # Fetches last 7 days of traces, updates memories/baselines.json,
-        # detects anomalies, and pushes failing spans to LangSmith datasets.
-        # Must run before pytest so test_anomaly_regression.py sees fresh examples.
+      - name: Update anomaly baselines
+        # Fetches recent traces and merges rolling medians into memories/baselines.json.
+        # Local detect_anomalies_async reads this file — git pull before trace analysis.
         run: uv run python eval/run_weekly_baselines.py
+
+      - name: Commit refreshed baselines
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add memories/baselines.json
+          if git diff --staged --quiet; then
+            echo "No baseline changes — skipping commit"
+          else
+            git commit -m "chore: refresh anomaly baselines from weekly CI"
+            git push
+          fi
 
       - name: Anomaly regression (pytest-langsmith)
         # Replays hard_error examples from the datasets populated above.

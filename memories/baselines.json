@@ -1,0 +1,15 @@
+{
+  "by_name": {
+    "fetch_arxiv": {
+      "median_latency": 5.38512,
+      "median_tokens": null,
+      "sample_count": 5
+    }
+  },
+  "by_flow": {
+    "wiki-ingestion": {
+      "median_steps": 2,
+      "sample_count": 3
+    }
+  }
+}
