@@ -1,0 +1,136 @@
+[
+  {
+    "_comment": "POSITIVE \u2014 simple 2-slide deck, colorful theme, verifies sandbox save_output flow",
+    "inputs": {
+      "message": "Create a 2-slide Marp presentation about cute pugs, use the colorful theme"
+    },
+    "outputs": {},
+    "metadata": {
+      "category": "marp",
+      "type": "positive",
+      "theme": "colorful",
+      "requires_daytona": true,
+      "expected_trajectory": {
+        "any": [
+          {
+            "name": "task",
+            "args_contains": "marp-slide-creator"
+          },
+          {
+            "name": "read_file",
+            "args_contains": "/home/daytona/skills/marp-slide/SKILL.md"
+          },
+          {
+            "name": "read_file",
+            "args_contains": "template-colorful.md"
+          },
+          {
+            "name": "write_file",
+            "args_contains": "/home/daytona/marp-slides/cute-pugs.md"
+          },
+          {
+            "name": "save_output",
+            "args_contains": "marp-slides/cute-pugs.md"
+          }
+        ]
+      },
+      "quality_checklist": {
+        "has_marp_frontmatter": "file starts with '---\\nmarp: true'",
+        "has_lead_slide": "contains '<!-- _class: lead -->'",
+        "css_embedded": "colorful theme CSS embedded in file",
+        "file_saved": "output .md file exists under marp-slides/"
+      },
+      "judge_criteria": {
+        "slide_quality": "Creates a 2-slide pug deck using the colorful theme (detected by --color-background)."
+      },
+      "id": "pugs-colorful-two-slide",
+      "evaluators": [
+        "no_crash",
+        "trajectory_subsequence",
+        "has_marp_frontmatter",
+        "has_lead_slide",
+        "has_content_slides",
+        "css_embedded",
+        "file_saved",
+        "slide_quality"
+      ],
+      "forbidden_tools": [
+        "web_search",
+        "web_extract",
+        "fetch_arxiv",
+        "parse_pdf_docling",
+        "execute"
+      ]
+    }
+  },
+  {
+    "_comment": "POSITIVE \u2014 business theme, wiki concept as source",
+    "inputs": {
+      "message": "Based on the existing content in our wiki, create 3 slides summarizing transformer architecture for a business audience (explain technical terms), use the business theme"
+    },
+    "outputs": {},
+    "metadata": {
+      "category": "marp",
+      "type": "positive",
+      "precondition": "transformer concept page exists in wiki",
+      "theme": "business",
+      "requires_daytona": true,
+      "expected_trajectory": {
+        "any": [
+          {
+            "name": "ls",
+            "args_contains": "/wiki'"
+            
+          },
+          {
+            "name": "read_file",
+            "args_contains": "/wiki/concepts/transformer-architecture.md"
+          },
+          {
+            "name": "task",
+            "args_contains": "marp-slide-creator"
+          },
+          {
+            "name": "read_file",
+            "args_contains": "/home/daytona/skills/marp-slide/SKILL.md"
+          },
+          {
+            "name": "write_file"
+          },
+          {
+            "name": "save_output"
+          }
+        ]
+      },
+      "quality_checklist": {
+        "has_marp_frontmatter": "file starts with '---\\nmarp: true'",
+        "has_lead_slide": "contains '<!-- _class: lead -->'",
+        "has_content_slides": "contains at least 1 '## ' headings",
+        "css_embedded": "business theme CSS embedded in file",
+        "file_saved": "output .md file exists under marp-slides/"
+      },
+      "judge_criteria": {
+        "slide_quality": "Slides readable, explain technical terms where needed, cover high-level value of transformer architecture",
+        "no_hallucination": "Claims grounded in wiki content, no invented business metrics or use cases"
+      },
+      "id": "transformer-business-theme",
+      "evaluators": [
+        "no_crash",
+        "trajectory_subsequence",
+        "has_marp_frontmatter",
+        "has_lead_slide",
+        "has_content_slides",
+        "css_embedded",
+        "file_saved",
+        "slide_quality"
+      ],
+      "forbidden_tools": [
+        "web_search",
+        "web_extract",
+        "fetch_arxiv",
+        "parse_pdf_docling",
+        "execute"
+      ]
+    }
+  }
+]

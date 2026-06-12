@@ -1,0 +1,149 @@
+[
+  {
+    "_comment": "POSITIVE \u2014 factual lookup, answer grounded in Attention paper",
+    "inputs": {
+      "message": "Based on our wiki, what are the key contributions of the Attention is All You Need paper?"
+    },
+    "outputs": {
+      "expected_concepts": [
+        "self-attention",
+        "transformer",
+        "multi-head attention",
+        "encoder-decoder"
+      ]
+    },
+    "metadata": {
+      "category": "query",
+      "type": "positive",
+      "precondition": "1706.03762 already ingested",
+      "judge_criteria": {
+        "answer_correctness": "Answer covers self-attention mechanism and transformer architecture as key contributions",
+        "answer_grounded": "Answer cites wiki pages e.g. [[self-attention]] or [[transformer]], not hallucinated"
+      },
+      "expected_trajectory": {
+        "any": [
+          {
+            "name": "read_file",
+            "args_contains": "/skills/llm-wiki/SKILL.md"
+          },
+          {
+            "name": "read_file",
+            "args_contains": "wiki/index.md"
+          },
+          {
+            "name": "read_file"
+          }
+        ]
+      },
+      "id": "attention-factual-lookup",
+      "evaluators": [
+        "no_crash",
+        "trajectory_subsequence",
+        "answer_quality"
+      ],
+      "forbidden_tools": [
+        "web_search",
+        "web_extract",
+        "fetch_arxiv",
+        "parse_pdf_docling",
+        "execute"
+      ]
+    }
+  },
+  {
+    "_comment": "POSITIVE — structural query requiring multi-page synthesis: transformer-architecture + linked concept pages",
+    "inputs": {
+      "message": "explain the architecture of the transformer, based on our wiki?"
+    },
+    "outputs": {
+      "expected_concepts": [
+        "self-attention",
+        "multi-head attention",
+        "positional encoding",
+        "encoder-decoder"
+      ]
+    },
+    "metadata": {
+      "category": "query",
+      "type": "positive",
+      "precondition": "1706.03762 already ingested",
+      "judge_criteria": {
+        "answer_correctness": "Answer explains the encoder-decoder stack structure, the role of multi-head self-attention, why positional encoding is needed (no recurrence), and how attention replaces RNNs. Must cover at least 3 of these 4 points.",
+        "answer_grounded": "Answer cites wiki pages via [[wikilinks]] such as [[transformer-architecture]], [[self-attention]], or [[multi-head-attention]] — not hallucinated from training data."
+      },
+      "expected_trajectory": {
+        "any": [
+          {
+            "name": "read_file",
+            "args_contains": "/skills/llm-wiki/SKILL.md"
+          },
+          {
+            "name": "read_file",
+            "args_contains": "wiki/index.md"
+          },
+          {
+            "name": "read_file",
+            "args_contains": "transformer-architecture"
+          }
+        ]
+      },
+      "id": "transformer-architecture-query",
+      "evaluators": [
+        "no_crash",
+        "trajectory_subsequence",
+        "answer_quality"
+      ],
+      "forbidden_tools": [
+        "execute",
+        "web_search",
+        "web_extract",
+        "fetch_arxiv",
+        "parse_pdf_docling"
+      ]
+    }
+  },
+  {
+    "_comment": "NEGATIVE \u2014 hallucination bait, topic not in wiki",
+    "inputs": {
+      "message": "What does the wiki say about Iphone 15?"
+    },
+    "outputs": {
+      "expected_behaviour": "admit_missing"
+    },
+    "metadata": {
+      "category": "query",
+      "type": "negative",
+      "judge_criteria": {
+        "answer_correctness": "Agent checks index.md, confirms iPhone 15 is not in the wiki, and clearly tells the user — without fabricating any content about it",
+        "answer_grounded": "Answer does not invent [[wikilinks]] or claim iPhone 15 is covered; no hallucinated citations are acceptable"
+      },
+      "expected_trajectory": {
+        "any": [
+          {
+            "name": "read_file",
+            "args_contains": "/skills/llm-wiki/SKILL.md"
+          },
+          {
+            "name": "read_file",
+            "args_contains": "wiki/index.md"
+          }
+        ]
+      },
+      "id": "iphone-15-hallucination-bait-negative",
+      "evaluators": [
+        "no_crash",
+        "trajectory_subsequence",
+        "answer_quality"
+      ],
+      "forbidden_tools": [
+        "write_file",
+        "edit_file",
+        "web_search",
+        "web_extract",
+        "fetch_arxiv",
+        "parse_pdf_docling",
+        "execute"
+      ]
+    }
+  }
+]

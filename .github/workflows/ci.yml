@@ -7,8 +7,24 @@ on:
       - 'src/**'
       - 'skills/**'
       - 'eval/**'
+    paths-ignore:
+      - '**.md'
+      - '*.yaml'
+      - '*.txt'
+      - '*.csv'
+      - '*.tsv'
   push:
     branches: [main]
+    paths:
+    - 'src/**'
+    - 'skills/**'
+    - 'eval/**'
+    paths-ignore:
+      - '**.md'
+      - '*.yaml'
+      - '*.txt'
+      - '*.csv'
+      - '*.tsv'
   # schedule:
   #   - cron: "0 2 * * 1"   # weekly on Monday at 02:00 UTC — uncomment when ready
   workflow_dispatch:

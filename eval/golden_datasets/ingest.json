@@ -1,0 +1,196 @@
+[
+  {
+    "_comment": "POSITIVE \u2014 already fully ingested, agent detects and reports without re-ingesting",
+    "inputs": {
+      "message": "Ingest the Attention is All You Need paper"
+    },
+    "outputs": {
+      "expected_behaviour": "already_ingested"
+    },
+    "metadata": {
+      "arxiv_id": "1706.03762",
+      "category": "ingest",
+      "type": "already-ingested",
+      "precondition": "1706.03762 fully ingested in committed wiki fixture",
+      "expected_trajectory": {
+        "any": [
+          "read_file",
+          "ls"
+        ]
+      },
+      "judge_criteria": {
+        "ingest_outcome_correct": "Agent detected the paper is already fully ingested and returned a useful summary of existing wiki pages \u2014 without writing any new files."
+      },
+      "evaluators": [
+        "no_crash",
+        "trajectory_subsequence",
+        "ingest_outcome_correct"
+      ],
+      "id": "attention-already-ingested",
+      "forbidden_tools": [
+        "write_file",
+        "edit_file",
+        "execute"
+      ]
+    }
+  },
+  {
+    "_comment": "POSITIVE \u2014 full ingest, GraphRAG (new paper not in wiki)",
+    "inputs": {
+      "message": "Ingest the paper: A GraphRAG Approach to Query-Focused Summarization. Create minimal wiki only"
+    },
+    "metadata": {
+      "arxiv_id": "2404.16130",
+      "category": "ingest",
+      "type": "full-ingest",
+      "expected_concepts": [
+        "retrieval",
+        "graphrag",
+        "knowledge-graphs",
+        "summarization"
+      ],
+      "expected_entities": [
+        "darren-edge",
+        "microsoft-research"
+      ],
+      "min_wiki_pages": 3,
+      "expected_trajectory": {
+        "quality": [
+          "read_file",
+          "fetch_arxiv",
+          "parse_pdf_docling",
+          "write_file",
+          "edit_file",
+          "quick_wiki_integrity_check"
+        ],
+        "fast": [
+          "read_file",
+          "web_search",
+          "web_extract",
+          "write_file",
+          "edit_file",
+          "quick_wiki_integrity_check"
+        ]
+      },
+      "required_files": [
+        "wiki/graph/graph.json",
+        "wiki/graph/citations.json",
+        "wiki/index.md",
+        "wiki/log.md"
+      ],
+      "evaluators": [
+        "no_crash",
+        "trajectory_subsequence",
+        "min_page_count",
+        "has_wikilinks",
+        "maintenance_files_updated",
+        "wiki_faithfulness",
+        "no_hallucination"
+      ],
+      "id": "graphrag-full-ingest"
+    }
+  },
+  {
+    "_comment": "POSITIVE \u2014 partial/resume ingest, Paper2Web missing entities + graph",
+    "inputs": {
+      "message": "The Paper2Web paper was partially ingested in the wiki. Identify what is missing and tell me steps you will take. Do not execute any changes yet, just produce the plan."
+    },
+    "outputs": {},
+    "metadata": {
+      "arxiv_id": "2510.15842",
+      "category": "ingest",
+      "type": "partial-ingest",
+      "precondition": "Paper2Web half-ingested in committed wiki fixture (raw + concept pages exist, entity pages and graph missing)",
+      "expected_concepts": [],
+      "expected_entities": [
+        "yuhang-chen"
+      ],
+      "expected_trajectory": {
+        "any": [
+          {
+            "name": "read_file",
+            "args_contains": "/skills/llm-wiki/SKILL.md"
+          },
+          {
+            "name": "ls"
+          },
+          {
+            "name": "read_file",
+            "args_contains": "/wiki/index.md"
+          },
+          {
+            "name": "read_file",
+            "args_contains": "/wiki/log.md"
+          }
+        ]
+      },
+      "_note": "Agent must follow SKILL.md Resuming an Existing Wiki \u2014 read SCHEMA, index, log before any writes. Trajectory must NOT include fetch_arxiv or parse_pdf_docling (raw already exists).",
+      "evaluators": [
+        "no_crash",
+        "trajectory_subsequence",
+        "ingest_outcome_correct"
+      ],
+      "id": "paper2web-partial-ingest",
+      "forbidden_tools": [
+        "web_search",
+        "web_extract",
+        "fetch_arxiv",
+        "parse_pdf_docling",
+        "write_file",
+        "edit_file",
+        "execute"
+      ],
+      "judge_criteria": {
+        "ingest_outcome_correct": "Agent identifies the missing work and produces a plan without writing files. To pass, the final response must mention: create at most two entity pages; include wiki/entities/yuhang-chen.md; update wiki/index.md; update wiki/graph/graph.json; update wiki/graph/citations.json; append to wiki/log.md. Do not require an institution entity unless the response itself claims one is required."
+      }
+    }
+  },
+  {
+    "_comment": "NEGATIVE \u2014 Medium member-only/sign-in + paywalled URL, agent must stop and inform user immediately",
+    "inputs": {
+      "message": "Ingest this paper: https://medium.com/ux-snaps/this-simple-trick-will-let-you-read-almost-any-paywalled-news-article-a4ba85e43c2d"
+    },
+    "outputs": {
+      "expected_behaviour": "stop and inform user immediately",
+      "expected_no_hallucination": true,
+      "expected_response": [
+        {
+          "type": "text",
+          "text": "The Medium article is behind a paywall — only the first few paragraphs are accessible (the article cuts off before the actual step-by-step instructions for disabling JavaScript).\n\nAlso worth noting: this article is about a **UX/browser trick** (disabling JavaScript to bypass paywalls), which is **outside the ML/AI Research domain** of your existing wiki.\n\nA few options:\n1. **Ingest what's available** — save the partial content and create wiki pages around the concepts that *are* visible (paywall UX patterns, JavaScript-based content gating) — though these are off-domain for your AI/ML wiki.\n2. **Expand the wiki domain** — broaden SCHEMA.md to include UX/web topics, then ingest.\n3. **Skip** — the article is paywalled (ironic!) and off-domain for your ML/AI wiki.\n\nWhat would you like to do? I can also try an alternative extraction approach (e.g., archive.org or a cached version) if you want the full content."
+        }
+      ]
+    },
+    "metadata": {
+      "category": "ingest",
+      "type": "negative",
+      "judge_criteria": {
+        "ingest_outcome_correct": "Agent informs the user that the Medium article is paywalled or only partially accessible, notes that the visible article is outside the existing ML/AI wiki domain instead of proceeding blindly, and does not write files or fabricate wiki pages from preview/paywall/login content."
+      },
+      "evaluators": [
+        "no_crash",
+        "trajectory_subsequence",
+        "ingest_outcome_correct"
+      ],
+      "expected_trajectory": {
+        "any": [
+          {
+            "name": "read_file",
+            "args_contains": "/skills/llm-wiki/SKILL.md"
+          },
+          {
+            "name": "web_extract",
+            "args_contains": "https://medium.com/ux-snaps/this-simple-trick-will-let-you-read-almos"
+          }
+        ]
+      },
+      "id": "medium-member-only-negative",
+      "forbidden_tools": [
+        "write_file",
+        "edit_file",
+        "fetch_arxiv",
+        "parse_pdf_docling",
+        "execute"
+      ]
+    }
+  }
+]

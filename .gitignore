@@ -1,15 +1,13 @@
-# Environment / secrets
+# Secrets & environment
 .env
 .env.*
 !.env.example
+.envrc
 
-# Virtual environments
+# Python
 .venv/
 venv/
 env/
-.envrc
-
-# Python bytecode / caches
 __pycache__/
 *.py[cod]
 *$py.class
@@ -20,8 +18,6 @@ __pycache__/
 coverage.xml
 htmlcov/
 .hypothesis/
-
-# Build / packaging
 build/
 dist/
 *.egg-info/
@@ -30,7 +26,7 @@ dist/
 # Jupyter
 .ipynb_checkpoints/
 
-# Editor / OS
+# OS & editors
 .DS_Store
 Thumbs.db
 .vscode/
@@ -39,47 +35,54 @@ Thumbs.db
 # Logs
 *.log
 
-# Local scratch todos (personal / ephemeral)
+# Local config (committed: config.example.yaml)
+*.yaml
+!config.example.yaml
+prompt.yaml
+
+# Runtime / sessions
+.sessions/
+
+# Eval — ephemeral (CI generates eval/results.json at runtime)
+eval/results.json
+eval/todo.md
+
+# Eval — versioned (tracked; required by CI: run_gate.py, push_golden_datasets.py)
+#   eval/pr_gate_cases.json
+#   eval/regression_baseline.json
+#   eval/golden_datasets/*.json
+#   eval/cached_outputs/*.json
+
+# Tests — local fixtures & LangSmith replay cache (CI: LANGSMITH_TEST_CACHE)
+tests/fixtures/
+tests/cassettes/
+
+# Agent memory — session notes may reference sensitive info
+memories/*
+!memories/AGENTS.md
+!memories/trace_analysis_log.md
+USER.md
+
+# Wiki — local/generated (wiki pages themselves are tracked)
+wiki/raw/assets/
+wiki/raw/papers/graphrag-query-focused-summarization.md
+wiki/.cache/
+wiki/graph/
+
+# Observability dev artifacts
+src/tools/observability_eval_tools/trace_offloads/
+large_tool_results/
+
+# Project-local scratch & deprecated
 notebooks/
 .aws/
 skills/deprecated/
-project_overview.md
-prompt.yaml
-src/tools/trace_offloads/
-*.yaml
-!config.example.yaml
-*.json
-!eval/pr_gate_cases.json
-!eval/baseline.json
-!eval/judge_calibration.json
-!eval/cached_outputs/*.json
 marp-slides/
-memories/agents_md_template.md
-requirements.txt
-eval/golden_datasets/
-eval/todo.md
-src/agents/prompt_builder.py
-wiki/raw/assets/
-wiki/raw/papers/graphrag-query-focused-summarization.md
-
-# user profile
-USER.md
-
-# agent memory — contains session notes that may reference sensitive info
-memories/*
-
-# private notes
-notes.md
-
-# persistent
-.sessions/
-
-# web tools reference
 web_tools_reference/
-
-# eval guide
 eval_guide/
-
-# context offload
-large_tool_results/
+project_overview.md
+notes.md
 test.md
+requirements.txt
+src/agents/prompt_builder.py
+memories/agents_md_template.md
