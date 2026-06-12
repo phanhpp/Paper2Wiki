@@ -85,6 +85,22 @@ Schema and conventions are in `wiki/SCHEMA.md`. Key rules:
 
 - `memories/AGENTS.md` — project/environment knowledge (tool quirks, architecture notes, task diary).
 - `memories/USER.md` — user profile (communication preferences, skill level).
+- `memories/baselines.json` — rolling per-run-name latency/token/step medians for `detect_anomalies_async` (3× spike thresholds). **Tracked in git**; weekly CI refreshes it from live LangSmith traces.
+
+**Anomaly baselines sync** — before manual trace analysis, `git pull` so local `detect_anomalies_async` uses CI-fresh thresholds:
+
+```text
+Weekly CI
+  → fetch traces (run_weekly_baselines.py)
+  → update memories/baselines.json
+  → commit + push to main
+
+You (manual trace analysis)
+  → git pull
+  → detect_anomalies_async reads memories/baselines.json
+```
+
+No need to run `eval/run_weekly_baselines.py` locally unless you want an ad-hoc refresh between CI runs.
 
 ### Skills (`skills/`)
 
@@ -112,11 +128,13 @@ Three tiers — each catches a different class of failure.
 
 Evaluator gating: each golden dataset example lists the evaluators it opts into via `metadata["evaluators"]`. The `_gate()` wrapper skips evaluators not listed for a given case and records `score=None` instead of failing.
 
-### Tier 3 — Weekly golden evals + baseline refresh (scheduled)
+### Tier 3 — Weekly CI (scheduled)
 
-All three golden eval datasets run regardless of what changed:
-- `eval/run_weekly_baselines.py` — `compute_baselines_async` updates rolling latency/token/step medians from the last 7 days of production traces
-- `pytest -m langsmith` — replays `hard_error` examples from HITL-reviewed LangSmith datasets; gates on no regressions
+Weekly job (`ci.yml` `weekly`):
+- `eval/run_weekly_baselines.py` — fetches traces, `compute_baselines_async` merges medians into `memories/baselines.json`, CI commits and pushes to `main`
+- `pytest -m langsmith` — replays `hard_error` examples from HITL-reviewed LangSmith datasets; gates on no regressions (does not read `baselines.json`)
+
+Golden agent evals (`eval-ingest` / `eval-query` / `eval-marp`) are path-conditional on PRs; weekly schedule runs all three when enabled.
 
 ### Closed feedback loop
 
