@@ -14,6 +14,7 @@ Typical usage after a flow completes:
     maybe_auto_title(conn, session_id, messages)
 """
 
+import re
 import json
 import time
 import hashlib
@@ -24,6 +25,38 @@ from typing import Optional
 from src.agents.llms import MODEL_CONFIG
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_thread_id(conn: Connection, ref: str) -> Optional[str]:
+    """Resolve a session reference (a thread_id **or** a title) to a thread_id.
+
+    Resolution order:
+    1. Exact ``thread_id`` match — returned as-is.
+    2. Title:
+       - a **specific** lineage member (ref ends in ``" #N"``) → that exact title only.
+       - a **base** name (no suffix) → the **most recent** session whose title is the base or
+         ``"base #N"`` (mirrors "resume by name picks the latest in the lineage": resuming
+         ``"my project"`` lands on the newest of ``"my project"`` / ``"my project #2"`` / …).
+
+    Returns the resolved ``thread_id``, or ``None`` if nothing matches.
+    """
+    # 1. exact thread_id
+    if conn.execute("SELECT 1 FROM sessions WHERE id = ?", (ref,)).fetchone():
+        return ref
+
+    # 2a. specific lineage member ("name #N") → exact title match only
+    if re.match(r'^.* #\d+$', ref):
+        row = conn.execute("SELECT id FROM sessions WHERE title = ?", (ref,)).fetchone()
+        return row[0] if row else None
+
+    # 2b. base name → most recent across the lineage (base or "base #N")
+    escaped = ref.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    row = conn.execute(
+        "SELECT id FROM sessions WHERE title = ? OR title LIKE ? ESCAPE '\\' "
+        "ORDER BY started_at DESC LIMIT 1",
+        (ref, f"{escaped} #%"),
+    ).fetchone()
+    return row[0] if row else None
 
 
 def _stable_message_id(thread_id: str, index: int, role: str, content: str) -> str:
