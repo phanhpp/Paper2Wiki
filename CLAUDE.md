@@ -31,7 +31,21 @@ uv run pytest -m "not integration"  # skip tests needing external services
 
 # Wiki health check (once scripts/lint.py exists)
 python scripts/lint.py --wiki-dir wiki/
+
+# CLI (paper2wiki) — interactive REPL, one-shot chat, session browsing
+# (`.env` is auto-loaded by the app; activate the venv or prefix with `uv run`)
+paper2wiki repl                  # interactive chat
+paper2wiki chat "ingest <url>"   # one-shot
+paper2wiki sessions ls           # browse sessions
+paper2wiki config show           # effective config
 ```
+
+> Flags (on `chat`/`repl`/`sessions resume`): `--thread-id/-t`, `--ingest-mode {fast|quality}`,
+> `--wiki-path`, `--yes/-y` (auto-approve HITL), `--eval-mode` (skip Daytona), `--debug`.
+> REPL meta-commands: `/new`, `/help`, `/exit`.
+> `python -m src.cli.app <cmd>` is an equivalent invocation that doesn't need the installed
+> entry point. (Requires uv ≥ 0.11; older uv on macOS flagged the editable `.pth` `UF_HIDDEN`,
+> which broke the `paper2wiki` console script — use `python -m` there, or upgrade uv.)
 
 Required `.env` vars: `ANTHROPIC_API_KEY`, `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT`, `DAYTONA_API_KEY` (Marp). Web ingest needs at least one of `FIRECRAWL_API_KEY`, `TAVILY_API_KEY`, `EXA_API_KEY`. Optional: `WIKI_PATH` (defaults to `./wiki`), `PAPER2WIKI_INGEST_MODE` (`fast` | `quality`). See `.env.example`.
 
@@ -173,6 +187,6 @@ uv run --env-file .env pytest -m "langsmith and not slow and not integration" -q
 ## Todos
 
 - Capacity limit for /memories/
-- Wrap agent into ClI
+- ~~Wrap agent into CLI~~ — done (`src/cli/`, run via `python -m src.cli.app`)
 - Consolidation agent + cron
 - RL
