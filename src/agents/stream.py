@@ -16,8 +16,13 @@ from src.sessions.session_manager import save_session
 from src.sessions.title_manager import maybe_auto_title
 
 
-def _save_session(conn, thread_id, messages, started_at, flow_type="ingest"):
-    """Save session to db and auto-title."""
+def _save_session(conn, thread_id, messages, started_at, flow_type="ingest", auto_title=True):
+    """Save session to db and (optionally) auto-title.
+
+    Set ``auto_title=False`` when a manual title is already set or pending for this thread —
+    auto-titling makes an LLM call whose result would just be overwritten, so skipping it
+    saves tokens and latency.
+    """
     session_id = save_session(
         conn=conn,
         thread_id=thread_id,
@@ -25,7 +30,8 @@ def _save_session(conn, thread_id, messages, started_at, flow_type="ingest"):
         started_at=started_at,
         flow_type=flow_type,
     )
-    maybe_auto_title(conn, session_id, messages)
+    if auto_title:
+        maybe_auto_title(conn, session_id, messages)
 
 
 async def run_turn_stream_async(
@@ -36,6 +42,7 @@ async def run_turn_stream_async(
     renderer: Renderer | None = None,
     auto_approve: bool = False,
     debug: bool = False,
+    auto_title: bool = True,
 ):
     """Run one streamed turn with HITL interrupt support.
 
@@ -139,7 +146,7 @@ async def run_turn_stream_async(
     messages = final_state.values["messages"]
     debug_content_types = [type(getattr(m, "content", None)).__name__ for m in messages]
     renderer.on_debug(f"[debug] session message content types: {debug_content_types}")
-    _save_session(get_sessions_conn(), resolved_thread_id, messages, started_at)
+    _save_session(get_sessions_conn(), resolved_thread_id, messages, started_at, auto_title=auto_title)
     
 
 def run_turn_stream(
@@ -150,6 +157,7 @@ def run_turn_stream(
     renderer: Renderer | None = None,
     auto_approve: bool = False,
     debug: bool = False,
+    auto_title: bool = True,
 ):
     """Sync wrapper (kept for convenience) around the async implementation."""
     return asyncio.run(
@@ -161,5 +169,6 @@ def run_turn_stream(
             renderer=renderer,
             auto_approve=auto_approve,
             debug=debug,
+            auto_title=auto_title,
         )
     )
