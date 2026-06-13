@@ -1,67 +1,19 @@
 """
 Stream agent's results: shows live progress + LLM tokens, handles interrupts.
+
+Output goes through a ``Renderer`` (see ``src/agents/renderer.py``) so the same loop drives
+notebooks (``DefaultRenderer``) and the CLI (``RichRenderer``).
 """
 import asyncio
 import time
 from langgraph.types import Command
-import ast, json
 from langchain_core.utils.uuid import uuid7
 from langchain_core.runnables import Runnable, RunnableConfig
 from src.agents.agent import create_supervisor
+from src.agents.renderer import Renderer, DefaultRenderer
 from src.sessions.sessions_db_setup import get_sessions_conn
 from src.sessions.session_manager import save_session
 from src.sessions.title_manager import maybe_auto_title
-
-SESSION_AUTO_APPROVE = False
-
-def _handle_interrupts(interrupts):
-    """Build decisions list from a list of Interrupt objects."""
-    global SESSION_AUTO_APPROVE
-    
-    interrupt_value = interrupts[0].value
-    action_requests = interrupt_value["action_requests"]
-    review_configs = interrupt_value["review_configs"]
-    config_map = {cfg["action_name"]: cfg for cfg in review_configs}
-    
-    decisions = []
-    for action in action_requests:
-        review_config = config_map[action["name"]]
-        
-        if SESSION_AUTO_APPROVE:
-            decisions.append({"type": "approve"})
-            continue
-        
-        print(f"\n🔔 Tool: {action['name']}")
-        print(f"   Args: {action['args']}")
-        print(f"   Allowed: {review_config['allowed_decisions']}")
-        choice = input("[a]pprove / [e]dit / [r]eject / [yolo=auto-approve all]: ").lower()
-        
-        if choice == "yolo":
-            SESSION_AUTO_APPROVE = True
-            decisions.append({"type": "approve"})
-        elif choice == "r":
-            decisions.append({"type": "reject"})
-        elif choice == "e":
-            new_args = input("New args (JSON or Python dict): ")
-            try:
-                parsed = json.loads(new_args)
-            except json.JSONDecodeError:
-                # ast.literal_eval: parse Python literal syntax (e.g. {'a': 1}) safely—
-                # no function calls or expressions, unlike eval().
-                try:
-                    parsed = ast.literal_eval(new_args)
-                except (ValueError, SyntaxError):
-                    print("Invalid input, approving original.")
-                    decisions.append({"type": "approve"})
-                    continue
-            decisions.append({
-                "type": "edit",
-                "edited_action": {"name": action["name"], "args": parsed},
-            })
-        else:
-            decisions.append({"type": "approve"})
-    
-    return decisions
 
 
 def _save_session(conn, thread_id, messages, started_at, flow_type="ingest"):
@@ -80,7 +32,10 @@ async def run_turn_stream_async(
     user_message: str,
     agent: Runnable | None = None,
     config: RunnableConfig | None = None,
-    thread_id: str | None = None
+    thread_id: str | None = None,
+    renderer: Renderer | None = None,
+    auto_approve: bool = False,
+    debug: bool = False,
 ):
     """Run one streamed turn with HITL interrupt support.
 
@@ -94,7 +49,14 @@ async def run_turn_stream_async(
 
     If you pass a custom ``agent``, use the same ``thread_id`` (or omit both so defaults
     match) wherever that agent was constructed with thread-scoped resources.
+
+    Output is driven through ``renderer``; if none is given a ``DefaultRenderer`` is built
+    from ``auto_approve``/``debug`` (when a renderer is passed those two args are ignored —
+    configure them on the renderer instead).
     """
+    if renderer is None:
+        renderer = DefaultRenderer(auto_approve=auto_approve, debug=debug)
+
     # Extract caller-provided configurable values (if any) so we can preserve them.
     configurable = dict((config or {}).get("configurable") or {})
 
@@ -145,8 +107,7 @@ async def run_turn_stream_async(
                     for msg in messages:
                         if hasattr(msg, "tool_calls") and msg.tool_calls:
                             for tc in msg.tool_calls:
-                                args_preview = str(tc["args"])[:80]
-                                print(f"\n🔧 {tc['name']}({args_preview})", flush=True)
+                                renderer.on_tool_call(tc["name"], tc["args"])
 
             elif chunk["type"] == "messages":
                 msg, metadata = chunk["data"]
@@ -155,21 +116,21 @@ async def run_turn_stream_async(
                     continue
 
                 if isinstance(msg.content, str):
-                    print(msg.content, end="", flush=True)
+                    renderer.on_token(msg.content)
                 elif isinstance(msg.content, list):  # Message from AI by default is a list
                     for block in msg.content:
                         if isinstance(block, dict) and block.get("type") == "text":
                             text = block.get("text", "")
                             if text:
-                                print(text, end="", flush=True)
+                                renderer.on_token(text)
 
         if not pending_interrupts:
-            print()  # newline after streaming
+            renderer.on_turn_end()  # newline after streaming
             break
 
         # Handle interrupts and resume
-        print()  # newline before HITL prompt
-        decisions = _handle_interrupts(pending_interrupts)
+        renderer.on_turn_end()  # newline before HITL prompt
+        decisions = renderer.handle_interrupts(pending_interrupts)
         payload = Command(resume={"decisions": decisions})
         # Loop back, stream the resumed execution
 
@@ -177,7 +138,7 @@ async def run_turn_stream_async(
     final_state = await agent.aget_state(merged_config)
     messages = final_state.values["messages"]
     debug_content_types = [type(getattr(m, "content", None)).__name__ for m in messages]
-    print(f"[debug] session message content types: {debug_content_types}")
+    renderer.on_debug(f"[debug] session message content types: {debug_content_types}")
     _save_session(get_sessions_conn(), resolved_thread_id, messages, started_at)
     
 
@@ -186,6 +147,9 @@ def run_turn_stream(
     agent: Runnable | None = None,
     config: dict | None = None,
     thread_id: str | None = None,
+    renderer: Renderer | None = None,
+    auto_approve: bool = False,
+    debug: bool = False,
 ):
     """Sync wrapper (kept for convenience) around the async implementation."""
     return asyncio.run(
@@ -193,6 +157,9 @@ def run_turn_stream(
             user_message=user_message,
             agent=agent,
             config=config,
-            thread_id=thread_id
+            thread_id=thread_id,
+            renderer=renderer,
+            auto_approve=auto_approve,
+            debug=debug,
         )
     )
