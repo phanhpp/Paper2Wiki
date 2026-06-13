@@ -16,7 +16,7 @@ Typical usage after a flow completes:
 
 import json
 import time
-import uuid
+import hashlib
 import logging
 from datetime import datetime
 from sqlite3 import Connection
@@ -24,6 +24,22 @@ from typing import Optional
 from src.agents.llms import MODEL_CONFIG
 
 logger = logging.getLogger(__name__)
+
+
+def _stable_message_id(thread_id: str, index: int, role: str, content: str) -> str:
+    """Deterministic message id so re-saving a thread is idempotent.
+
+    LangGraph accumulates the full message list on a thread, and save_session() is called
+    at the end of every turn — so a multi-turn session re-presents earlier messages each
+    time. Keying each row on (thread_id, position, role, content) instead of a random UUID
+    lets ``INSERT OR IGNORE`` skip rows already written (and, via the AFTER INSERT trigger,
+    avoids duplicate FTS rows too). Messages are append-only and finalized by the time they
+    are saved, so a given position maps to a stable row across turns.
+    """
+    digest = hashlib.sha256(
+        f"{thread_id}\x00{index}\x00{role}\x00{content}".encode("utf-8")
+    ).hexdigest()
+    return digest[:32]
 
 
 def _serialize_message_content(raw_content) -> str:
@@ -74,7 +90,7 @@ def save_session(
         VALUES (?, ?, ?, ?, ?, 'ended')
     """, [thread_id, flow_type, resolved_model, started_at, now])
 
-    for msg in messages:
+    for index, msg in enumerate(messages):
         raw_content = msg.content if hasattr(msg, 'content') else msg
         content = _serialize_message_content(raw_content)
         if not content:
@@ -85,11 +101,14 @@ def save_session(
             tool_calls = json.dumps(msg.tool_calls)
 
         tool_name = getattr(msg, 'name', None)
+        message_id = _stable_message_id(thread_id, index, msg.type, content)
 
+        # INSERT OR IGNORE: re-saving the same thread (every turn) is a no-op for rows
+        # already present, keeping the messages table and its FTS index duplicate-free.
         conn.execute("""
-            INSERT INTO messages(id, session_id, role, content, tool_calls, tool_name, created_at)
+            INSERT OR IGNORE INTO messages(id, session_id, role, content, tool_calls, tool_name, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, [str(uuid.uuid4()), thread_id, msg.type, content, tool_calls, tool_name, now])
+        """, [message_id, thread_id, msg.type, content, tool_calls, tool_name, now])
 
     conn.commit()
     logger.debug("Saved session %s (flow=%s, msgs=%d)", thread_id, flow_type, len(messages))
