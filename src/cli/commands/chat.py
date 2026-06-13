@@ -15,14 +15,33 @@ from src.cli._runtime import run_async
 
 _REPL_HELP = """\
 Commands:
-  /new    start a fresh session (new thread + sandbox)
-  /help   show this help
-  /exit   quit (also Ctrl-D)
+  /title <name>   set a memorable title for this session
+  /title          show the current title
+  /new            start a fresh session (new thread + sandbox)
+  /help           show this help
+  /exit           quit (also Ctrl-D)
 """
 
 
 def _new_thread_id() -> str:
     return str(uuid7())
+
+
+def _apply_title(conn, thread_id: str, title: str, console) -> bool:
+    """Apply a manual title to an existing session row; print the outcome.
+
+    Returns True on success. Errors (collision / invalid) are reported, not raised, so a bad
+    /title never drops the user out of the REPL.
+    """
+    from src.sessions.title_manager import set_title_manual
+
+    try:
+        applied = set_title_manual(conn, thread_id, title)
+    except ValueError as exc:
+        console.print(f"[red]Title not set:[/] {exc}")
+        return False
+    console.print(f"[dim]Title set: {applied}[/]")
+    return True
 
 
 def run_chat(
@@ -73,12 +92,17 @@ def run_repl(
     from src.agents.agent import create_supervisor
     from src.agents.stream import run_turn_stream_async
     from src.cli.renderer import RichRenderer
+    from src.sessions.sessions_db_setup import get_sessions_conn
 
     renderer = RichRenderer(auto_approve=yes, debug=debug)
     console = renderer.console
     current = {"tid": thread_id or _new_thread_id()}
+    # A /title issued before the first turn is queued: the session row doesn't exist until
+    # save_session runs, so we apply it right after the next turn completes.
+    pending_title: str | None = None
 
     async def _loop() -> None:
+        nonlocal pending_title
         agent = await create_supervisor(current["tid"], eval_mode=eval_mode)
         session: PromptSession = PromptSession(history=InMemoryHistory())
         console.print(f"[bold green]Paper2Wiki[/] — session [dim]{current['tid']}[/]")
@@ -99,13 +123,38 @@ def run_repl(
                 continue
             if user_in == "/new":
                 current["tid"] = _new_thread_id()
+                pending_title = None
                 agent = await create_supervisor(current["tid"], eval_mode=eval_mode)
                 console.print(f"[dim]New session {current['tid']}[/]\n")
                 continue
+            if user_in.split(maxsplit=1)[0] == "/title":
+                arg = user_in[len("/title"):].strip()
+                conn = get_sessions_conn()
+                row = conn.execute(
+                    "SELECT title FROM sessions WHERE id = ?", (current["tid"],)
+                ).fetchone()
+                if not arg:  # show current title
+                    if row is None:
+                        console.print("[dim](no session yet — send a message first)[/]")
+                    else:
+                        console.print(f"[dim]Current title: {row[0] or 'untitled'}[/]")
+                elif row is None:  # session not saved yet → queue it
+                    pending_title = arg
+                    console.print(f"[dim]Title queued: {arg} (applies after your first message)[/]")
+                else:
+                    _apply_title(conn, current["tid"], arg, console)
+                continue
 
+            # Skip the LLM auto-titler when a manual title is queued — it would just be
+            # overwritten below, wasting a model call.
             await run_turn_stream_async(
-                user_in, agent=agent, thread_id=current["tid"], renderer=renderer
+                user_in, agent=agent, thread_id=current["tid"], renderer=renderer,
+                auto_title=pending_title is None,
             )
+
+            if pending_title is not None:  # apply a title queued before the session existed
+                _apply_title(get_sessions_conn(), current["tid"], pending_title, console)
+                pending_title = None
 
         console.print("\n[dim]Goodbye.[/]")
 
