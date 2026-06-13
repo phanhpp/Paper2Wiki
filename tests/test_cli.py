@@ -36,6 +36,7 @@ def _feed_input(monkeypatch, responses):
 
 @pytest.mark.unit
 def test_handle_interrupts_approve(monkeypatch):
+    """'a' (or any unrecognized choice) maps to an approve decision."""
     _feed_input(monkeypatch, ["a"])
     decisions = DefaultRenderer().handle_interrupts([_interrupt()])
     assert decisions == [{"type": "approve"}]
@@ -43,6 +44,7 @@ def test_handle_interrupts_approve(monkeypatch):
 
 @pytest.mark.unit
 def test_handle_interrupts_reject(monkeypatch):
+    """'r' maps to a reject decision."""
     _feed_input(monkeypatch, ["r"])
     decisions = DefaultRenderer().handle_interrupts([_interrupt()])
     assert decisions == [{"type": "reject"}]
@@ -50,6 +52,7 @@ def test_handle_interrupts_reject(monkeypatch):
 
 @pytest.mark.unit
 def test_handle_interrupts_edit_json(monkeypatch):
+    """'e' with JSON args produces an edit decision carrying the parsed args."""
     _feed_input(monkeypatch, ["e", '{"path": "b.md"}'])
     decisions = DefaultRenderer().handle_interrupts([_interrupt()])
     assert decisions == [
@@ -59,7 +62,7 @@ def test_handle_interrupts_edit_json(monkeypatch):
 
 @pytest.mark.unit
 def test_handle_interrupts_edit_python_dict(monkeypatch):
-    # Not valid JSON (single quotes) but a valid Python literal → ast.literal_eval path.
+    """'e' with a Python-dict literal (not JSON) is parsed via the ast.literal_eval fallback."""
     _feed_input(monkeypatch, ["e", "{'path': 'c.md'}"])
     decisions = DefaultRenderer().handle_interrupts([_interrupt()])
     assert decisions == [
@@ -69,6 +72,7 @@ def test_handle_interrupts_edit_python_dict(monkeypatch):
 
 @pytest.mark.unit
 def test_handle_interrupts_edit_invalid_falls_back_to_approve(monkeypatch):
+    """'e' with unparseable args safely falls back to approve rather than crashing."""
     _feed_input(monkeypatch, ["e", "not parseable !!"])
     decisions = DefaultRenderer().handle_interrupts([_interrupt()])
     assert decisions == [{"type": "approve"}]
@@ -76,6 +80,7 @@ def test_handle_interrupts_edit_invalid_falls_back_to_approve(monkeypatch):
 
 @pytest.mark.unit
 def test_handle_interrupts_yolo_sets_session_auto_approve(monkeypatch):
+    """'yolo' approves and latches auto-approve so later interrupts skip the prompt."""
     renderer = DefaultRenderer()
     _feed_input(monkeypatch, ["yolo"])
     first = renderer.handle_interrupts([_interrupt()])
@@ -89,7 +94,7 @@ def test_handle_interrupts_yolo_sets_session_auto_approve(monkeypatch):
 
 @pytest.mark.unit
 def test_auto_approve_constructor_short_circuits(monkeypatch):
-    # auto_approve=True must never call input().
+    """auto_approve=True approves without ever calling input()."""
     def _boom(*a, **k):
         raise AssertionError("input() should not be called when auto_approve=True")
 
@@ -100,7 +105,7 @@ def test_auto_approve_constructor_short_circuits(monkeypatch):
 
 @pytest.mark.unit
 def test_rich_renderer_maps_choices_via_rich_prompt(monkeypatch):
-    # RichRenderer reads the HITL choice through rich.prompt.Prompt.ask, not input().
+    """RichRenderer reads the HITL choice via rich.prompt.Prompt.ask (not input())."""
     import src.cli.renderer as rr
 
     monkeypatch.setattr(rr.Prompt, "ask", staticmethod(lambda *a, **k: "r"))
@@ -111,6 +116,7 @@ def test_rich_renderer_maps_choices_via_rich_prompt(monkeypatch):
 
 @pytest.mark.unit
 def test_rich_renderer_edit_uses_rich_prompt(monkeypatch):
+    """RichRenderer's edit path reads both the choice and the new args via Prompt.ask."""
     import src.cli.renderer as rr
 
     answers = iter(["e", '{"path": "z.md"}'])
@@ -124,6 +130,7 @@ def test_rich_renderer_edit_uses_rich_prompt(monkeypatch):
 
 @pytest.mark.unit
 def test_apply_env_sets_ingest_mode_read_by_get_ingest_mode(monkeypatch):
+    """--ingest-mode flows through apply_env into the env var get_ingest_mode reads."""
     from src.cli._env import IngestMode, apply_env
     from src.ingest_mode import get_ingest_mode
 
@@ -134,6 +141,7 @@ def test_apply_env_sets_ingest_mode_read_by_get_ingest_mode(monkeypatch):
 
 @pytest.mark.unit
 def test_apply_env_sets_wiki_path(monkeypatch):
+    """--wiki-path is written to the WIKI_PATH env var."""
     import os
 
     from src.cli._env import apply_env
@@ -145,6 +153,7 @@ def test_apply_env_sets_wiki_path(monkeypatch):
 
 @pytest.mark.unit
 def test_apply_env_none_is_noop(monkeypatch):
+    """Passing None for both flags leaves existing env vars untouched."""
     from src.cli._env import apply_env
 
     monkeypatch.setenv("PAPER2WIKI_INGEST_MODE", "fast")
@@ -156,6 +165,7 @@ def test_apply_env_none_is_noop(monkeypatch):
 
 @pytest.mark.unit
 def test_require_keys_raises_when_anthropic_missing(monkeypatch):
+    """A missing ANTHROPIC_API_KEY fails fast with typer.Exit."""
     import typer
 
     from src.cli._env import require_keys
@@ -168,9 +178,9 @@ def test_require_keys_raises_when_anthropic_missing(monkeypatch):
 
 @pytest.mark.unit
 def test_require_keys_eval_mode_skips_daytona(monkeypatch):
+    """eval_mode skips the Daytona key requirement (no sandbox is built)."""
     from src.cli._env import require_keys
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
     monkeypatch.delenv("DAYTONA_API_KEY", raising=False)
-    # Should not raise: Daytona not required in eval mode.
-    require_keys(eval_mode=True)
+    require_keys(eval_mode=True)  # must not raise
