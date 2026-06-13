@@ -178,6 +178,40 @@ def set_session_title(conn, session_id: str, title: str) -> bool:
     return True
 
 
+def set_title_manual(conn, session_id: str, title: str) -> str:
+    """Set a user-chosen title, erroring on collision.
+
+    Unlike :func:`set_session_title` (which silently auto-numbers collisions for auto-titling),
+    this is for explicit user intent (CLI ``rename`` / ``/title``): if the name is already taken
+    by another session, raise instead of mangling what the user typed.
+
+    Args:
+        conn:       sqlite3.Connection to sessions.db.
+        session_id: ID of the session to title (must already exist).
+        title:      Raw user-supplied title (will be sanitized).
+
+    Returns:
+        The sanitized title that was applied.
+
+    Raises:
+        ValueError: if the title is empty after sanitization, exceeds ``MAX_TITLE_LENGTH``,
+            or is already used by a different session.
+    """
+    cleaned = sanitize_title(title)  # raises ValueError if too long
+    if not cleaned:
+        raise ValueError("Title is empty after sanitization.")
+
+    conflict = conn.execute(
+        "SELECT id FROM sessions WHERE title = ? AND id != ?", (cleaned, session_id)
+    ).fetchone()
+    if conflict:
+        raise ValueError(f"Title {cleaned!r} is already used by another session.")
+
+    conn.execute("UPDATE sessions SET title = ? WHERE id = ?", (cleaned, session_id))
+    conn.commit()
+    return cleaned
+
+
 # ---------------------------------------------------------------------------
 # Auto-title generation
 # ---------------------------------------------------------------------------
