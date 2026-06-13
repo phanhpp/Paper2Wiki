@@ -42,7 +42,8 @@ paper2wiki config show           # effective config
 
 > Flags (on `chat`/`repl`/`sessions resume`): `--thread-id/-t`, `--ingest-mode {fast|quality}`,
 > `--wiki-path`, `--yes/-y` (auto-approve HITL), `--eval-mode` (skip Daytona), `--debug`.
-> REPL meta-commands: `/new`, `/help`, `/exit`.
+> REPL meta-commands: `/title <name>` (name the session), `/new`, `/help`, `/exit`.
+> `sessions resume <id|title>` and `sessions rename <id|title> <new>` accept a thread ID or title.
 > `python -m src.cli.app <cmd>` is an equivalent invocation that doesn't need the installed
 > entry point. (Requires uv ≥ 0.11; older uv on macOS flagged the editable `.pth` `UF_HIDDEN`,
 > which broke the `paper2wiki` console script — use `python -m` there, or upgrade uv.)

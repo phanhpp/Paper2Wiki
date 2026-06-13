@@ -38,7 +38,8 @@ Common flags (on `chat` / `repl` / `sessions resume`):
 | `--eval-mode` | Skip the Daytona sandbox (no marp subagent) |
 | `--debug` | Show diagnostic output |
 
-REPL meta-commands: `/new` (fresh thread + sandbox), `/help`, `/exit` (also Ctrl-D).
+REPL meta-commands: `/title <name>` (name the session; queued if sent before the first turn),
+`/new` (fresh thread + sandbox), `/help`, `/exit` (also Ctrl-D).
 
 ## Architecture
 
@@ -131,8 +132,8 @@ fine; the group form costs one line and future-proofs the command surface.
 | `src/cli/_env.py` | `IngestMode` enum, `apply_env()` (flags → env vars), `require_keys()` (fail fast on missing `ANTHROPIC_API_KEY`; `DAYTONA_API_KEY` unless `--eval-mode`). |
 | `src/cli/renderer.py` | `RichRenderer` — streams assistant text as live Markdown (`rich.live.Live`), prints styled tool-call lines, renders HITL prompts in a Rich panel. |
 | `src/cli/commands/__init__.py` | Package marker. |
-| `src/cli/commands/chat.py` | `repl` (interactive loop, prompt_toolkit input, `/new` `/help` `/exit`) and `chat` (one-shot). Shared `run_repl()` / `run_chat()` helpers so `sessions resume` can reuse the REPL. |
-| `src/cli/commands/sessions.py` | `ls`, `search` (FTS5 over `messages_fts`), `resume` (→ REPL), `prune`. Queries `sessions.db` directly; renders Rich tables. |
+| `src/cli/commands/chat.py` | `repl` (interactive loop, prompt_toolkit input, `/title` `/new` `/help` `/exit`) and `chat` (one-shot). Shared `run_repl()` / `run_chat()` helpers so `sessions resume` can reuse the REPL. |
+| `src/cli/commands/sessions.py` | `ls`, `search` (FTS5 over `messages_fts`), `resume` (by thread ID **or** title via `resolve_thread_id`, with tab-completion → REPL), `rename` (manual title, errors on collision), `prune`. Queries `sessions.db` directly; renders Rich tables. |
 | `src/cli/commands/config.py` | `show` — resolved ingest mode, wiki path, available web providers. |
 | `tests/test_cli.py` | 12 unit tests: HITL decision mapping (approve/reject/edit-JSON/edit-dict/invalid/yolo/auto-approve) and env/key resolution. Pure, no I/O. |
 | `docs/cli.md` | This document. |
