@@ -1,3 +1,4 @@
+import logging
 from deepagents import create_deep_agent, CompiledSubAgent
 from src.tools import all_tools
 from src.prompts.system_prompt import PHASE_1_SUPERVISOR_PROMPT
@@ -5,8 +6,9 @@ from langgraph.store.memory import InMemoryStore
 import aiosqlite
 from src.agents.backend_wrapper import GuardedLocalShellBackend
 # NOTE: create_daytona_agent (→ langchain_daytona → the Daytona SDK) is imported lazily inside
-# create_supervisor, only when eval_mode is False. That SDK import costs ~40s; deferring it keeps
-# `import src.agents.agent` cheap and lets eval-mode runs avoid it entirely.
+# create_supervisor, only when eval_mode is False. The import itself is ~3.6s; the real cost is at
+# call time — create_daytona_agent provisions/restores a sandbox over the network (tens of seconds).
+# Deferring keeps `import src.agents.agent` cheap and lets eval-mode runs skip Daytona entirely.
 from src.agents.sandbox_utils import register_sandbox
 from src.agents.llms import set_up_llms
 from langchain_core.utils.uuid import uuid7
@@ -16,7 +18,9 @@ from pathlib import Path
 from langchain.agents.middleware import PIIMiddleware, ModelCallLimitMiddleware, ToolCallLimitMiddleware
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2] 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+logger = logging.getLogger(__name__)
 
 # --- module-level singletons, created once ---
 _checkpoint_conn = None
@@ -74,8 +78,7 @@ async def create_supervisor(thread_id: str | None = None, eval_mode: bool = Fals
         # Lazy import: pulls in the Daytona SDK (~40s) only when we actually build a sandbox.
         from src.agents.daytona_agent import create_daytona_agent
 
-        # Todo: turn this to log
-        print("Creating Daytona agent for marp slide creation")
+        logger.info("Creating Daytona agent for marp slide creation")
         # Create Daytona agent for marp slide creation
         _daytona_backend, daytona_sandbox, visual_agent = create_daytona_agent(
             model=set_up_llms("claude-haiku-4-5-20251001"),
