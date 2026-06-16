@@ -34,7 +34,7 @@ app = typer.Typer(
 def _main() -> None:
     """Load environment variables before any command executes."""
     load_dotenv()
-    print("Environment variables loaded.")
+    
 
 
 app.command("repl")(chat_cmd.repl) # register the repl command
