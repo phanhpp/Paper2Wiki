@@ -7,25 +7,73 @@ interactive REPL, one-shot chat, session browsing, and config inspection. Built 
 
 ## How to run
 
-The `[project.scripts]` entry installs a `paper2wiki` command (activate the venv with
-`source .venv/bin/activate`, or prefix with `uv run`). The app auto-loads `.env`.
+Run all commands **from the repo root**. The app auto-loads `.env`, so you don't need
+`--env-file` (it's harmless if you add it).
+
+### Recommended: `uv run python -m`
+
+This is the most reliable invocation — it works regardless of your PATH or the editable-install
+state, because `python -m` puts the repo root on `sys.path`:
 
 ```bash
-paper2wiki repl                                       # interactive chat
-paper2wiki chat "ingest https://arxiv.org/abs/..."    # one-shot
-paper2wiki sessions ls                                # browse sessions (no agent/LLM)
-paper2wiki config show                                # effective config
+uv run python -m src.cli.app repl                                  # interactive chat
+uv run python -m src.cli.app chat "ingest https://arxiv.org/abs/…" # one-shot
+uv run python -m src.cli.app sessions ls                           # browse sessions (no agent/LLM)
+uv run python -m src.cli.app sessions resume "my project"          # resume by title or thread id
+uv run python -m src.cli.app config show                           # effective config
 ```
 
-`python -m src.cli.app <cmd>` is an equivalent invocation that doesn't depend on the
-installed entry point.
+Tip — alias it so it reads like a real command:
 
-> **macOS + old uv caveat (resolved on uv ≥ 0.11):** earlier uv (e.g. 0.6.x) created the
-> editable `.pth` with the macOS `UF_HIDDEN` flag, and CPython's `site` silently skips
-> hidden `.pth` files — so `import src` failed and the `paper2wiki` console script broke
-> (the flag was re-applied on every `uv sync`). Fix is to `uv self update` (≥ 0.11 no longer
-> sets the flag); as a stopgap, `python -m src.cli.app` always works, or
-> `chflags nohidden .venv/lib/python*/site-packages/__editable__.llm_wiki-*.pth`.
+```bash
+echo "alias paper2wiki='uv run python -m src.cli.app'" >> ~/.zshrc && source ~/.zshrc
+paper2wiki repl
+```
+
+### The `paper2wiki` console command
+
+`[project.scripts]` installs an executable at `.venv/bin/paper2wiki`. Calling it by bare name
+needs **two** things to be true:
+
+1. **`.venv/bin` on your PATH** — it isn't by default (e.g. when a conda `base` env is active).
+   Either `source .venv/bin/activate`, or use `uv run paper2wiki …` (runs it in the project env
+   without activating).
+2. **The editable install must be importable** — see the macOS caveat below.
+
+```bash
+source .venv/bin/activate     # or skip and use:  uv run paper2wiki …
+paper2wiki repl
+```
+
+> **ℹ️ macOS + uv `.pth` quirk (occasional, easy fix).** Most of the time the console command
+> just works. Once in a while — typically right after a `uv sync` — `uv run paper2wiki` and
+> `.venv/bin/paper2wiki` fail with `ModuleNotFoundError: No module named 'src'`. The cause: uv
+> sometimes creates the editable `.pth` (`.venv/lib/python*/site-packages/__editable__.llm_wiki-*.pth`)
+> with the macOS `UF_HIDDEN` flag set, and CPython's `site` silently **skips hidden `.pth` files**,
+> so `import src` can't resolve. It's a packaging quirk, not a problem with your code.
+>
+> - **Diagnose:** `ls -lO .venv/lib/python*/site-packages/__editable__*.pth` — `hidden` in the
+>   flags column means it's currently affected; `-` means you're fine.
+> - **Fix:** `chflags nohidden .venv/lib/python*/site-packages/__editable__.llm_wiki-*.pth`
+>   (a later `uv sync` may re-hide it, so re-run if it comes back).
+> - **Avoid it entirely:** use `uv run python -m src.cli.app …` — the `-m` form ignores the
+>   `.pth`, so it never hits this.
+
+### Command reference
+
+| Command | What it does | Needs agent/LLM? |
+|---|---|---|
+| `repl` | Interactive chat session (streams, HITL, meta-commands) | yes |
+| `chat "<msg>"` | One-shot: run a single message and exit | yes |
+| `sessions ls [-n N] [--source ingest]` | List recent sessions, newest first | no |
+| `sessions search "<query>"` | Full-text search message history (FTS5) | no |
+| `sessions resume <id\|title>` | Reopen a past session in the REPL (tab-completes) | yes |
+| `sessions rename <id\|title> "<new title>"` | Rename a session (errors on collision) | no |
+| `sessions prune [--older-than-days N] [-y]` | Delete old ended sessions | no |
+| `config show [--ingest-mode …] [--wiki-path …]` | Print the effective config | no |
+
+The `sessions`/`config` commands don't import the agent stack, so they're fast; `repl`/`chat`
+build the supervisor (and, unless `--eval-mode`, a Daytona sandbox).
 
 Common flags (on `chat` / `repl` / `sessions resume`):
 
@@ -36,10 +84,11 @@ Common flags (on `chat` / `repl` / `sessions resume`):
 | `--wiki-path` | Override the wiki directory |
 | `--yes` / `-y` | Auto-approve all HITL prompts |
 | `--eval-mode` | Skip the Daytona sandbox (no marp subagent) |
+| `--no-save` | Don't persist to `sessions.db` — no session row, no message history, no auto-title. The LangGraph checkpointer still runs, so in-run HITL approve/resume is unaffected. For testing throwaway turns. |
 | `--debug` | Show diagnostic output |
 
 REPL meta-commands: `/title <name>` (name the session; queued if sent before the first turn),
-`/new` (fresh thread + sandbox), `/help`, `/exit` (also Ctrl-D).
+`/new` (fresh thread + sandbox), `/help`, `/exit` (bare `quit`/`exit`/`bye`/`:q` and Ctrl-D also quit).
 
 ## Architecture
 

@@ -33,20 +33,25 @@ uv run pytest -m "not integration"  # skip tests needing external services
 python scripts/lint.py --wiki-dir wiki/
 
 # CLI (paper2wiki) — interactive REPL, one-shot chat, session browsing
-# (`.env` is auto-loaded by the app; activate the venv or prefix with `uv run`)
-paper2wiki repl                  # interactive chat
-paper2wiki chat "ingest <url>"   # one-shot
-paper2wiki sessions ls           # browse sessions
-paper2wiki config show           # effective config
+# Most reliable invocation (run from repo root; .env auto-loaded). See docs/cli.md.
+uv run python -m src.cli.app repl                  # interactive chat
+uv run python -m src.cli.app chat "ingest <url>"   # one-shot
+uv run python -m src.cli.app sessions ls           # browse sessions
+uv run python -m src.cli.app config show           # effective config
 ```
 
 > Flags (on `chat`/`repl`/`sessions resume`): `--thread-id/-t`, `--ingest-mode {fast|quality}`,
-> `--wiki-path`, `--yes/-y` (auto-approve HITL), `--eval-mode` (skip Daytona), `--debug`.
-> REPL meta-commands: `/title <name>` (name the session), `/new`, `/help`, `/exit`.
+> `--wiki-path`, `--yes/-y` (auto-approve HITL), `--eval-mode` (skip Daytona),
+> `--no-save` (don't write to `sessions.db` — no title, no history; for testing), `--debug`.
+> REPL meta-commands: `/title <name>` (name the session), `/new`, `/help`, `/exit` (bare `quit`/`exit`/`bye`/`:q` and Ctrl-D also quit).
 > `sessions resume <id|title>` and `sessions rename <id|title> <new>` accept a thread ID or title.
-> `python -m src.cli.app <cmd>` is an equivalent invocation that doesn't need the installed
-> entry point. (Requires uv ≥ 0.11; older uv on macOS flagged the editable `.pth` `UF_HIDDEN`,
-> which broke the `paper2wiki` console script — use `python -m` there, or upgrade uv.)
+> **macOS caveat (occasional):** the bare `paper2wiki` console command (via `uv run paper2wiki`
+> or an activated venv) normally works. Occasionally — usually right after a `uv sync` — it fails
+> with `ModuleNotFoundError: No module named 'src'`: uv has flagged the editable `.pth` `UF_HIDDEN`
+> and CPython's `site` skips hidden `.pth` files. To fix, run
+> `chflags nohidden .venv/lib/python*/site-packages/__editable__.llm_wiki-*.pth`. The `-m` form
+> `uv run python -m src.cli.app …` sidesteps the `.pth` entirely and never hits this. Full details
+> in `docs/cli.md`.
 
 Required `.env` vars: `ANTHROPIC_API_KEY`, `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT`, `DAYTONA_API_KEY` (Marp). Web ingest needs at least one of `FIRECRAWL_API_KEY`, `TAVILY_API_KEY`, `EXA_API_KEY`. Optional: `WIKI_PATH` (defaults to `./wiki`), `PAPER2WIKI_INGEST_MODE` (`fast` | `quality`). See `.env.example`.
 
