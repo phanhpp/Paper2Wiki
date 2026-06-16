@@ -43,6 +43,7 @@ async def run_turn_stream_async(
     auto_approve: bool = False,
     debug: bool = False,
     auto_title: bool = True,
+    persist: bool = True,
 ):
     """Run one streamed turn with HITL interrupt support.
 
@@ -141,6 +142,12 @@ async def run_turn_stream_async(
         payload = Command(resume={"decisions": decisions})
         # Loop back, stream the resumed execution
 
+    # Ephemeral mode: skip sessions.db entirely (no row, no history, no auto-title).
+    # The LangGraph checkpointer still ran, so in-run HITL resume was unaffected.
+    if not persist:
+        renderer.on_debug("[debug] persist=False — skipping sessions.db save")
+        return
+
     # save session to db
     final_state = await agent.aget_state(merged_config)
     messages = final_state.values["messages"]
@@ -158,6 +165,7 @@ def run_turn_stream(
     auto_approve: bool = False,
     debug: bool = False,
     auto_title: bool = True,
+    persist: bool = True,
 ):
     """Sync wrapper (kept for convenience) around the async implementation."""
     return asyncio.run(
@@ -170,5 +178,6 @@ def run_turn_stream(
             auto_approve=auto_approve,
             debug=debug,
             auto_title=auto_title,
+            persist=persist,
         )
     )
