@@ -16,13 +16,15 @@ import pytest
 from src.agents.renderer import DefaultRenderer
 
 
-def _interrupt(action_name: str = "write_file", args: dict | None = None):
+def _interrupt(action_name: str = "write_file", args: dict | None = None,
+               allowed: list[str] | None = None):
     """Build a single fake LangGraph interrupt matching the HITL payload shape."""
     return SimpleNamespace(
         value={
             "action_requests": [{"name": action_name, "args": args or {"path": "a.md"}}],
             "review_configs": [
-                {"action_name": action_name, "allowed_decisions": ["approve", "edit", "reject"]}
+                {"action_name": action_name,
+                 "allowed_decisions": allowed or ["approve", "edit", "reject"]}
             ],
         }
     )
@@ -43,11 +45,39 @@ def test_handle_interrupts_approve(monkeypatch):
 
 
 @pytest.mark.unit
-def test_handle_interrupts_reject(monkeypatch):
-    """'r' maps to a reject decision."""
-    _feed_input(monkeypatch, ["r"])
+def test_handle_interrupts_reject_no_reason(monkeypatch):
+    """'r' with an empty reason maps to a bare reject decision."""
+    _feed_input(monkeypatch, ["r", ""])
     decisions = DefaultRenderer().handle_interrupts([_interrupt()])
     assert decisions == [{"type": "reject"}]
+
+
+@pytest.mark.unit
+def test_handle_interrupts_reject_with_reason(monkeypatch):
+    """'r' with a reason attaches it as the message sent back to the model."""
+    _feed_input(monkeypatch, ["r", "use the feat/cli branch, not main"])
+    decisions = DefaultRenderer().handle_interrupts([_interrupt()])
+    assert decisions == [{"type": "reject", "message": "use the feat/cli branch, not main"}]
+
+
+@pytest.mark.unit
+def test_handle_interrupts_respond(monkeypatch):
+    """'s' returns the typed text as a respond decision (ask-user tools)."""
+    _feed_input(monkeypatch, ["s", "the answer is 42"])
+    decisions = DefaultRenderer().handle_interrupts(
+        [_interrupt("ask_user", allowed=["approve", "respond"])]
+    )
+    assert decisions == [{"type": "respond", "message": "the answer is 42"}]
+
+
+@pytest.mark.unit
+def test_choices_for_filters_to_allowed():
+    """Only tool-allowed decisions are offered; yolo rides along with approve."""
+    from src.agents.renderer import choices_for
+
+    assert choices_for(["approve", "reject"]) == ["a", "r", "yolo"]
+    assert choices_for(["reject"]) == ["r"]  # no approve → no yolo
+    assert choices_for(["approve", "edit", "reject", "respond"]) == ["a", "e", "r", "s", "yolo"]
 
 
 @pytest.mark.unit
@@ -108,7 +138,8 @@ def test_rich_renderer_maps_choices_via_rich_prompt(monkeypatch):
     """RichRenderer reads the HITL choice via rich.prompt.Prompt.ask (not input())."""
     import src.cli.renderer as rr
 
-    monkeypatch.setattr(rr.Prompt, "ask", staticmethod(lambda *a, **k: "r"))
+    answers = iter(["r", ""])  # choice, then empty reason
+    monkeypatch.setattr(rr.Prompt, "ask", staticmethod(lambda *a, **k: next(answers)))
     renderer = rr.RichRenderer()
     decisions = renderer.handle_interrupts([_interrupt()])
     assert decisions == [{"type": "reject"}]
@@ -126,6 +157,72 @@ def test_rich_renderer_edit_uses_rich_prompt(monkeypatch):
     assert decisions == [
         {"type": "edit", "edited_action": {"name": "write_file", "args": {"path": "z.md"}}}
     ]
+
+
+@pytest.mark.unit
+def test_renderers_conform_to_protocol():
+    """Both renderers satisfy the Renderer protocol (incl. on_tool_result)."""
+    from src.agents.renderer import Renderer
+    import src.cli.renderer as rr
+
+    assert isinstance(DefaultRenderer(), Renderer)
+    assert isinstance(rr.RichRenderer(), Renderer)
+
+
+@pytest.mark.unit
+def test_rich_renderer_tool_result_previews_and_stashes_full():
+    """on_tool_result keeps the full text but only previews it inline."""
+    import src.cli.renderer as rr
+
+    renderer = rr.RichRenderer()
+    long = "\n".join(f"line {i}" for i in range(1, 51))
+    renderer.on_turn_start()
+    renderer.on_tool_result("read_file", long)
+
+    assert renderer._last_tool_output == [("read_file", long)]  # full kept
+
+
+@pytest.mark.unit
+def test_rich_renderer_open_last_tool_output_pages_full(monkeypatch):
+    """Ctrl-O handler pages the full stashed output with a per-tool header."""
+    import src.cli.renderer as rr
+
+    captured = {}
+    monkeypatch.setattr(rr.click, "echo_via_pager", lambda text: captured.update(text=text))
+    renderer = rr.RichRenderer()
+    renderer.on_turn_start()
+    renderer.on_tool_result("read_file", "line 1\nline 50")
+    renderer.open_last_tool_output()
+
+    assert "── read_file ──" in captured["text"]
+    assert "line 50" in captured["text"]
+
+
+@pytest.mark.unit
+def test_rich_renderer_open_last_tool_output_empty(monkeypatch):
+    """With nothing stashed, Ctrl-O reports it and never invokes the pager."""
+    import src.cli.renderer as rr
+
+    called = {"pager": False}
+    monkeypatch.setattr(rr.click, "echo_via_pager", lambda text: called.update(pager=True))
+    renderer = rr.RichRenderer()
+    renderer.on_turn_start()  # clears the store
+    renderer.open_last_tool_output()
+
+    assert called["pager"] is False
+
+
+@pytest.mark.unit
+def test_rich_renderer_turn_start_clears_tool_output():
+    """A new turn drops the previous turn's stashed output."""
+    import src.cli.renderer as rr
+
+    renderer = rr.RichRenderer()
+    renderer.on_turn_start()
+    renderer.on_tool_result("read_file", "data")
+    assert renderer._last_tool_output
+    renderer.on_turn_start()
+    assert renderer._last_tool_output == []
 
 
 @pytest.mark.unit

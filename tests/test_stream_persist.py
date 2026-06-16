@@ -57,3 +57,54 @@ async def test_persist_true_saves(monkeypatch):
     )
 
     assert save_calls == [1]
+
+
+class _SpyRenderer:
+    """Records which renderer hook each streamed message hits."""
+
+    auto_approve = False
+
+    def __init__(self):
+        self.tokens: list[str] = []
+        self.tool_results: list[tuple[str, str]] = []
+
+    def on_turn_start(self): ...
+    def on_token(self, text): self.tokens.append(text)
+    def on_tool_call(self, name, args): ...
+    def on_tool_result(self, name, content): self.tool_results.append((name, content))
+    def on_turn_end(self): ...
+    def on_debug(self, message): ...
+    def handle_interrupts(self, interrupts): return []
+
+
+class _MessagesAgent:
+    """Streams one AI text chunk then one ToolMessage on the 'messages' channel."""
+
+    def __init__(self, ai_msg, tool_msg):
+        self._chunks = [
+            {"type": "messages", "data": (ai_msg, {})},
+            {"type": "messages", "data": (tool_msg, {})},
+        ]
+
+    async def astream(self, *args, **kwargs):
+        for chunk in self._chunks:
+            yield chunk
+
+
+@pytest.mark.unit
+async def test_tool_message_routes_to_on_tool_result_not_on_token():
+    """ToolMessage content goes to on_tool_result (collapsed preview), not the
+    live Markdown stream — assistant text still streams via on_token."""
+    from langchain_core.messages import AIMessageChunk, ToolMessage
+
+    ai = AIMessageChunk(content="hello")
+    tool = ToolMessage(content="FILE BODY", tool_call_id="x", name="read_file")
+    renderer = _SpyRenderer()
+
+    await stream_mod.run_turn_stream_async(
+        "hi", agent=_MessagesAgent(ai, tool), thread_id="t-route",
+        renderer=renderer, persist=False,
+    )
+
+    assert renderer.tokens == ["hello"]                       # AI text streamed
+    assert renderer.tool_results == [("read_file", "FILE BODY")]  # tool routed away from on_token
