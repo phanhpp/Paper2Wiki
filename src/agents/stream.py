@@ -16,6 +16,21 @@ from src.sessions.session_manager import save_session
 from src.sessions.title_manager import maybe_auto_title
 
 
+def _as_text(content) -> str:
+    """Flatten a message's content (str, or a list of text/dict blocks) to plain text."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict):
+                parts.append(block.get("text") or block.get("content") or str(block))
+            else:
+                parts.append(str(block))
+        return "\n".join(parts)
+    return str(content)
+
+
 def _save_session(conn, thread_id, messages, started_at, flow_type="ingest", auto_title=True):
     """Save session to db and (optionally) auto-title.
 
@@ -87,6 +102,11 @@ async def run_turn_stream_async(
     while True:
         pending_interrupts = None
 
+        # Signal "agent is thinking" before any output — the renderer shows a transient
+        # spinner that the first token/tool-call tears down. Runs each iteration so the
+        # post-interrupt resume (below) gets a fresh spinner during its think gap too.
+        renderer.on_turn_start()
+
         # Stream values (for interrupts) + messages (for token output)
         async for chunk in agent.astream(
             payload,
@@ -121,6 +141,13 @@ async def run_turn_stream_async(
                 msg, metadata = chunk["data"]
 
                 if not msg.content:
+                    continue
+
+                # Tool results (ToolMessage) get a collapsed preview, not the live
+                # Markdown stream — echoing a 1000-line file there smears the view.
+                if getattr(msg, "type", None) == "tool":
+                    renderer.on_tool_result(getattr(msg, "name", None) or "tool",
+                                            _as_text(msg.content))
                     continue
 
                 if isinstance(msg.content, str):

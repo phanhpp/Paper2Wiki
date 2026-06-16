@@ -8,6 +8,7 @@ then import ``create_supervisor`` lazily.
 
 from __future__ import annotations
 
+import logging
 import os
 from enum import Enum
 
@@ -17,6 +18,24 @@ import typer
 class IngestMode(str, Enum):
     fast = "fast"
     quality = "quality"
+
+
+def setup_logging(debug: bool = False) -> None:
+    """Configure console logging for the CLI.
+
+    Default: only WARNING+ reaches the console, so startup stays quiet. ``--debug``
+    drops the level to DEBUG and surfaces the agent/tool diagnostics (Daytona build,
+    provider routing, session save, etc.). Third-party loggers are pinned to WARNING
+    unless ``--debug`` so their chatter doesn't leak in.
+    """
+    logging.basicConfig(
+        level=logging.DEBUG if debug else logging.WARNING,
+        format="%(levelname)s %(name)s: %(message)s",
+        force=True,  # take effect even if some import already configured the root logger
+    )
+    if not debug:
+        for noisy in ("httpx", "httpcore", "urllib3", "anthropic", "openai", "daytona"):
+            logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 def apply_env(ingest_mode: IngestMode | None, wiki_path: str | None) -> None:

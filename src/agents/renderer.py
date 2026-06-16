@@ -23,12 +23,24 @@ from typing import Any, Protocol, runtime_checkable
 class Renderer(Protocol):
     """Front-end contract for the agent stream loop."""
 
+    def on_turn_start(self) -> None:
+        """The turn began — the agent is thinking but hasn't emitted output yet.
+
+        Front-ends can show a transient "thinking" indicator here (transient means disappear once thinking ends); it should be torn
+        down by the first ``on_token`` / ``on_tool_call`` / ``handle_interrupts`` call.
+        """
+        ...
+
     def on_token(self, text: str) -> None:
         """A chunk of assistant text arrived (stream as it comes)."""
         ...
 
     def on_tool_call(self, name: str, args: Any) -> None:
         """The agent invoked a tool."""
+        ...
+
+    def on_tool_result(self, name: str, content: str) -> None:
+        """A tool returned its result. Front-ends may preview/collapse long output."""
         ...
 
     def on_turn_end(self) -> None:
@@ -44,13 +56,47 @@ class Renderer(Protocol):
         ...
 
 
-def build_decisions(interrupts: list, prompt_fn, edit_fn, state: "_AutoApprove") -> list[dict]:
+# Prompt key → HITL decision type. ``yolo`` is a UI-only shortcut for approve-all.
+CHOICE_TYPE = {"a": "approve", "e": "edit", "r": "reject", "s": "respond"}
+CHOICE_LABEL = {
+    "a": "[a]pprove",
+    "e": "[e]dit",
+    "r": "[r]eject",        # reject + an optional reason sent to the model
+    "s": "re[s]pond",       # answer on behalf of the tool (ask-user tools)
+    "yolo": "[yolo]=approve all",
+}
+
+
+def choices_for(allowed: list[str]) -> list[str]:
+    """Prompt keys offered for an action, derived from its ``allowed_decisions``.
+
+    Only decisions the tool actually permits are shown (so a reject-only tool never
+    offers edit). ``yolo`` is appended when approve is allowed.
+    """
+    keys = [k for k in ("a", "e", "r", "s") if CHOICE_TYPE[k] in (allowed or [])]
+    if "approve" in (allowed or []):
+        keys.append("yolo")
+    return keys
+
+
+def legend(choices: list[str]) -> str:
+    """Human-readable one-liner for the offered choices, e.g. ``[a]pprove / [r]eject``."""
+    return " / ".join(CHOICE_LABEL[c] for c in choices)
+
+
+def build_decisions(interrupts, prompt_fn, edit_fn, message_fn, state: "_AutoApprove") -> list[dict]:
     """Shared HITL decision loop.
 
-    Iterates the action requests in ``interrupts`` and asks the front-end for a choice via
-    ``prompt_fn`` (returns the lowercased choice string) and ``edit_fn`` (returns the raw new
-    args string when the user chooses to edit). ``state`` carries the session auto-approve flag
-    so ``yolo`` sticks for the rest of the run.
+    For each requested action it offers only the decisions the tool allows
+    (``choices_for``) and asks the front-end to resolve them:
+    - ``prompt_fn(action, review_config, choices)`` → the chosen key (``a/e/r/s/yolo``)
+    - ``edit_fn(action)`` → raw new-args string (for ``e``)
+    - ``message_fn(action, kind)`` → free-text for ``r`` (reason, optional) and
+      ``s`` (the reply returned as the tool result)
+
+    Decision shapes match ``langchain ... human_in_the_loop``:
+    ``approve`` / ``edit`` / ``reject`` (optional ``message``) / ``respond`` (``message``).
+    ``state`` carries the session auto-approve flag so ``yolo`` sticks for the run.
     """
     interrupt_value = interrupts[0].value
     action_requests = interrupt_value["action_requests"]
@@ -65,13 +111,23 @@ def build_decisions(interrupts: list, prompt_fn, edit_fn, state: "_AutoApprove")
             decisions.append({"type": "approve"})
             continue
 
-        choice = prompt_fn(action, review_config)
+        choices = choices_for(review_config.get("allowed_decisions"))
+        choice = prompt_fn(action, review_config, choices)
 
         if choice == "yolo":
             state.auto_approve = True
             decisions.append({"type": "approve"})
         elif choice == "r":
-            decisions.append({"type": "reject"})
+            # Reject + (optional) reason — feedback to the model so it tries a
+            # different approach, the tool is NOT executed.
+            reason = (message_fn(action, "reject") or "").strip()
+            decision = {"type": "reject"}
+            if reason:
+                decision["message"] = reason
+            decisions.append(decision)
+        elif choice == "s":
+            # Respond — return the text as a successful tool result (ask-user tools).
+            decisions.append({"type": "respond", "message": message_fn(action, "respond") or ""})
         elif choice == "e":
             new_args = edit_fn(action)
             try:
@@ -112,12 +168,19 @@ class DefaultRenderer:
     def auto_approve(self) -> bool:
         return self._state.auto_approve
 
+    def on_turn_start(self) -> None:
+        """No-op: the plain ``print`` front-end shows no thinking indicator."""
+
     def on_token(self, text: str) -> None:
         print(text, end="", flush=True)
 
     def on_tool_call(self, name: str, args: Any) -> None:
         args_preview = str(args)[:80]
         print(f"\n🔧 {name}({args_preview})", flush=True)
+
+    def on_tool_result(self, name: str, content: str) -> None:
+        """Print the full tool result inline (preserves notebook/test behavior)."""
+        print(content, flush=True)
 
     def on_turn_end(self) -> None:
         print()
@@ -127,15 +190,17 @@ class DefaultRenderer:
             print(message)
 
     def handle_interrupts(self, interrupts: list) -> list[dict]:
-        def prompt_fn(action, review_config):
+        def prompt_fn(action, review_config, choices):
             print(f"\n🔔 Tool: {action['name']}")
             print(f"   Args: {action['args']}")
-            print(f"   Allowed: {review_config['allowed_decisions']}")
-            return input(
-                "[a]pprove / [e]dit / [r]eject / [yolo=auto-approve all]: "
-            ).lower()
+            return input(f"{legend(choices)}: ").lower()
 
         def edit_fn(action):
             return input("New args (JSON or Python dict): ")
 
-        return build_decisions(interrupts, prompt_fn, edit_fn, self._state)
+        def message_fn(action, kind):
+            if kind == "reject":
+                return input("Reason to send the model (optional): ")
+            return input("Reply to return as the tool result: ")
+
+        return build_decisions(interrupts, prompt_fn, edit_fn, message_fn, self._state)
