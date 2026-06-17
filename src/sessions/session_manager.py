@@ -14,9 +14,10 @@ Typical usage after a flow completes:
     maybe_auto_title(conn, session_id, messages)
 """
 
+import re
 import json
 import time
-import uuid
+import hashlib
 import logging
 from datetime import datetime
 from sqlite3 import Connection
@@ -24,6 +25,54 @@ from typing import Optional
 from src.agents.llms import MODEL_CONFIG
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_thread_id(conn: Connection, ref: str) -> Optional[str]:
+    """Resolve a session reference (a thread_id **or** a title) to a thread_id.
+
+    Resolution order:
+    1. Exact ``thread_id`` match — returned as-is.
+    2. Title:
+       - a **specific** lineage member (ref ends in ``" #N"``) → that exact title only.
+       - a **base** name (no suffix) → the **most recent** session whose title is the base or
+         ``"base #N"`` (mirrors "resume by name picks the latest in the lineage": resuming
+         ``"my project"`` lands on the newest of ``"my project"`` / ``"my project #2"`` / …).
+
+    Returns the resolved ``thread_id``, or ``None`` if nothing matches.
+    """
+    # 1. exact thread_id
+    if conn.execute("SELECT 1 FROM sessions WHERE id = ?", (ref,)).fetchone():
+        return ref
+
+    # 2a. specific lineage member ("name #N") → exact title match only
+    if re.match(r'^.* #\d+$', ref):
+        row = conn.execute("SELECT id FROM sessions WHERE title = ?", (ref,)).fetchone()
+        return row[0] if row else None
+
+    # 2b. base name → most recent across the lineage (base or "base #N")
+    escaped = ref.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    row = conn.execute(
+        "SELECT id FROM sessions WHERE title = ? OR title LIKE ? ESCAPE '\\' "
+        "ORDER BY started_at DESC LIMIT 1",
+        (ref, f"{escaped} #%"),
+    ).fetchone()
+    return row[0] if row else None
+
+
+def _stable_message_id(thread_id: str, index: int, role: str, content: str) -> str:
+    """Deterministic message id so re-saving a thread is idempotent.
+
+    LangGraph accumulates the full message list on a thread, and save_session() is called
+    at the end of every turn — so a multi-turn session re-presents earlier messages each
+    time. Keying each row on (thread_id, position, role, content) instead of a random UUID
+    lets ``INSERT OR IGNORE`` skip rows already written (and, via the AFTER INSERT trigger,
+    avoids duplicate FTS rows too). Messages are append-only and finalized by the time they
+    are saved, so a given position maps to a stable row across turns.
+    """
+    digest = hashlib.sha256(
+        f"{thread_id}\x00{index}\x00{role}\x00{content}".encode("utf-8")
+    ).hexdigest()
+    return digest[:32]
 
 
 def _serialize_message_content(raw_content) -> str:
@@ -74,7 +123,7 @@ def save_session(
         VALUES (?, ?, ?, ?, ?, 'ended')
     """, [thread_id, flow_type, resolved_model, started_at, now])
 
-    for msg in messages:
+    for index, msg in enumerate(messages):
         raw_content = msg.content if hasattr(msg, 'content') else msg
         content = _serialize_message_content(raw_content)
         if not content:
@@ -85,11 +134,14 @@ def save_session(
             tool_calls = json.dumps(msg.tool_calls)
 
         tool_name = getattr(msg, 'name', None)
+        message_id = _stable_message_id(thread_id, index, msg.type, content)
 
+        # INSERT OR IGNORE: re-saving the same thread (every turn) is a no-op for rows
+        # already present, keeping the messages table and its FTS index duplicate-free.
         conn.execute("""
-            INSERT INTO messages(id, session_id, role, content, tool_calls, tool_name, created_at)
+            INSERT OR IGNORE INTO messages(id, session_id, role, content, tool_calls, tool_name, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, [str(uuid.uuid4()), thread_id, msg.type, content, tool_calls, tool_name, now])
+        """, [message_id, thread_id, msg.type, content, tool_calls, tool_name, now])
 
     conn.commit()
     logger.debug("Saved session %s (flow=%s, msgs=%d)", thread_id, flow_type, len(messages))

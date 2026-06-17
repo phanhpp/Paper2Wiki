@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 from typing_extensions import Optional, Literal, Any
 from langchain.tools import tool
 import asyncio
-from pathlib import Path
 _ASYNC_CLIENT = anthropic.AsyncAnthropic()
 _MODEL = "claude-haiku-4-5-20251001"
 _MAX_TOKENS = 4192
@@ -81,10 +80,6 @@ async def _summarize_batch_async(
     traces = dict(sliced)
     traces = _filter_traces(traces, focus_query)
     prompt = _build_messages(traces, focus_query)
-
-    # DEBUG: dump full prompt to file for inspection
-    debug_path = Path(__file__).parents[1] / "trace_offloads" / f"debug_prompt_{offset}.txt"
-    debug_path.write_text(prompt, encoding="utf-8")
 
     response = await _ASYNC_CLIENT.messages.parse(
         model=_MODEL,

@@ -31,7 +31,27 @@ uv run pytest -m "not integration"  # skip tests needing external services
 
 # Wiki health check (once scripts/lint.py exists)
 python scripts/lint.py --wiki-dir wiki/
+
+# CLI (paper2wiki) — interactive REPL, one-shot chat, session browsing
+# Most reliable invocation (run from repo root; .env auto-loaded). See docs/cli.md.
+uv run python -m src.cli.app repl                  # interactive chat
+uv run python -m src.cli.app chat "ingest <url>"   # one-shot
+uv run python -m src.cli.app sessions ls           # browse sessions
+uv run python -m src.cli.app config show           # effective config
 ```
+
+> Flags (on `chat`/`repl`/`sessions resume`): `--thread-id/-t`, `--ingest-mode {fast|quality}`,
+> `--wiki-path`, `--yes/-y` (auto-approve HITL), `--eval-mode` (skip Daytona),
+> `--no-save` (don't write to `sessions.db` — no title, no history; for testing), `--debug`.
+> REPL meta-commands: `/title <name>` (name the session), `/new`, `/help`, `/exit` (bare `quit`/`exit`/`bye`/`:q` and Ctrl-D also quit).
+> `sessions resume <id|title>` and `sessions rename <id|title> <new>` accept a thread ID or title.
+> **macOS caveat (occasional):** the bare `paper2wiki` console command (via `uv run paper2wiki`
+> or an activated venv) normally works. Occasionally — usually right after a `uv sync` — it fails
+> with `ModuleNotFoundError: No module named 'src'`: uv has flagged the editable `.pth` `UF_HIDDEN`
+> and CPython's `site` skips hidden `.pth` files. To fix, run
+> `chflags nohidden .venv/lib/python*/site-packages/__editable__.llm_wiki-*.pth`. The `-m` form
+> `uv run python -m src.cli.app …` sidesteps the `.pth` entirely and never hits this. Full details
+> in `docs/cli.md`.
 
 Required `.env` vars: `ANTHROPIC_API_KEY`, `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT`, `DAYTONA_API_KEY` (Marp). Web ingest needs at least one of `FIRECRAWL_API_KEY`, `TAVILY_API_KEY`, `EXA_API_KEY`. Optional: `WIKI_PATH` (defaults to `./wiki`), `PAPER2WIKI_INGEST_MODE` (`fast` | `quality`). See `.env.example`.
 
@@ -110,6 +130,54 @@ Skills available to the supervisor:
 - `skills/web-tools/` — web search/extract provider selection and call patterns (Firecrawl, Tavily, Exa)
 - `skills/marp-slide/` — Marp slide creation (injected into the Daytona sandbox)
 
+### CLI front-end (`src/cli/`)
+
+Terminal REPL/one-shot front-end. The agent stream emits events through the `Renderer`
+protocol (`src/agents/renderer.py`); `RichRenderer` (`src/cli/renderer.py`) is the Rich +
+prompt_toolkit terminal implementation, `DefaultRenderer` is the plain-`print` one used by
+notebooks/tests. The loop lives in `src/cli/commands/chat.py`.
+
+**Per-turn UI lifecycle** (one turn): `on_turn_start` shows a transient "Thinking…" spinner →
+first `on_token` swaps it for a live Markdown block → `on_turn_end` commits the block. Tool
+results route to `on_tool_result` (collapsed preview, full text stashed), **not** to the
+Markdown stream. HITL interrupts route to `handle_interrupts`.
+
+**Verified by unit tests** (`pytest -m unit`; `tests/test_cli.py`, `tests/test_stream_persist.py`):
+- HITL decisions: approve / reject (with & without reason) / edit (JSON + Python-dict + invalid
+  fallback) / **respond** / yolo / auto-approve short-circuit; `choices_for` filters to the
+  tool's `allowed_decisions`. Decision shapes match `langchain ... human_in_the_loop`.
+- `RichRenderer.on_tool_result` previews + stashes full output; `open_last_tool_output` pages it
+  (and the empty case); `on_turn_start` clears the per-turn store. Both renderers satisfy the
+  protocol (incl. `on_tool_result`).
+- `stream.py` routes a `ToolMessage` to `on_tool_result`, assistant text to `on_token`.
+- `persist=False` (`--no-save`) skips `sessions.db`; `persist=True` saves.
+
+**Verified manually only** (real run under a pty; no automated coverage yet):
+- Spinner → Markdown handoff (spinner clears on first token).
+- Long-output Markdown no longer smears/repeats — `on_token` streams into a `transient=True`,
+  `vertical_overflow="crop"` Live, and `_end_live` commits the full Markdown once. (The earlier
+  `vertical_overflow="visible"` reprinted the whole block each refresh on overflow.)
+
+**Known gaps / to fix:**
+- **HITL `respond` vs `reject`:** "tell the agent to do it differently" is **reject + a reason
+  message** (feedback, tool not run), *not* `respond` (which returns the text as a successful
+  tool result, for ask-user tools). Both are now offered when allowed.
+- **Ctrl-O only works at the `you ❯` prompt, not mid-stream** — prompt_toolkit reads keys only
+  while awaiting prompt input. `/open` (alias `/last`) is the always-available equivalent.
+- **Ctrl-O / `/open` can't toggle closed** — they launch a real pager (`less`); close with `q`.
+  A Claude-Code-style open/close toggle while tokens keep streaming needs an inline, managed-
+  render expand (not a pager) — i.e. the Textual rewrite below.
+- **Interactive bits lack automated tests** (spinner, smear, Ctrl-O) — verified only by hand.
+  Future: `pexpect`/`pyte`-based tests, or Textual `Pilot` if migrated.
+
+
+**Future — Textual TUI (Option A):** to match Claude Code (mid-stream Ctrl-O expand/collapse of
+a *scrollable* tool output while streaming continues) the REPL must be a continuously-rendered
+TUI that owns input + rendering. Scope it as a `TextualRenderer` behind the existing `Renderer`
+protocol, gated by a flag (e.g. `--tui`), keeping the Rich path as default. The agent/stream/
+persistence layers are already decoupled and stay unchanged. Orthogonal to the LiteLLM work
+(UI layer vs model-provider layer).
+
 ## Testing Strategy
 
 Three tiers — each catches a different class of failure.
@@ -173,6 +241,9 @@ uv run --env-file .env pytest -m "langsmith and not slow and not integration" -q
 ## Todos
 
 - Capacity limit for /memories/
-- Wrap agent into ClI
+- ~~Wrap agent into CLI~~ — done (`src/cli/`, run via `python -m src.cli.app`)
+- CLI: mid-stream Ctrl-O (capture keys during a turn) + open/close toggle — see "CLI front-end"
+  (lightweight `loop.add_reader` in cbreak mode, or the full Textual TUI)
+- CLI: automated tests for interactive paths (spinner / smear / Ctrl-O) via `pexpect`/`pyte`
 - Consolidation agent + cron
 - RL

@@ -31,7 +31,7 @@ def setup_sessions_db() -> sqlite3.Connection:
         sqlite3.Connection with WAL mode and foreign keys enabled.
     """
     conn = sqlite3.connect(str(SESSIONS_DIR / "sessions.db"), check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA journal_mode=WAL") # WAL (Write-Ahead Log) — writes go to a separate log file first, readers can still read the old data simultaneously
     conn.execute("PRAGMA foreign_keys = ON")  # enable cascade deletes
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS sessions (

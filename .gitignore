@@ -87,3 +87,4 @@ test.md
 requirements.txt
 src/agents/prompt_builder.py
 memories/agents_md_template.md
+docs/

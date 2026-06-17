@@ -95,6 +95,83 @@ You can interact with Paper2Wiki using natural language. Here are common pattern
 
 ---
 
+## Using the CLI
+
+Paper2Wiki ships a terminal CLI (`paper2wiki`) for daily use: an interactive REPL, one-shot
+chat, session browsing, and config inspection. Run commands **from the repo root** — `.env`
+is auto-loaded.
+
+### Running it
+
+The most reliable invocation (works regardless of your PATH or editable-install state):
+
+```bash
+uv run python -m src.cli.app repl                                  # interactive chat
+uv run python -m src.cli.app chat "ingest https://arxiv.org/abs/…" # one-shot, then exit
+uv run python -m src.cli.app sessions ls                           # browse past sessions
+uv run python -m src.cli.app config show                           # show effective config
+```
+
+Optional alias so it reads like a real command:
+
+```bash
+echo "alias paper2wiki='uv run python -m src.cli.app'" >> ~/.zshrc && source ~/.zshrc
+paper2wiki repl
+```
+
+(A `paper2wiki` console script is also installed in the venv; it needs `.venv/bin` on your
+PATH — either `source .venv/bin/activate` or use `uv run paper2wiki …`.)
+
+### Commands
+
+| Command | What it does | Needs LLM? |
+|---|---|---|
+| `repl` | Interactive chat session (streaming, approvals, meta-commands) | yes |
+| `chat "<msg>"` | Run a single message and exit | yes |
+| `sessions ls [-n N]` | List recent sessions, newest first | no |
+| `sessions search "<query>"` | Full-text search message history | no |
+| `sessions resume <id\|title>` | Reopen a past session in the REPL | yes |
+| `sessions rename <id\|title> "<new>"` | Rename a session | no |
+| `sessions prune [--older-than-days N] [-y]` | Delete old ended sessions | no |
+| `config show` | Print the effective config (ingest mode, wiki path, providers) | no |
+
+`sessions`/`config` don't load the agent stack, so they're fast; `repl`/`chat` build the
+supervisor (and, unless `--eval-mode`, a Daytona sandbox).
+
+### Common flags (on `chat` / `repl` / `sessions resume`)
+
+| Flag | Purpose |
+|---|---|
+| `--thread-id` / `-t` | Resume / pin a specific thread |
+| `--ingest-mode {fast\|quality}` | Override ingest mode |
+| `--wiki-path` | Override the wiki directory |
+| `--yes` / `-y` | Auto-approve all approval prompts |
+| `--eval-mode` | Skip the Daytona sandbox (no Marp subagent) |
+| `--no-save` | Don't persist to `sessions.db` (throwaway turns; in-run approvals still work) |
+| `--debug` | Show diagnostic output |
+
+### Inside the REPL
+
+- Chat in natural language (see [Usage](#usage) above).
+- **Approvals (HITL):** tool calls pause for review. Choose **a** approve · **e** edit args ·
+  **r** reject *(with an optional reason sent back to the agent so it tries differently)* ·
+  **s** respond *(answer on the tool's behalf, for ask-user tools)* · **yolo** approve all for
+  the session. Only the options a given tool allows are shown.
+- **Long tool output** is shown as a short preview; **`/open`** (or **Ctrl-O** at the prompt)
+  pages the full output — press **`q`** to close. *(Ctrl-O works at the `you ❯` prompt, not
+  mid-stream.)*
+- **Meta-commands:** `/title <name>` · `/new` · `/help` · `/open` (alias `/last`) · `/exit`
+  (bare `quit`/`exit`/`bye`/`:q` and Ctrl-D also quit).
+
+### macOS note
+
+Occasionally (usually right after `uv sync`) the bare `paper2wiki` command fails with
+`ModuleNotFoundError: No module named 'src'` — a uv editable-`.pth` hidden-flag quirk. Fix:
+`chflags nohidden .venv/lib/python*/site-packages/__editable__.llm_wiki-*.pth`. The
+`uv run python -m src.cli.app …` form sidesteps it entirely.
+
+---
+
 ## Storage Structure
 
 - `/wiki/`: The core knowledge base (Markdown + JSON)

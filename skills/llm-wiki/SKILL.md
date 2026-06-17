@@ -340,8 +340,7 @@ This is the difference between a growing wiki and a pile of duplicates.
 
 ⑧ **Report what changed** — list every file created or updated to the user.
 
-A single source can trigger updates across 5-15 wiki pages. This is normal
-and desired — it's the compounding effect.
+A single source can trigger updates across 5-10 wiki pages. This is normal and desired — it's the compounding effect.
 
 ### 2. Query
 
