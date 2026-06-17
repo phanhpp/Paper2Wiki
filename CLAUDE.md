@@ -130,6 +130,54 @@ Skills available to the supervisor:
 - `skills/web-tools/` — web search/extract provider selection and call patterns (Firecrawl, Tavily, Exa)
 - `skills/marp-slide/` — Marp slide creation (injected into the Daytona sandbox)
 
+### CLI front-end (`src/cli/`)
+
+Terminal REPL/one-shot front-end. The agent stream emits events through the `Renderer`
+protocol (`src/agents/renderer.py`); `RichRenderer` (`src/cli/renderer.py`) is the Rich +
+prompt_toolkit terminal implementation, `DefaultRenderer` is the plain-`print` one used by
+notebooks/tests. The loop lives in `src/cli/commands/chat.py`.
+
+**Per-turn UI lifecycle** (one turn): `on_turn_start` shows a transient "Thinking…" spinner →
+first `on_token` swaps it for a live Markdown block → `on_turn_end` commits the block. Tool
+results route to `on_tool_result` (collapsed preview, full text stashed), **not** to the
+Markdown stream. HITL interrupts route to `handle_interrupts`.
+
+**Verified by unit tests** (`pytest -m unit`; `tests/test_cli.py`, `tests/test_stream_persist.py`):
+- HITL decisions: approve / reject (with & without reason) / edit (JSON + Python-dict + invalid
+  fallback) / **respond** / yolo / auto-approve short-circuit; `choices_for` filters to the
+  tool's `allowed_decisions`. Decision shapes match `langchain ... human_in_the_loop`.
+- `RichRenderer.on_tool_result` previews + stashes full output; `open_last_tool_output` pages it
+  (and the empty case); `on_turn_start` clears the per-turn store. Both renderers satisfy the
+  protocol (incl. `on_tool_result`).
+- `stream.py` routes a `ToolMessage` to `on_tool_result`, assistant text to `on_token`.
+- `persist=False` (`--no-save`) skips `sessions.db`; `persist=True` saves.
+
+**Verified manually only** (real run under a pty; no automated coverage yet):
+- Spinner → Markdown handoff (spinner clears on first token).
+- Long-output Markdown no longer smears/repeats — `on_token` streams into a `transient=True`,
+  `vertical_overflow="crop"` Live, and `_end_live` commits the full Markdown once. (The earlier
+  `vertical_overflow="visible"` reprinted the whole block each refresh on overflow.)
+
+**Known gaps / to fix:**
+- **HITL `respond` vs `reject`:** "tell the agent to do it differently" is **reject + a reason
+  message** (feedback, tool not run), *not* `respond` (which returns the text as a successful
+  tool result, for ask-user tools). Both are now offered when allowed.
+- **Ctrl-O only works at the `you ❯` prompt, not mid-stream** — prompt_toolkit reads keys only
+  while awaiting prompt input. `/open` (alias `/last`) is the always-available equivalent.
+- **Ctrl-O / `/open` can't toggle closed** — they launch a real pager (`less`); close with `q`.
+  A Claude-Code-style open/close toggle while tokens keep streaming needs an inline, managed-
+  render expand (not a pager) — i.e. the Textual rewrite below.
+- **Interactive bits lack automated tests** (spinner, smear, Ctrl-O) — verified only by hand.
+  Future: `pexpect`/`pyte`-based tests, or Textual `Pilot` if migrated.
+
+
+**Future — Textual TUI (Option A):** to match Claude Code (mid-stream Ctrl-O expand/collapse of
+a *scrollable* tool output while streaming continues) the REPL must be a continuously-rendered
+TUI that owns input + rendering. Scope it as a `TextualRenderer` behind the existing `Renderer`
+protocol, gated by a flag (e.g. `--tui`), keeping the Rich path as default. The agent/stream/
+persistence layers are already decoupled and stay unchanged. Orthogonal to the LiteLLM work
+(UI layer vs model-provider layer).
+
 ## Testing Strategy
 
 Three tiers — each catches a different class of failure.
@@ -194,5 +242,8 @@ uv run --env-file .env pytest -m "langsmith and not slow and not integration" -q
 
 - Capacity limit for /memories/
 - ~~Wrap agent into CLI~~ — done (`src/cli/`, run via `python -m src.cli.app`)
+- CLI: mid-stream Ctrl-O (capture keys during a turn) + open/close toggle — see "CLI front-end"
+  (lightweight `loop.add_reader` in cbreak mode, or the full Textual TUI)
+- CLI: automated tests for interactive paths (spinner / smear / Ctrl-O) via `pexpect`/`pyte`
 - Consolidation agent + cron
 - RL
