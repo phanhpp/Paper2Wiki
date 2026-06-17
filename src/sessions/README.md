@@ -155,13 +155,22 @@ on the argument surfaces both ids (with the title as description) and titles. Re
 ## Pruning
 
 Pruning is **manual and explicit** — there is no auto-prune (history is valuable for search
-recall). One command cleans both DBs in lockstep, keyed by `thread_id`:
+recall). Run `sessions stats` first to size the job, then prune. One command cleans both DBs in
+lockstep, keyed by `thread_id`:
 
 ```bash
+uv run python -m src.cli.app sessions stats                 # totals + count deleted per threshold
 uv run python -m src.cli.app sessions prune                 # ended sessions > 90 days
 uv run python -m src.cli.app sessions prune --older-than-days 30
 uv run python -m src.cli.app sessions prune -y              # skip the confirm prompt
 ```
+
+`stats` reports the total sessions (active vs ended), the time range, and — using the *same*
+`status='ended' AND ended_at < cutoff` predicate as `prune` — exactly how many sessions each age
+threshold would delete.
+
+Before deleting, `prune` **previews the date + title of every session it's about to remove**, then
+asks to confirm — so you can judge each by its title (and answering `n` is a safe no-op inspection).
 
 **What gets pruned:** sessions with `status='ended'` older than the threshold are deleted from
 `sessions.db` (messages cascade), **and** their checkpoint state is evicted from `checkpoints.db`.
@@ -172,6 +181,28 @@ uv run python -m src.cli.app sessions prune -y              # skip the confirm p
 > gone. `prune` is the only `sessions` subcommand that loads the checkpointer; `ls` / `search` /
 > `resume` stay agent-free and fast.
 
+### Orphan checkpoints
+
+`prune` is *driven by* deleted session rows, so it only evicts checkpoints that still have a
+session. Threads that never wrote a session row (`--no-save`, eval/test runs, history predating
+`sessions.db`) are **orphans** `prune` can't reach — and are typically most of `checkpoints.db`.
+`sessions prune-orphans` sweeps them:
+
+```bash
+uv run python -m src.cli.app sessions prune-orphans                  # dry run (lists orphans + ages)
+uv run python -m src.cli.app sessions prune-orphans --full           # list all (not just first 20)
+uv run python -m src.cli.app sessions prune-orphans --older-than 1   # skip threads active < 1 day ago
+uv run python -m src.cli.app sessions prune-orphans --apply --vacuum # evict + reclaim disk
+```
+
+Orphans are found read-only (`SELECT thread_id, MAX(checkpoint_id) FROM checkpoints GROUP BY
+thread_id` minus `sessions.id`) and evicted via the checkpointer's `adelete_thread` (no raw
+DELETEs). `--older-than DAYS` excludes threads whose latest checkpoint is recent (last activity
+decoded from the time-ordered v6 `checkpoint_id`), guarding against evicting a thread mid-first-turn
+before its session row is written. It **refuses if `sessions.db` is empty** (everything would look
+orphaned). `--vacuum` is needed to shrink the file — `DELETE` only frees pages to SQLite's
+freelist; `VACUUM` returns them to the OS. See `agent.py:find_orphan_checkpoint_threads` /
+`prune_checkpoints` and `docs/pruning_design.md`.
 
 ## Notes / gotchas
 

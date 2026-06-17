@@ -155,10 +155,12 @@ PATH — either `source .venv/bin/activate` or use `uv run paper2wiki …`.)
 | `repl` | Interactive chat session (streaming, approvals, meta-commands) | yes |
 | `chat "<msg>"` | Run a single message and exit | yes |
 | `sessions ls [-n N]` | List recent sessions, newest first | no |
+| `sessions stats` | Catalog summary + how many you'd prune at each age threshold | no |
 | `sessions search "<query>"` | Full-text search message history | no |
 | `sessions resume <id\|title>` | Reopen a past session in the REPL | yes |
 | `sessions rename <id\|title> "<new>"` | Rename a session | no |
-| `sessions prune [--older-than-days N] [-y]` | Delete old ended sessions | no |
+| `sessions prune [--older-than-days N] [-y]` | Delete old ended sessions (+ their checkpoints) | no |
+| `sessions prune-orphans [--apply] [--vacuum] [--older-than D] [--full]` | Evict checkpoints with no session row (dry run by default) | no |
 | `config show` | Print the effective config (ingest mode, wiki path, providers) | no |
 
 `sessions`/`config` don't load the agent stack, so they're fast; `repl`/`chat` build the
@@ -192,14 +194,19 @@ supervisor (and, unless `--eval-mode`, a Daytona sandbox).
 ### Pruning old sessions
 
 History is kept indefinitely by default (it powers `sessions search`). When you want to clean
-up, **pruning is manual and explicit** — one command tidies both stores in lockstep:
+up, run `sessions stats` first to see the totals, time range, and how many sessions you'd delete
+at each age threshold — then prune. **Pruning is manual and explicit** — one command tidies both
+stores in lockstep:
 
 ```bash
+paper2wiki sessions stats                      # see totals + what each threshold would delete
 paper2wiki sessions prune                      # delete ended sessions older than 90 days
 paper2wiki sessions prune --older-than-days 30 # custom age threshold
 paper2wiki sessions prune -y                   # skip the confirmation prompt
 ```
 
+- **Preview before delete:** `prune` lists the date + title of every session it will remove and
+  asks to confirm, so you can judge each by its title (answer `n` to inspect without deleting).
 - **What's removed:** ended sessions past the threshold — their chat history (`sessions.db`)
   **and** their resumable graph state (`checkpoints.db`), keyed by the same `thread_id`.
 - **What's kept:** active sessions are never pruned, regardless of age.
@@ -207,6 +214,32 @@ paper2wiki sessions prune -y                   # skip the confirmation prompt
 
 `prune` is the only `sessions` subcommand that loads the checkpointer; `ls` / `search` /
 `resume` stay fast.
+
+#### Orphan checkpoints
+
+`prune` only evicts checkpoints whose **session row still exists** — it's driven by deleted
+sessions. Runs that never wrote a session row (`--no-save` turns, eval/test threads, history
+predating `sessions.db`) leave **orphan** checkpoints that `prune` can't reach, and they're
+usually the bulk of `checkpoints.db`. Sweep them separately:
+
+```bash
+paper2wiki sessions prune-orphans                      # dry run — lists orphans + each one's last-activity age
+paper2wiki sessions prune-orphans --full               # list every orphan (not just the first 20)
+paper2wiki sessions prune-orphans --older-than 1       # skip threads active in the last day
+paper2wiki sessions prune-orphans --apply              # actually evict them (via adelete_thread)
+paper2wiki sessions prune-orphans --apply --vacuum     # also shrink the file on disk
+```
+
+- **Dry run by default** — review the list (each orphan shows its last-activity age), then re-run
+  with `--apply`. Use `--full` to print the whole list instead of the first 20.
+- **`--older-than DAYS`** skips recently-active threads (last activity read from each thread's
+  most recent checkpoint) — use it to avoid evicting a session mid-first-turn whose session row
+  hasn't been written yet. Note: **larger values are *more* restrictive** (fewer matches); if it
+  matches nothing it tells you how many orphans exist and their age range.
+- **Safety guard:** if `sessions.db` is empty it refuses (everything would look orphaned).
+- **`--vacuum`** reclaims disk: plain deletes only free pages internally, so the file doesn't
+  shrink until you VACUUM (a one-shot rebuild). Without it, orphans are gone but the file stays
+  the same size.
 
 ### macOS note
 

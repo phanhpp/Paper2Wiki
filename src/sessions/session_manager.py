@@ -178,22 +178,37 @@ def prune_sessions(conn: Connection, older_than_days: int = 90, yes: bool = Fals
     """
     cutoff = int(time.time()) - (older_than_days * 86400)
 
-    # sessions.id IS the thread_id — capture the ids before DELETE so the caller
+    # sessions.id IS the thread_id — capture the rows before DELETE so the caller
     # can evict exactly these threads from checkpoints.db (driven by the actual
-    # deleted set, never by re-deriving "older than N days" a second time).
-    deleted_ids = [
-        row[0] for row in conn.execute("""
-            SELECT id FROM sessions
-            WHERE ended_at < ? AND status = 'ended'
-        """, [cutoff]).fetchall()
-    ]
+    # deleted set, never by re-deriving "older than N days" a second time). Pull
+    # title + started_at too so we can preview *which* sessions are at risk —
+    # the title is what lets the user judge "keep or toss" before confirming.
+    rows = conn.execute("""
+        SELECT id, title, started_at FROM sessions
+        WHERE ended_at < ? AND status = 'ended'
+        ORDER BY started_at DESC
+    """, [cutoff]).fetchall()
+    deleted_ids = [row[0] for row in rows]
 
     if not deleted_ids:
         print("No sessions to prune.")
         return []
 
+    # Preview the exact sessions about to be deleted (date — title), so the
+    # decision is informed; answering "n" doubles as a no-op inspection.
+    print(f"Sessions to prune ({len(rows)}):")
+    PREVIEW_CAP = 50
+    for _id, title, started_at in rows[:PREVIEW_CAP]:
+        when = (
+            datetime.fromtimestamp(int(started_at)).strftime("%Y-%m-%d %H:%M")
+            if started_at else "—"
+        )
+        print(f"  {when}  {title or 'untitled'}")
+    if len(rows) > PREVIEW_CAP:
+        print(f"  … and {len(rows) - PREVIEW_CAP} more")
+
     if not yes:
-        confirm = input(f"Delete {len(deleted_ids)} sessions older than {older_than_days} days? [y/N] ")
+        confirm = input(f"Delete these {len(deleted_ids)} sessions older than {older_than_days} days? [y/N] ")
         if confirm.lower() != 'y':
             print("Cancelled.")
             return []

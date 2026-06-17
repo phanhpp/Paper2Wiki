@@ -62,7 +62,7 @@ def ls(
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max sessions to show.")] = 20,
     source: Annotated[str | None, typer.Option("--source", help="Filter by source (ingest/query/...).")] = None,
 ) -> None:
-    """List recent sessions, newest first."""
+    """Specify the total number of recent sessions then list them (within the limit), newest first."""
     from src.sessions.sessions_db_setup import close_sessions_conn, get_sessions_conn
 
     conn = get_sessions_conn()
@@ -90,6 +90,181 @@ def ls(
     for started_at, title, src, sid in rows:
         table.add_row(_fmt_ts(started_at), title or "[dim]untitled[/]", src or "—", sid)
     console.print(table)
+
+
+@app.command("stats")
+def stats() -> None:
+    """Summarize the catalog to help decide what to prune.
+
+    Shows totals (active vs ended), the time range, and — framed for the
+    `prune` decision — how many *ended* sessions fall past each common age
+    threshold. The buckets use the same predicate as `prune`
+    (``status='ended' AND ended_at < cutoff``), so the count at e.g. 30 days is
+    exactly what ``sessions prune --older-than-days 30`` would delete.
+    """
+    import time
+
+    from src.sessions.sessions_db_setup import close_sessions_conn, get_sessions_conn
+
+    now = int(time.time())
+    buckets = (7, 30, 90)
+    cutoffs = [now - d * 86400 for d in buckets]
+
+    conn = get_sessions_conn()
+    try:
+        total, active, ended, oldest, newest = conn.execute(
+            "SELECT COUNT(*), "
+            "SUM(status='active'), SUM(status='ended'), "
+            "MIN(started_at), MAX(started_at) FROM sessions"
+        ).fetchone()
+        prunable = conn.execute(
+            "SELECT "
+            "SUM(ended_at < ?), SUM(ended_at < ?), SUM(ended_at < ?) "
+            "FROM sessions WHERE status = 'ended'",
+            cutoffs,
+        ).fetchone()
+    finally:
+        close_sessions_conn()
+
+    if not total:
+        console.print("[dim]No sessions yet.[/]")
+        return
+
+    console.print(
+        f"[bold]{total}[/] sessions  "
+        f"([green]{active or 0}[/] active, {ended or 0} ended)\n"
+        f"Range: [dim]{_fmt_ts(oldest)}[/] → [dim]{_fmt_ts(newest)}[/]"
+    )
+
+    table = Table(title="Prunable ended sessions by age", header_style="bold")
+    table.add_column("Older than", no_wrap=True)
+    table.add_column("Would delete", justify="right")
+    table.add_column("Command", style="dim")
+    for days, count in zip(buckets, prunable):
+        table.add_row(
+            f"{days} days",
+            str(count or 0),
+            f"sessions prune --older-than-days {days}",
+        )
+    console.print(table)
+
+
+@app.command("prune-orphans")
+def prune_orphans(
+    apply: Annotated[bool, typer.Option("--apply", help="Actually delete (default: dry run).")] = False,
+    vacuum: Annotated[bool, typer.Option("--vacuum", help="Run VACUUM after deleting to reclaim disk.")] = False,
+    older_than: Annotated[float, typer.Option("--older-than", help="Only sweep threads inactive for more than this many days (0 = no filter).")] = 0.0,
+    full: Annotated[bool, typer.Option("--full", help="List every orphan thread instead of the first 20.")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
+) -> None:
+    """Evict checkpoint threads that have no session row (orphans).
+
+    Orphans accumulate from runs that never wrote to sessions.db — ``--no-save``
+    turns, eval/test threads, or history predating sessions.db. The coupled
+    ``prune`` (driven by deleted session rows) can't reach them, so they linger
+    in checkpoints.db forever. This sweeps them via the checkpointer's
+    ``adelete_thread`` (no raw SQL); pass ``--vacuum`` to actually shrink the file.
+
+    Use ``--older-than DAYS`` to skip recently-active threads (e.g. a session
+    mid-first-turn whose session row hasn't been written yet); last activity is
+    read from each thread's most recent checkpoint. Note larger values are *more*
+    restrictive (fewer matches). Pass ``--full`` to list every orphan.
+
+    Dry run by default — review the list, then re-run with ``--apply``.
+    """
+    import time
+
+    from src.sessions.sessions_db_setup import close_sessions_conn, get_sessions_conn
+
+    conn = get_sessions_conn()
+    try:
+        known = {row[0] for row in conn.execute("SELECT id FROM sessions").fetchall()}
+    finally:
+        close_sessions_conn()
+
+    # Guard: an empty/reset sessions.db would make *every* checkpoint look
+    # orphaned and wipe the lot. Refuse rather than risk it.
+    if not known:
+        typer.secho(
+            "Refusing: sessions.db has 0 sessions, so every checkpoint would look orphaned. "
+            "Aborting to avoid wiping all checkpoint state.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    from src.agents.agent import (
+        close_checkpointer,
+        find_orphan_checkpoint_threads,
+        prune_checkpoints,
+    )
+
+    def _days_ago(ts: float | None) -> str:
+        return f"{(time.time() - ts) / 86400:.1f}d ago" if ts else "unknown"
+
+    async def _run() -> None:
+        try:
+            # All orphans with last-activity; the recency filter is applied here so
+            # we can explain *why* it excluded threads rather than just printing none.
+            records = await find_orphan_checkpoint_threads(known)
+            if not records:
+                console.print("[dim]No orphan checkpoints.[/]")
+                return
+
+            if older_than:
+                cutoff = time.time() - older_than * 86400
+                # Undecidable age (ts is None) is kept out when filtering (safe).
+                eligible = [(t, ts) for t, ts in records if ts is not None and ts < cutoff]
+            else:
+                eligible = list(records)
+
+            # Recency filter matched nothing but orphans exist → explain, don't mislead.
+            if not eligible:
+                seen = [ts for _, ts in records if ts]
+                span = (
+                    f" (last activity {_days_ago(max(seen))} … {_days_ago(min(seen))})"
+                    if seen else ""
+                )
+                console.print(
+                    f"[yellow]No orphans inactive > {older_than:g}d[/], but "
+                    f"[bold]{len(records)}[/] orphans exist{span}. "
+                    f"Lower --older-than (or drop it) to include them."
+                )
+                return
+
+            scope = f", inactive > {older_than:g}d" if older_than else ""
+            console.print(
+                f"Found [bold]{len(eligible)}[/] orphan checkpoint threads "
+                f"(no matching session row{scope}):"
+            )
+            shown = eligible if full else eligible[:20]
+            for tid, ts in shown:
+                console.print(f"  [cyan]{tid}[/]  [dim]{_days_ago(ts)}[/]")
+            if not full and len(eligible) > 20:
+                console.print(f"  [dim]… and {len(eligible) - 20} more — pass --full to list all[/]")
+
+            orphan_ids = [t for t, _ in eligible]
+
+            if not apply:
+                console.print(
+                    "[dim]Dry run — re-run with --apply to delete "
+                    "(add --vacuum to reclaim disk).[/]"
+                )
+                return
+
+            if not yes and not typer.confirm(f"Delete {len(orphan_ids)} orphan threads?"):
+                console.print("Cancelled.")
+                return
+
+            await prune_checkpoints(orphan_ids, vacuum=vacuum)
+            console.print(
+                f"Evicted [bold]{len(orphan_ids)}[/] orphan threads."
+                + (" Reclaimed disk (VACUUM)." if vacuum else "")
+            )
+        finally:
+            await close_checkpointer()
+
+    asyncio.run(_run())
 
 
 @app.command("search")
