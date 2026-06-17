@@ -88,13 +88,26 @@ cp .env.example .env
 `.env`:
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_API_KEY=sk-ant-...  # or OPENAI_API_KEY / GOOGLE_API_KEY — match your chosen model
 LANGSMITH_API_KEY=lsv2_...
 LANGSMITH_TRACING=true        # Required for self-improvement
 LANGSMITH_PROJECT=paper2wiki
 DAYTONA_API_KEY=...           # Required for Marp slides
 WIKI_PATH=./wiki              # Optional: custom wiki location
+PAPER2WIKI_MODEL=             # Optional: base LLM for all roles, e.g. openai:gpt-4o (default: claude-sonnet-4-6)
 ```
+
+**Choosing your LLM.** Paper2Wiki is provider-agnostic. Pick **one** base model and set that
+provider's API key; it drives the supervisor, subagents, and all auxiliary tasks (titling, trace
+summaries, eval judge, web summarizer). Set it via `PAPER2WIKI_MODEL` (env) or `model.default` in
+`config.yaml`, using any LangChain value incl. `provider:model` (`openai:gpt-4o`,
+`google_genai:gemini-2.0-flash`, `anthropic:claude-sonnet-4-6`).
+
+Override a single task under `auxiliary.<task>` (tasks: `supervisor`, `subagent`, `title`,
+`summarize`, `judge`, `web_summarize`) — each block takes `provider`/`model`/`base_url`/`api_key`/
+`timeout`/`extra_body`, so a task can use a different provider or an OpenAI-compatible gateway
+(e.g. OpenRouter) with its own key. Quick env override for one task:
+`PAPER2WIKI_MODEL_SUBAGENT=openai:gpt-4o-mini`. See `config.example.yaml`.
 
 ## Usage
 

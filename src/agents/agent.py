@@ -12,6 +12,7 @@ from src.agents.backend_wrapper import GuardedLocalShellBackend
 # Deferring keeps `import src.agents.agent` cheap and lets eval-mode runs skip Daytona entirely.
 from src.agents.sandbox_utils import register_sandbox
 from src.agents.llms import set_up_llms
+from src.llm_roles import get_model_spec
 from langchain_core.utils.uuid import uuid7
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from src.sessions.sessions_db_setup import SESSIONS_DIR
@@ -173,7 +174,7 @@ async def create_supervisor(thread_id: str | None = None, eval_mode: bool = Fals
         logger.info("Creating Daytona agent for marp slide creation")
         # Create Daytona agent for marp slide creation
         _daytona_backend, daytona_sandbox, visual_agent = create_daytona_agent(
-            model=set_up_llms("claude-haiku-4-5-20251001"),
+            model=set_up_llms(get_model_spec("subagent")),
             thread_id=thread_id,
             skills=[str(REPO_ROOT / "skills/marp-slide")],
         )
@@ -194,7 +195,7 @@ async def create_supervisor(thread_id: str | None = None, eval_mode: bool = Fals
     checkpointer = await _get_async_checkpointer()
 
     supervisor = create_deep_agent(
-        model=set_up_llms("claude-sonnet-4-6"), #claude-haiku-4-5-20251001
+        model=set_up_llms(get_model_spec("supervisor")),
         skills=["/skills/"],
         memory=["memories/AGENTS.md","memories/USER.md"],
         system_prompt=PHASE_1_SUPERVISOR_PROMPT,

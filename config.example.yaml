@@ -1,6 +1,49 @@
-# Paper2Wiki web tools configuration
+# Paper2Wiki configuration
 # Place at: ~/.paper2wiki/config.yaml
 # Or set PAPER2WIKI_CONFIG=/path/to/config.yaml
+
+# ── LLMs ──────────────────────────────────────────────────────────────────────
+# Pick ONE base model (and set that provider's API key). It drives the supervisor,
+# the subagents, and every auxiliary task. Any single task can override it below.
+#
+# A model accepts any LangChain value, including the `provider:model` form:
+#   openai:gpt-4o · anthropic:claude-sonnet-4-6 · google_genai:gemini-2.0-flash
+#   groq:llama-3.3-70b-versatile · mistral:mistral-large-latest · ollama:llama3.1
+# The key is read from the provider's env var (OPENAI_API_KEY / ANTHROPIC_API_KEY /
+# GOOGLE_API_KEY / …) unless you set `api_key` explicitly below.
+#
+# Env overrides (no config file needed):
+#   PAPER2WIKI_MODEL=openai:gpt-4o              # base model for everything
+#   PAPER2WIKI_MODEL_SUBAGENT=openai:gpt-4o-mini  # one task only
+model:
+  default: claude-sonnet-4-6   # the user's chosen LLM (omit → falls back to Claude)
+  provider: anthropic          # 'auto' or omit to infer from the model name
+  # base_url:                  # custom/OpenAI-compatible endpoint (else provider default)
+  # api_key:                   # else read from the provider's env var
+
+# Per-task overrides. Every task inherits `model` above unless you set fields here.
+# All fields optional: provider ('auto'=infer), model (''=inherit base), base_url,
+# api_key, timeout (seconds), extra_body (provider-specific kwargs).
+# Tasks: supervisor · subagent (marp) · title · summarize (traces) · judge (eval) ·
+#        web_summarize (web-page compression — was web.summarizer_model).
+auxiliary:
+  # Example: keep the cheap auxiliary tasks on Haiku while the base is something else.
+  # web_summarize:
+  #   provider: anthropic
+  #   model: claude-haiku-4-5-20251001
+  #   timeout: 120
+  #   extra_body: {}
+  #
+  # Example: route one task through OpenRouter (an OpenAI-compatible gateway).
+  # Use provider: openai + base_url — NOT provider: openrouter (that needs the
+  # extra `langchain-openrouter` package). Pick a tool-calling-capable model.
+  # summarize:
+  #   provider: openai
+  #   model: google/gemini-2.5-flash
+  #   base_url: https://openrouter.ai/api/v1
+  #   api_key: sk-or-...
+  #   timeout: 60
+  #   extra_body: {}          # OpenRouter-specific params (provider routing, etc.)
 
 web:
   # Shared default provider — used when no per-capability override is set.
@@ -13,11 +56,8 @@ web:
   # search_backend: tavily
   # extract_backend: firecrawl
 
-  # LLM summarizer settings
-  # Model used to compress large pages into ~5k char markdown summaries.
-  summarizer_model: claude-haiku-4-5-20251001
-
   # Pages shorter than this (in chars) skip LLM summarization.
+  # (The summarizer's MODEL is configured under `auxiliary.web_summarize` above.)
   # Raw content is returned as-is. Default: 5000
   min_length_for_summary: 5000
 
