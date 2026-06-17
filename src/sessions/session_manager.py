@@ -148,7 +148,7 @@ def save_session(
     return thread_id
 
 
-def prune_sessions(conn: Connection, older_than_days: int = 90, yes: bool = False) -> None:
+def prune_sessions(conn: Connection, older_than_days: int = 90, yes: bool = False) -> list[str]:
     """Delete ended sessions older than a threshold, with confirmation.
 
     Only deletes sessions with status='ended'. Active sessions are never pruned.
@@ -159,33 +159,51 @@ def prune_sessions(conn: Connection, older_than_days: int = 90, yes: bool = Fals
     Auto-pruning is intentionally NOT called at startup — session history is
     valuable for session_search recall. Call this explicitly via CLI.
 
+    Stays fully synchronous on purpose: it does blocking ``sqlite3`` I/O, so
+    ``async`` would buy nothing and would force every caller to ``await``. The
+    matching checkpoint eviction (``prune_checkpoints``, which is async) is
+    therefore *not* called from here — the CLI ``prune`` command runs it at the
+    one place an event loop can be spun safely. See ``src/sessions/README.md``.
+
     Args:
         conn:             sqlite3.Connection to sessions.db.
         older_than_days:  Delete sessions ended more than this many days ago.
         yes:              Skip confirmation prompt if True.
+
+    Returns:
+        The thread_ids (sessions.id) that were deleted — feed these to
+        ``src.agents.agent.prune_checkpoints`` so the matching checkpoint state
+        is evicted by the same join key. Empty list if nothing was pruned (no
+        matches, or the user cancelled).
     """
     cutoff = int(time.time()) - (older_than_days * 86400)
 
-    count = conn.execute("""
-        SELECT COUNT(*) FROM sessions
-        WHERE ended_at < ? AND status = 'ended'
-    """, [cutoff]).fetchone()[0]
+    # sessions.id IS the thread_id — capture the ids before DELETE so the caller
+    # can evict exactly these threads from checkpoints.db (driven by the actual
+    # deleted set, never by re-deriving "older than N days" a second time).
+    deleted_ids = [
+        row[0] for row in conn.execute("""
+            SELECT id FROM sessions
+            WHERE ended_at < ? AND status = 'ended'
+        """, [cutoff]).fetchall()
+    ]
 
-    if count == 0:
+    if not deleted_ids:
         print("No sessions to prune.")
-        return
+        return []
 
     if not yes:
-        confirm = input(f"Delete {count} sessions older than {older_than_days} days? [y/N] ")
+        confirm = input(f"Delete {len(deleted_ids)} sessions older than {older_than_days} days? [y/N] ")
         if confirm.lower() != 'y':
             print("Cancelled.")
-            return
+            return []
 
     conn.execute("""
         DELETE FROM sessions
         WHERE ended_at < ? AND status = 'ended'
     """, [cutoff])
     # messages cascade-deleted via ON DELETE CASCADE
+    conn.commit()  # close the write transaction — VACUUM cannot run inside one
     conn.execute("VACUUM")
-    conn.commit()
-    print(f"Pruned {count} sessions.")
+    print(f"Pruned {len(deleted_ids)} sessions.")
+    return deleted_ids

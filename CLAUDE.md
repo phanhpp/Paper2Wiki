@@ -72,6 +72,8 @@ The supervisor agent is constructed in `src/agents/agent.py:create_supervisor()`
 - **`checkpoints.db`** — LangGraph `AsyncSqliteSaver`; stores graph state for interrupt/resume. Lazily initialized as a module-level singleton in `agent.py`.
 - **`sessions.db`** — clean message history + FTS5 full-text search. Schema defined in `src/sessions/sessions_db_setup.py`. Auto-initialized on import via `_sessions_conn` singleton. Use `session_manager.prune_sessions()` for manual cleanup (auto-pruning is intentionally off).
 
+**Pruning is coupled across both DBs by `thread_id`.** `sessions prune` deletes ended sessions from `sessions.db` *and* evicts their checkpoint state from `checkpoints.db` (via `agent.py:prune_checkpoints` → `adelete_thread`) in one invocation, driven by the ids `prune_sessions` returns. `prune_sessions` stays sync (blocking sqlite3); the async eviction's single `asyncio.run` boundary lives in the CLI `prune` command. Full-thread deletion only — never `aprune(keep_latest)` (DeltaChannel-unsafe). User guide in `src/sessions/README.md`; design rationale in `docs/pruning_design.md`.
+
 ### Tools (`src/tools/`)
 
 All tools exposed to the supervisor are aggregated in `src/tools/__init__.py:all_tools`, built by `_build_tools()`. Adding a new tool: implement it under `src/tools/` and add it to the `_build_tools()` return list.

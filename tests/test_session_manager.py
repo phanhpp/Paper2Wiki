@@ -111,6 +111,139 @@ def test_set_title_manual_success_collision_and_empty(conn):
         set_title_manual(conn, "s1", "   ")
 
 
+def _add_ended_session(conn, sid, ended_at):
+    """Insert an ended session row with an explicit ended_at (for prune tests)."""
+    conn.execute(
+        "INSERT INTO sessions(id, started_at, ended_at, status) VALUES (?, ?, ?, 'ended')",
+        (sid, ended_at - 10, ended_at),
+    )
+    conn.commit()
+
+
+@pytest.mark.unit
+def test_prune_sessions_returns_deleted_ids(conn):
+    """prune deletes matching ended sessions and returns exactly their thread_ids."""
+    from src.sessions.session_manager import prune_sessions
+
+    _add_ended_session(conn, "old-1", ended_at=100)
+    _add_ended_session(conn, "old-2", ended_at=200)
+
+    deleted = prune_sessions(conn, older_than_days=0, yes=True)
+
+    assert sorted(deleted) == ["old-1", "old-2"]
+    remaining = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+    assert remaining == 0
+
+
+@pytest.mark.unit
+def test_prune_sessions_no_match_returns_empty(conn):
+    """No eligible sessions → empty list, nothing deleted."""
+    from src.sessions.session_manager import prune_sessions
+
+    # Active sessions are never eligible regardless of age.
+    conn.execute(
+        "INSERT INTO sessions(id, started_at, ended_at, status) VALUES ('live', 1, 2, 'active')"
+    )
+    conn.commit()
+
+    assert prune_sessions(conn, older_than_days=0, yes=True) == []
+    assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1
+
+
+@pytest.mark.unit
+def test_prune_sessions_cancelled_returns_empty(conn, monkeypatch):
+    """Declining the confirmation returns [] and deletes nothing."""
+    from src.sessions import session_manager
+
+    _add_ended_session(conn, "old-1", ended_at=100)
+    monkeypatch.setattr("builtins.input", lambda _: "n")
+
+    assert session_manager.prune_sessions(conn, older_than_days=0, yes=False) == []
+    assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1
+
+
+@pytest.mark.unit
+async def test_prune_checkpoints_empty_is_noop():
+    """prune_checkpoints([]) returns without ever touching the checkpointer singleton."""
+    import src.agents.agent as agent
+
+    async def _boom():
+        raise AssertionError("checkpointer must not be initialized for an empty prune")
+
+    # If the guard is wrong this raises; a clean return proves the no-op path.
+    import unittest.mock as mock
+
+    with mock.patch.object(agent, "_get_async_checkpointer", _boom):
+        await agent.prune_checkpoints([])
+
+
+@pytest.mark.unit
+async def test_prune_checkpoints_evicts_each_thread(monkeypatch):
+    """Each thread_id is evicted via the checkpointer's adelete_thread (full deletion)."""
+    import src.agents.agent as agent
+
+    deleted: list[str] = []
+
+    class _FakeCheckpointer:
+        async def adelete_thread(self, tid):
+            deleted.append(tid)
+
+    async def _fake_get():
+        return _FakeCheckpointer()
+
+    monkeypatch.setattr(agent, "_get_async_checkpointer", _fake_get)
+
+    await agent.prune_checkpoints(["t1", "t2", "t3"])
+    assert deleted == ["t1", "t2", "t3"]
+
+
+@pytest.mark.unit
+def test_prune_command_couples_checkpoint_eviction(tmp_path, monkeypatch):
+    """The CLI `prune` command feeds the deleted thread_ids straight to prune_checkpoints."""
+    import src.agents.agent as agent
+    import src.sessions.sessions_db_setup as dbsetup
+    from src.cli.commands import sessions as cmd
+
+    monkeypatch.setattr(dbsetup, "SESSIONS_DIR", tmp_path)
+    seed = dbsetup.setup_sessions_db()
+    _add_ended_session(seed, "old-1", ended_at=100)
+    _add_ended_session(seed, "old-2", ended_at=200)
+    dbsetup.close_sessions_conn()  # let the command open its own connection
+
+    evicted: list[str] = []
+
+    async def _fake_prune_checkpoints(ids):
+        evicted.extend(ids)
+
+    async def _fake_close():
+        pass
+
+    monkeypatch.setattr(agent, "prune_checkpoints", _fake_prune_checkpoints)
+    monkeypatch.setattr(agent, "close_checkpointer", _fake_close)
+
+    cmd.prune(older_than_days=0, yes=True)
+
+    assert sorted(evicted) == ["old-1", "old-2"]
+
+
+@pytest.mark.unit
+def test_prune_command_skips_eviction_when_nothing_pruned(tmp_path, monkeypatch):
+    """No deleted sessions → prune_checkpoints is never called (no checkpointer load)."""
+    import src.agents.agent as agent
+    import src.sessions.sessions_db_setup as dbsetup
+    from src.cli.commands import sessions as cmd
+
+    monkeypatch.setattr(dbsetup, "SESSIONS_DIR", tmp_path)
+    dbsetup.setup_sessions_db()  # empty db
+    dbsetup.close_sessions_conn()
+
+    def _must_not_call(*_a, **_k):
+        raise AssertionError("prune_checkpoints called despite empty prune set")
+
+    monkeypatch.setattr(agent, "prune_checkpoints", _must_not_call)
+    cmd.prune(older_than_days=0, yes=True)
+
+
 @pytest.mark.unit
 def test_save_session_distinct_content_kept(conn):
     """Distinct messages are stored separately (de-dup keys on content, not collapses it)."""

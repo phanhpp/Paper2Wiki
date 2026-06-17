@@ -39,6 +39,33 @@ async def _get_async_checkpointer() -> AsyncSqliteSaver:
     return _checkpointer
 
 
+async def prune_checkpoints(thread_ids: list[str]) -> None:
+    """Evict all checkpoint state for the given threads from checkpoints.db.
+
+    Counterpart to ``prune_sessions``: once a session row is pruned the thread
+    will never be resumed, so its checkpoint is pure garbage. Keeping the two
+    DBs in lockstep (same ``thread_id`` join key) stops checkpoints.db drifting
+    into orphaned state.
+
+    Uses ``adelete_thread`` (full, all-or-nothing eviction per thread) rather
+    than ``aprune(strategy="keep_latest")``: keep_latest is **DeltaChannel-unsafe**
+    — it can sever the parent chain so a surviving checkpoint silently
+    reconstructs with empty channels (no error raised). Full deletion has no
+    chain to sever. See ``docs/prune.md`` and ``src/sessions/README.md``.
+
+    Async because the checkpointer is the async ``AsyncSqliteSaver`` singleton.
+    Call it from a sync context via ``asyncio.run`` (see the CLI ``prune``
+    command) — never from inside ``prune_sessions``, which stays sync.
+    """
+    if not thread_ids:
+        return
+
+    checkpointer = await _get_async_checkpointer()
+    for thread_id in thread_ids:
+        await checkpointer.adelete_thread(thread_id)
+    logger.debug("Pruned checkpoints for %d threads", len(thread_ids))
+
+
 async def close_checkpointer() -> None:
     """Explicitly close the async checkpointer connection.
 

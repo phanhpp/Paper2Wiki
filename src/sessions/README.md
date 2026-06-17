@@ -152,10 +152,31 @@ reference to a `thread_id`:
 on the argument surfaces both ids (with the title as description) and titles. Resume still runs on the
 `thread_id` under the hood — the title is only an input alias.
 
+## Pruning
+
+Pruning is **manual and explicit** — there is no auto-prune (history is valuable for search
+recall). One command cleans both DBs in lockstep, keyed by `thread_id`:
+
+```bash
+uv run python -m src.cli.app sessions prune                 # ended sessions > 90 days
+uv run python -m src.cli.app sessions prune --older-than-days 30
+uv run python -m src.cli.app sessions prune -y              # skip the confirm prompt
+```
+
+**What gets pruned:** sessions with `status='ended'` older than the threshold are deleted from
+`sessions.db` (messages cascade), **and** their checkpoint state is evicted from `checkpoints.db`.
+
+**What is kept:** active sessions are never pruned, regardless of age.
+
+> A pruned session can no longer be resumed — both its history and its resumable graph state are
+> gone. `prune` is the only `sessions` subcommand that loads the checkpointer; `ls` / `search` /
+> `resume` stay agent-free and fast.
+
+
 ## Notes / gotchas
 
-- **No auto-pruning.** History is valuable for search recall; call `sessions prune` (or
-  `prune_sessions`) manually.
+- **No auto-pruning** — see the "Pruning" section above; it's manual by design.
 - The connection uses WAL mode and `foreign_keys = ON` (for cascade deletes).
 - This package is independent of the agent at import time — querying `sessions.db` does **not**
-  load the agent/tools graph, which is why the CLI's `sessions` commands are fast.
+  load the agent/tools graph, which is why the CLI's `sessions` commands are fast (except `prune`,
+  which loads the checkpointer to evict — see above).

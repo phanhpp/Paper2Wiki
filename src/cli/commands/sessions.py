@@ -1,11 +1,13 @@
 """Browse and manage saved sessions (sessions.db).
 
 These commands only touch the sessions DB (no agent/checkpointer), except ``resume`` which
-hands off to the REPL.
+hands off to the REPL, and ``prune`` which also evicts the matching checkpoints from
+checkpoints.db (so it loads the async checkpointer — see its docstring).
 """
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Annotated
 
@@ -196,12 +198,43 @@ def prune(
     older_than_days: Annotated[int, typer.Option("--older-than-days", help="Age threshold in days.")] = 90,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
 ) -> None:
-    """Delete ended sessions older than the threshold."""
+    """Delete ended sessions older than the threshold (+ their checkpoints).
+
+    Pruning is coupled across both SQLite DBs by ``thread_id``: every session
+    deleted from sessions.db has its checkpoint state evicted from
+    checkpoints.db in the same invocation. A pruned session is never resumed,
+    so its checkpoint is pure garbage — keeping them in lockstep stops the two
+    DBs from drifting into orphaned state.
+
+    ``prune_sessions`` stays synchronous (blocking sqlite3); the checkpoint
+    eviction (``prune_checkpoints``, async) runs here at the CLI boundary via
+    ``asyncio.run`` — the one spot guaranteed to have no event loop running.
+    This makes ``prune`` the only ``sessions`` subcommand that loads the async
+    checkpointer; ``ls`` / ``search`` / ``resume`` stay agent-free and fast.
+    """
     from src.sessions.session_manager import prune_sessions
     from src.sessions.sessions_db_setup import close_sessions_conn, get_sessions_conn
 
     conn = get_sessions_conn()
     try:
-        prune_sessions(conn, older_than_days=older_than_days, yes=yes)
+        deleted_ids = prune_sessions(conn, older_than_days=older_than_days, yes=yes)
     finally:
         close_sessions_conn()
+
+    if not deleted_ids:
+        return
+
+    # Evict the matching checkpoints, driven by the exact deleted thread_ids.
+    # sessions first, then checkpoints: if this leg fails midway a few
+    # checkpoints linger (harmless — re-evicted next run), whereas the reverse
+    # could orphan a still-resumable thread.
+    from src.agents.agent import close_checkpointer, prune_checkpoints
+
+    async def _evict() -> None:
+        try:
+            await prune_checkpoints(deleted_ids)
+        finally:
+            await close_checkpointer()  # flush WAL + release the handle in this loop
+
+    asyncio.run(_evict())
+    console.print(f"Evicted checkpoints for [cyan]{len(deleted_ids)}[/] threads.")

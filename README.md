@@ -32,6 +32,32 @@ Supervisor Agent (Local)
 
 ---
 
+## Context Management (Automatic Compaction)
+
+Long ingests and trace analyses can generate huge tool outputs and long histories. Paper2Wiki
+relies on the **Deep Agents SDK's built-in context management** — we add **no** summarization
+middleware, so the framework defaults do the work automatically. The agent doesn't "know" it
+happened; its working memory just stays clean.
+
+| Mechanism | When it fires | What happens |
+|---|---|---|
+| **Offloading** | a single tool result exceeds **~20,000 tokens** | the full result is written to the filesystem; the agent keeps only a short **preview + file path** and can re-read on demand |
+| **Summarization** | the context window reaches **~85%** capacity | older history is summarized in place and the run resumes; the full record is preserved (it's never silently lost) |
+
+This is **automatic** in the Deep Agents SDK (in raw LangGraph you'd hand-write an offload node,
+a `summarize_node` with conditional edges, and `trim_messages` yourself).
+
+What we *do* configure in `src/agents/agent.py` are complementary **guardrails**, not compaction:
+
+- `ModelCallLimitMiddleware(run_limit=20)` — caps model calls per run (sized for worst-case ingest).
+- `ToolCallLimitMiddleware("web_extract", run_limit=2, thread_limit=4)` — caps expensive scrapes.
+- `PIIMiddleware` — redacts/masks emails, credit cards, and API keys from input.
+
+We do **not** add the optional `compact_conversation` tool (agent-triggered early compaction) —
+the stateless defaults above are sufficient for current workloads.
+
+---
+
 ## Prerequisites
 
 - Python 3.11+
@@ -162,6 +188,25 @@ supervisor (and, unless `--eval-mode`, a Daytona sandbox).
   mid-stream.)*
 - **Meta-commands:** `/title <name>` · `/new` · `/help` · `/open` (alias `/last`) · `/exit`
   (bare `quit`/`exit`/`bye`/`:q` and Ctrl-D also quit).
+
+### Pruning old sessions
+
+History is kept indefinitely by default (it powers `sessions search`). When you want to clean
+up, **pruning is manual and explicit** — one command tidies both stores in lockstep:
+
+```bash
+paper2wiki sessions prune                      # delete ended sessions older than 90 days
+paper2wiki sessions prune --older-than-days 30 # custom age threshold
+paper2wiki sessions prune -y                   # skip the confirmation prompt
+```
+
+- **What's removed:** ended sessions past the threshold — their chat history (`sessions.db`)
+  **and** their resumable graph state (`checkpoints.db`), keyed by the same `thread_id`.
+- **What's kept:** active sessions are never pruned, regardless of age.
+- **Irreversible:** a pruned session can no longer be searched *or* resumed.
+
+`prune` is the only `sessions` subcommand that loads the checkpointer; `ls` / `search` /
+`resume` stay fast.
 
 ### macOS note
 
