@@ -6,11 +6,11 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
-    """Strip any PAPER2WIKI_MODEL* env so tests are deterministic."""
+    """Strip PAPER2WIKI_* and LITELLM_* env so tests are deterministic."""
     import os
 
     for k in list(os.environ):
-        if k.startswith("PAPER2WIKI_MODEL"):
+        if k.startswith("PAPER2WIKI_") or k.startswith("LITELLM_"):
             monkeypatch.delenv(k, raising=False)
     yield
 
@@ -107,6 +107,77 @@ def test_get_model_rejects_unknown_role(monkeypatch):
     _set_config(monkeypatch, {})
     with pytest.raises(ValueError):
         lr.get_model("not_a_role")
+
+
+@pytest.mark.unit
+def test_gateway_off_leaves_spec_unrouted(monkeypatch):
+    """No PAPER2WIKI_LLM_GATEWAY → spec keeps its configured provider/base_url (direct path)."""
+    import src.llm_roles as lr
+
+    _set_config(monkeypatch, {"model": {"default": "claude-sonnet-4-6", "provider": "anthropic"}})
+    spec = lr.get_model_spec("supervisor")
+    assert spec.provider == "anthropic"
+    assert spec.base_url is None
+
+
+@pytest.mark.unit
+def test_gateway_on_routes_every_role_to_proxy(monkeypatch):
+    """Flag on → provider forced to openai, base_url/api_key from env, model unchanged."""
+    import src.llm_roles as lr
+
+    _set_config(monkeypatch, {"model": {"default": "claude-sonnet-4-6", "provider": "anthropic"}})
+    monkeypatch.setenv("PAPER2WIKI_LLM_GATEWAY", "litellm")
+    monkeypatch.setenv("LITELLM_BASE_URL", "http://localhost:4000")
+    monkeypatch.setenv("LITELLM_API_KEY", "sk-virtual-tenant")
+
+    spec = lr.get_model_spec("supervisor")
+    assert spec.provider == "openai"                 # "lie to LangChain"
+    assert spec.base_url == "http://localhost:4000"
+    assert spec.api_key == "sk-virtual-tenant"       # the virtual key, not the real one
+    assert spec.model == "claude-sonnet-4-6"         # unchanged — proxy alias resolves it
+
+
+@pytest.mark.unit
+def test_gateway_defaults_base_url(monkeypatch):
+    """Flag on with no LITELLM_BASE_URL → defaults to the local proxy port."""
+    import src.llm_roles as lr
+
+    _set_config(monkeypatch, {"model": {"default": "m"}})
+    monkeypatch.setenv("PAPER2WIKI_LLM_GATEWAY", "litellm")
+    assert lr.get_model_spec("title").base_url == lr._GATEWAY_DEFAULT_BASE_URL
+
+
+@pytest.mark.unit
+def test_gateway_injects_cache_namespace_only_when_opted_in(monkeypatch):
+    """Per-tenant namespace is stamped onto cache-opted roles; others are untouched."""
+    import src.llm_roles as lr
+
+    _set_config(monkeypatch, {
+        "model": {"default": "m"},
+        "auxiliary": {"web_summarize": {"extra_body": {"cache": {"use-cache": True}}}},
+    })
+    monkeypatch.setenv("PAPER2WIKI_LLM_GATEWAY", "litellm")
+    monkeypatch.setenv("LITELLM_CACHE_NAMESPACE", "tenant-1")
+
+    cached = lr.get_model_spec("web_summarize")
+    assert cached.extra_body["cache"] == {"use-cache": True, "namespace": "tenant-1"}
+
+    # A role with no cache opt-in gets no cache/namespace.
+    assert lr.get_model_spec("title").extra_body == {}
+
+
+@pytest.mark.unit
+def test_gateway_no_namespace_env_leaves_cache_unscoped(monkeypatch):
+    """Cache opt-in but no LITELLM_CACHE_NAMESPACE → cache kept, namespace not invented."""
+    import src.llm_roles as lr
+
+    _set_config(monkeypatch, {
+        "model": {"default": "m"},
+        "auxiliary": {"summarize": {"extra_body": {"cache": {"use-cache": True}}}},
+    })
+    monkeypatch.setenv("PAPER2WIKI_LLM_GATEWAY", "litellm")
+
+    assert lr.get_model_spec("summarize").extra_body["cache"] == {"use-cache": True}
 
 
 @pytest.mark.unit

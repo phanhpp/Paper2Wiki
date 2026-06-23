@@ -109,13 +109,48 @@ def get_model_spec(role: str) -> ModelSpec:
     provider = provider if provider not in _AUTO else None
 
     timeout = aux.get("timeout")
-    return ModelSpec(
+    spec = ModelSpec(
         model=model,
         provider=provider,
         base_url=_pick("base_url"),
         api_key=_pick("api_key"),
         timeout=float(timeout) if timeout not in (None, "") else None,
         extra_body=dict(aux.get("extra_body") or {}),
+    )
+    return _apply_gateway(spec)
+
+
+_GATEWAY_DEFAULT_BASE_URL = "http://localhost:4000"
+
+
+def _apply_gateway(spec: ModelSpec) -> ModelSpec:
+    """Route a spec through the LiteLLM proxy when ``PAPER2WIKI_LLM_GATEWAY=litellm``.
+
+    The "lie to LangChain" trick: force ``provider=openai`` + ``base_url=<proxy>`` so the request
+    becomes a generic OpenAI-shaped call to the proxy (which then authenticates, meters, caps,
+    fallbacks, and routes it to the real model). ``model`` is unchanged — the proxy's ``model_list``
+    aliases resolve it. ``api_key`` is the per-tenant **virtual key**, never the real provider key.
+
+    Flag off (default) → returns the spec untouched (today's direct-to-provider behavior).
+    """
+    if os.environ.get("PAPER2WIKI_LLM_GATEWAY", "").strip().lower() != "litellm":
+        return spec
+
+    # Per-tenant cache scoping: if this role opted into caching (extra_body.cache.use-cache),
+    # stamp the tenant namespace so semantic-cache hits never cross tenants.
+    extra_body = dict(spec.extra_body or {})
+    cache = extra_body.get("cache")
+    namespace = os.environ.get("LITELLM_CACHE_NAMESPACE", "").strip()
+    if isinstance(cache, dict) and cache.get("use-cache") and namespace:
+        extra_body["cache"] = {**cache, "namespace": namespace}
+
+    return ModelSpec(
+        model=spec.model,  # unchanged — proxy alias resolves it
+        provider="openai",
+        base_url=os.environ.get("LITELLM_BASE_URL", "").strip() or _GATEWAY_DEFAULT_BASE_URL,
+        api_key=os.environ.get("LITELLM_API_KEY", "").strip() or None,
+        timeout=spec.timeout,
+        extra_body=extra_body,
     )
 
 
