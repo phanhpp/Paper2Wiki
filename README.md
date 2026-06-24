@@ -9,6 +9,7 @@ A research assistant that transforms research papers into durable artifacts — 
 - **LLM-Wiki**: builds and maintains a graph-structured knowledge base from academic papers
 - **Marp slides**: generates presentation decks from papers or wiki content (sandboxed via Daytona)
 - **Self-improvement**: fetches its own LangSmith traces, detects metric anomalies (tool crashes, token blowouts, latency/step spikes) and qualitative patterns (skill deviations, HITL rejections, tool misuse), then patches its own **skill prompts** and `AGENTS.md` — HITL approval required before any change is committed
+- **Model-agnostic**: bring any LLM provider (Anthropic, OpenAI, Google, OpenRouter, local Ollama…) via `config.yaml` — set one base model for everything, or a different model per task (supervisor, subagents, titling, summaries, eval judge) with its own provider/endpoint/key
 - **General assistance**: answers questions, writes/edits code, and runs repo tools (with HITL where configured)
 
 ---
@@ -25,7 +26,7 @@ Supervisor Agent (Local)
     └── Skill: marp-slide
 ```
 
-- **Supervisor**: Handles high-level orchestration, wiki maintenance, and trace analysis. Runs on your local machine with guarded shell access.
+- **Supervisor**: Handles high-level orchestration, wiki maintenance, and trace analysis. Runs on your local machine with guarded shell access. Its model — and each subagent/auxiliary task's — is provider-agnostic, resolved from `config.yaml` (see [Choosing your LLM](#choosing-your-llm)).
 - **Marp Subagent**: An isolated Daytona container dedicated to generating and styling presentation decks.
 - **HITL (Human-in-the-Loop)**: By default, the system interrupts and asks for approval before any `write_file`, `edit_file`, or `execute` (shell/git) operation.
 
@@ -64,7 +65,7 @@ the stateless defaults above are sufficient for current workloads.
 - [uv](https://docs.astral.sh/uv/) (recommended)
 - [LangSmith account](https://smith.langchain.com/) (free tier)
 - [Daytona account](https://daytona.io/) (free trial, no credit card)
-- Anthropic or OpenAI API key
+- An API key for your chosen LLM provider — Anthropic, OpenAI, Google, etc. (see [Choosing your LLM](#choosing-your-llm))
 
 ---
 
@@ -97,11 +98,13 @@ WIKI_PATH=./wiki              # Optional: custom wiki location
 PAPER2WIKI_MODEL=             # Optional: base LLM for all roles, e.g. openai:gpt-4o (default: claude-sonnet-4-6)
 ```
 
-**Choosing your LLM.** Paper2Wiki is provider-agnostic. Pick **one** base model and set that
-provider's API key; it drives the supervisor, subagents, and all auxiliary tasks (titling, trace
-summaries, eval judge, web summarizer). Set it via `PAPER2WIKI_MODEL` (env) or `model.default` in
-`config.yaml`, using any LangChain value incl. `provider:model` (`openai:gpt-4o`,
-`google_genai:gemini-2.0-flash`, `anthropic:claude-sonnet-4-6`).
+### Choosing your LLM
+
+Paper2Wiki is **provider-agnostic** — all models are resolved from `config.yaml` (no code change).
+Pick **one** base model and set that provider's API key; it drives the supervisor, subagents, and
+all auxiliary tasks (titling, trace summaries, eval judge, web summarizer). Set it via
+`PAPER2WIKI_MODEL` (env) or `model.default` in `config.yaml`, using any LangChain value incl.
+`provider:model` (`openai:gpt-4o`, `google_genai:gemini-2.0-flash`, `anthropic:claude-sonnet-4-6`).
 
 Override a single task under `auxiliary.<task>` (tasks: `supervisor`, `subagent`, `title`,
 `summarize`, `judge`, `web_summarize`) — each block takes `provider`/`model`/`base_url`/`api_key`/
