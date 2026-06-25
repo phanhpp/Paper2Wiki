@@ -87,7 +87,13 @@ def set_up_llms(model, **kwargs):
             top.pop("effort", None)
             top.pop("thinking", None)
 
-        return init_chat_model(**top, model_kwargs=model_kwargs | dict(spec.extra_body) | kwargs)
+        # extra_body → the model's dedicated `extra_body` passthrough (NOT model_kwargs):
+        # keys like `cache` collide with reserved LangChain fields (ChatOpenAI.cache expects a
+        # BaseCache), so they must ride in extra_body to reach the request body intact.
+        if spec.extra_body:
+            top["extra_body"] = dict(spec.extra_body)
+
+        return init_chat_model(**top, model_kwargs=model_kwargs | kwargs)
 
     if model in MODEL_CONFIG:
         cfg = MODEL_CONFIG[model]

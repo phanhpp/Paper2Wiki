@@ -209,7 +209,10 @@ def test_set_up_llms_spec_applies_all_fields(monkeypatch):
     assert captured["base_url"] == "https://openrouter.ai/api/v1"
     assert captured["api_key"] == "sk-or"
     assert captured["timeout"] == 60
-    assert captured["model_kwargs"]["reasoning"] == {"effort": "low"}
+    # extra_body rides the dedicated `extra_body` param, NOT model_kwargs (where `cache` would
+    # collide with ChatOpenAI's reserved field).
+    assert captured["extra_body"] == {"reasoning": {"effort": "low"}}
+    assert "reasoning" not in captured.get("model_kwargs", {})
     # Non-Anthropic provider → Anthropic-only knobs stripped.
     assert "effort" not in captured and "thinking" not in captured
 
