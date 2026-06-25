@@ -15,7 +15,7 @@ set; it never imports `litellm`. Full design + rationale: `[docs/litellm/plan.md
 | 2    | Seed tenants (Team → User → Key) + budget test                                  | ✅ done                                                                                   |
 | 3    | App seam `_apply_gateway` in `src/llm_roles.py` (+ unit tests)                  | ✅ done                                                                                   |
 | 4    | `config.yaml`: semantic cache, alerting, Prometheus metrics, LangSmith callback | ✅ done · fallbacks / rate limits / prompt-injection guardrail / app-side cache opt-in 🚧 |
-| 5    | End-to-end through the agent with a virtual key                                 | ⬜ todo                                                                                   |
+| 5    | End-to-end — app role routes through the gateway and hits the cache             | ✅ done (`web_summarize`: 2nd identical summarization → `[cache] HIT`)                    |
 
 
 ## Topology — single container + managed data stores (production-shaped)
@@ -176,7 +176,27 @@ PAPER2WIKI_LLM_GATEWAY=litellm LITELLM_API_KEY=<virtual-key> \
   uv run python -m src.cli.app chat 'hi in 3 words'
 ```
 
+## Semantic cache: `default_off` vs `default_on`
+
+`default_on` caches **every** call; `default_off` caches **none** unless the request explicitly
+sends `cache: {use-cache: true}`. We use `**default_off`** on purpose — blanket-caching an agent is
+unsafe: a cached **supervisor/subagent tool-calling turn** could replay a stale tool call or return
+a wrong-context answer. So the app opts in only the **idempotent** tasks (`web_summarize`,
+`summarize`, `title`, `judge`) — injected per-request by `_apply_gateway` in `src/llm_roles.py`,
+with a per-tenant `cache.namespace` so hits never cross tenants. This is the production-correct
+choice, not a learning shortcut.
+
 ## Testing the semantic cache
+
+A custom callback (`cache_logger.py`, mounted into the container and registered in `config.yaml`'s
+`callbacks` — see [`docs/litellm/custom_callbacks.md`](../docs/litellm/custom_callbacks.md) for how
+that wiring works) prints one clear line per request — watch it live with `docker compose logs -f litellm`:
+```
+[cache] HIT  model=claude-haiku-4-5-20251001  0.42s
+[cache] miss model=claude-sonnet-4-6          2.91s
+```
+(After adding the callback, run **`docker compose up -d`** — a new volume mount needs a recreate, not
+just `restart`.)
 
 `mode: default_off` means nothing caches unless the request opts in — so a plain repeated call
 will **not** hit the cache. Pass the cache directive explicitly to test it:
@@ -187,12 +207,12 @@ will **not** hit the cache. Pass the cache directive explicitly to test it:
 curl -i http://localhost:4000/v1/chat/completions \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
   -d '{"model":"claude-haiku-4-5-20251001","cache":{"use-cache":true},
-       "messages":[{"role":"user","content":"What is the capital of France?"}]}'
+       "messages":[{"role":"user","content":"What the capital city of Vietnam?"}]}'
 
 curl -i http://localhost:4000/v1/chat/completions \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
   -d '{"model":"claude-haiku-4-5-20251001","cache":{"use-cache":true},
-       "messages":[{"role":"user","content":"Tell me the capital city of France."}]}'
+       "messages":[{"role":"user","content": "Vietnam capital?"}]}'
 ```
 
 Confirm a hit by any of: the `**x-litellm-semantic-similarity**` response header (≥ `0.8`); the
@@ -207,18 +227,19 @@ spend** for the 2nd call in `:4000/ui`. Lower `similarity_threshold` if near-mat
 (`extra_body: {cache: {use-cache: true}}` on the idempotent roles in the app's `config.yaml`).
 - **Step 5** — end-to-end through the agent with a virtual key.
 
-
 ## Operating the proxy — restart vs recreate
 
 Each container reads **its own** file at startup, so restart the one whose file you changed:
 
-| Changed | What to run | Why |
-| --- | --- | --- |
-| `config.yaml` (LiteLLM) | `docker compose restart litellm` | Volume-mounted, but LiteLLM parses it **at startup** — no hot reload; `restart` re-reads it (fast, no recreate). |
-| `prometheus.yml` (scrape config) | `docker compose restart prometheus` | Prometheus reads its config at startup too (or `curl -X POST http://localhost:9090/-/reload` if started with `--web.enable-lifecycle`). |
-| `.env` | `docker compose up -d` | env is injected at container **creation**, not live-mounted — `restart` won't pick up changes; you must recreate. |
 
-So: **`config.yaml` → restart litellm, `prometheus.yml` → restart prometheus, `.env` → up -d.**
+| Changed                          | What to run                         | Why                                                                                                                                     |
+| -------------------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `config.yaml` (LiteLLM)          | `docker compose restart litellm`    | Volume-mounted, but LiteLLM parses it **at startup** — no hot reload; `restart` re-reads it (fast, no recreate).                        |
+| `prometheus.yml` (scrape config) | `docker compose restart prometheus` | Prometheus reads its config at startup too (or `curl -X POST http://localhost:9090/-/reload` if started with `--web.enable-lifecycle`). |
+| `.env`                           | `docker compose up -d`              | env is injected at container **creation**, not live-mounted — `restart` won't pick up changes; you must recreate.                       |
+
+
+So: `**config.yaml` → restart litellm, `prometheus.yml` → restart prometheus, `.env` → up -d.**
 (If unsure, `up -d` always works — it just recreates the container.)
 
 ## Troubleshooting
@@ -229,12 +250,14 @@ Not your LLM keys — it's the **Prometheus scraper hitting `/metrics` without v
 auth exception → and since `llm_exceptions` is in `alert_types`, it alerts on each one. The ~15 s
 cadence is Prometheus's default `scrape_interval`. Confirm by pairing the alert timestamps with
 `GET /metrics … 401` lines in `docker compose logs litellm`. Fix either way:
-- **Auth the scraper** (keep `/metrics` private): in `prometheus.yml` set
-  `bearer_token: <literal master key>` (or `bearer_token_file:`). **Not** `os.environ/…` — Prometheus
-  has no env-var expansion, so it sends the literal string and still 401s. Then
-  `docker compose restart prometheus`.
+
+- **Auth the scraper** (keep `/metrics` private): in `prometheus.yml` use **`bearer_token_file: /path`**
+(a path to a file holding the `sk-…` key) **or** `bearer_token: sk-…` (the literal key). Don't mix
+them up — `bearer_token: /etc/.../master_key` sends the *path string* as the token (401
+`Received=/etc****_key, expected to start with 'sk-'`). And **not** `os.environ/…` — Prometheus has no
+env-var expansion. Then `docker compose restart prometheus`.
 - **Or make `/metrics` public** (fine on localhost): `require_auth_for_metrics_endpoint: false` in
-  `config.yaml`, then `docker compose restart litellm`.
+`config.yaml`, then `docker compose restart litellm`.
 
 Verify: `docker compose logs --since 1m litellm | grep /metrics` shows `200`, and
 `http://localhost:9090/targets` lists the `litellm-proxy` job as **UP**.
@@ -247,3 +270,23 @@ test value; raise it (e.g. `30`, or `300` in prod) once you're done watching ale
 
 **Config edit "didn't take."** You must restart the right container (table above), and you must edit
 the file that's actually mounted — confirm with `docker compose exec litellm grep <key> /app/config.yaml`.
+
+**Bursty `db_exceptions: Can't reach database server`.** LiteLLM's scheduled background jobs
+(budget-reset, cost-cleanup polls) hitting a **Neon free-tier compute that auto-suspended while
+idle** — transient and self-recovering. Fix: drop `db_exceptions` from `alert_types` and set
+`general_settings.database_connection_timeout: 30` so Prisma waits through Neon's ~1–3 s wake;
+**don't** keep-alive a free-tier Neon (it burns the limited compute-hours allowance).
+
+**Semantic cache "only matches exact text," paraphrases miss with `similarity: 0.0`.** Usually a
+**`REDIS_SSL` mismatch**, not the threshold. Redis Cloud sometimes hands you a **non-TLS port**, so
+`REDIS_SSL=true` silently breaks the vector cache's connection and it **degrades to near-exact-only**
+matching (it doesn't error). Confirm your Redis Cloud endpoint's TLS setting, set `REDIS_SSL` to
+match, **`flushdb`** to drop the stale index, then **`docker compose up -d`** (an `.env` change needs
+a recreate, not `restart`). Two more notes: `x-litellm-semantic-similarity: 0.0` is reported on *any*
+miss (not the real cosine), so use an offline cosine check to know a pair's true score; and a cache
+*hit* still costs ~400 ms because the lookup must embed the query — far cheaper than the LLM call,
+but not instant.
+
+**`export $(grep … .env | xargs)` fails with `not valid in this context`.** A value in `.env`
+contains a space/comma, which `xargs` splits. Don't load the whole file into the shell — grab the one
+var you need: `KEY=$(grep -E '^LITELLM_MASTER_KEY=' .env | cut -d= -f2-)`.
