@@ -13,6 +13,7 @@ services:
       - "4000:4000" # send requests from local terminal to http://localhost:4000, get forwarded to container port 4000
     volumes:
       - ./config.yaml:/app/config.yaml
+      - ./cache_logger.py:/app/cache_logger.py   # custom callback: concise cache HIT/miss logs
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     env_file:
       - .env
