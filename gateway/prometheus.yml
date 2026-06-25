@@ -3,7 +3,7 @@ global:
 
 scrape_configs:
   - job_name: 'litellm-proxy'
-    bearer_token: /etc/prometheus/master_key  
+    bearer_token_file: /etc/prometheus/master_key  
     metrics_path: '/metrics/'
     # We add a small buffer since LiteLLM needs a second to process auth checks
     scrape_timeout: 10s 
