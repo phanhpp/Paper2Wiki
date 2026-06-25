@@ -148,36 +148,40 @@ def test_gateway_defaults_base_url(monkeypatch):
 
 
 @pytest.mark.unit
-def test_gateway_injects_cache_namespace_only_when_opted_in(monkeypatch):
-    """Per-tenant namespace is stamped onto cache-opted roles; others are untouched."""
+def test_gateway_caches_only_idempotent_roles(monkeypatch):
+    """Idempotent roles get a per-tenant cache opt-in injected; supervisor/subagent never do."""
     import src.llm_roles as lr
 
-    _set_config(monkeypatch, {
-        "model": {"default": "m"},
-        "auxiliary": {"web_summarize": {"extra_body": {"cache": {"use-cache": True}}}},
-    })
+    _set_config(monkeypatch, {"model": {"default": "m"}})
     monkeypatch.setenv("PAPER2WIKI_LLM_GATEWAY", "litellm")
     monkeypatch.setenv("LITELLM_CACHE_NAMESPACE", "tenant-1")
 
-    cached = lr.get_model_spec("web_summarize")
-    assert cached.extra_body["cache"] == {"use-cache": True, "namespace": "tenant-1"}
+    for role in ("web_summarize", "summarize", "title", "judge"):
+        assert lr.get_model_spec(role).extra_body["cache"] == {"use-cache": True, "namespace": "tenant-1"}
 
-    # A role with no cache opt-in gets no cache/namespace.
-    assert lr.get_model_spec("title").extra_body == {}
+    # Stateful / tool-calling roles are never cached.
+    assert "cache" not in lr.get_model_spec("supervisor").extra_body
+    assert "cache" not in lr.get_model_spec("subagent").extra_body
 
 
 @pytest.mark.unit
-def test_gateway_no_namespace_env_leaves_cache_unscoped(monkeypatch):
-    """Cache opt-in but no LITELLM_CACHE_NAMESPACE → cache kept, namespace not invented."""
+def test_gateway_cache_without_namespace(monkeypatch):
+    """Cacheable role, no LITELLM_CACHE_NAMESPACE → cache opt-in kept, namespace not invented."""
     import src.llm_roles as lr
 
-    _set_config(monkeypatch, {
-        "model": {"default": "m"},
-        "auxiliary": {"summarize": {"extra_body": {"cache": {"use-cache": True}}}},
-    })
+    _set_config(monkeypatch, {"model": {"default": "m"}})
     monkeypatch.setenv("PAPER2WIKI_LLM_GATEWAY", "litellm")
 
     assert lr.get_model_spec("summarize").extra_body["cache"] == {"use-cache": True}
+
+
+@pytest.mark.unit
+def test_gateway_off_injects_no_cache(monkeypatch):
+    """Direct mode (flag off) never adds a cache directive — it would break a real provider."""
+    import src.llm_roles as lr
+
+    _set_config(monkeypatch, {"model": {"default": "m"}})
+    assert "cache" not in lr.get_model_spec("summarize").extra_body
 
 
 @pytest.mark.unit

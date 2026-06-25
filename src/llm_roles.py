@@ -117,13 +117,18 @@ def get_model_spec(role: str) -> ModelSpec:
         timeout=float(timeout) if timeout not in (None, "") else None,
         extra_body=dict(aux.get("extra_body") or {}),
     )
-    return _apply_gateway(spec)
+    return _apply_gateway(spec, role)
 
 
 _GATEWAY_DEFAULT_BASE_URL = "http://localhost:4000"
 
+# Idempotent, stateless tasks safe to semantic-cache. The supervisor/subagent are
+# deliberately excluded — caching a stateful tool-calling turn could replay a stale
+# tool call or return a wrong-context answer.
+_CACHEABLE_ROLES = frozenset({"web_summarize", "summarize", "title", "judge"})
 
-def _apply_gateway(spec: ModelSpec) -> ModelSpec:
+
+def _apply_gateway(spec: ModelSpec, role: str) -> ModelSpec:
     """Route a spec through the LiteLLM proxy when ``PAPER2WIKI_LLM_GATEWAY=litellm``.
 
     The "lie to LangChain" trick: force ``provider=openai`` + ``base_url=<proxy>`` so the request
@@ -131,18 +136,23 @@ def _apply_gateway(spec: ModelSpec) -> ModelSpec:
     fallbacks, and routes it to the real model). ``model`` is unchanged — the proxy's ``model_list``
     aliases resolve it. ``api_key`` is the per-tenant **virtual key**, never the real provider key.
 
+    For ``_CACHEABLE_ROLES`` it also opts the request into the proxy's semantic cache
+    (``cache: {use-cache: true}`` — the proxy runs ``mode: default_off``) with a per-tenant
+    ``namespace`` so hits never cross tenants. The cache directive is injected **only here**, on the
+    gateway path, so it never reaches a direct provider (which would reject it).
+
     Flag off (default) → returns the spec untouched (today's direct-to-provider behavior).
     """
     if os.environ.get("PAPER2WIKI_LLM_GATEWAY", "").strip().lower() != "litellm":
         return spec
 
-    # Per-tenant cache scoping: if this role opted into caching (extra_body.cache.use-cache),
-    # stamp the tenant namespace so semantic-cache hits never cross tenants.
     extra_body = dict(spec.extra_body or {})
-    cache = extra_body.get("cache")
-    namespace = os.environ.get("LITELLM_CACHE_NAMESPACE", "").strip()
-    if isinstance(cache, dict) and cache.get("use-cache") and namespace:
-        extra_body["cache"] = {**cache, "namespace": namespace}
+    if role in _CACHEABLE_ROLES:
+        cache = {"use-cache": True}
+        namespace = os.environ.get("LITELLM_CACHE_NAMESPACE", "").strip()
+        if namespace:
+            cache["namespace"] = namespace  # scope hits per tenant (no cross-tenant leakage)
+        extra_body["cache"] = cache
 
     return ModelSpec(
         model=spec.model,  # unchanged — proxy alias resolves it
