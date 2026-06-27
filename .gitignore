@@ -45,11 +45,8 @@ prompt.yaml
 
 # Eval — ephemeral (CI generates eval/results.json at runtime)
 eval/results.json
-eval/todo.md
-
 # Eval — versioned (tracked; required by CI: run_gate.py, push_golden_datasets.py)
 #   eval/pr_gate_cases.json
-#   eval/regression_baseline.json
 #   eval/golden_datasets/*.json
 #   eval/cached_outputs/*.json
 

@@ -16,10 +16,11 @@ API key is configured — they run locally or in CI jobs that have secrets.
 Run:
     uv run python eval/run_gate.py
 
-Writes eval/results.json. Exits 1 if any regression threshold is breached.
-To update the baseline after a green run:
-    cp eval/results.json eval/regression_baseline.json
-    git add eval/regression_baseline.json && git commit -m "eval: update baseline"
+Writes eval/results.json. Exits 1 if any regression category scores below 100%
+(REGRESSION_THRESHOLDS). Capability categories are tracked/printed but never block — when a
+capability case reliably passes, promote it (change "type" → "regression" in pr_gate_cases.json)
+to lock it into the hard gate. Promotion is the "lock in a gain" mechanism; there is no separate
+baseline file.
 """
 
 import asyncio
@@ -149,11 +150,6 @@ async def run_case(case: dict, tool_map: dict) -> dict:
 
 async def main():
     cases   = json.loads(Path("eval/pr_gate_cases.json").read_text())
-    baseline = (
-        json.loads(Path("eval/regression_baseline.json").read_text())
-        if Path("eval/regression_baseline.json").exists()
-        else {}
-    )
 
     tool_map = _load_tool_map()
 
@@ -180,21 +176,14 @@ async def main():
         if active else 1.0
     )
 
-    # Regression detection: >5% drop vs baseline in any regression category.
-    # regression_baseline.json keys are prefixed "regression_" so capability scores never
-    # accidentally trigger a regression alert.
-    regression_detected = any(
-        reg_scores.get(cat, 1.0) < baseline.get(f"regression_{cat}", 0) - 0.05
-        for cat in reg_scores
-    )
-
+    # Only regression categories block the gate (must score 100%). Capability categories are
+    # tracked/printed but never block — when one is reliably passing, promote it to regression
+    # (change its "type" in pr_gate_cases.json) to lock it into the hard gate.
     gate_failures = []
     for cat, threshold in REGRESSION_THRESHOLDS.items():
         score = reg_scores.get(cat, 1.0)
         if score < threshold:
             gate_failures.append(f"regression/{cat}: {score:.0%} < {threshold:.0%}")
-    if regression_detected:
-        gate_failures.append("regression: >5% drop vs baseline")
 
     case_failures = [
         f"{r['id']} ({r.get('type', '?')}): {r.get('reason', '')}"
@@ -209,7 +198,6 @@ async def main():
         "capability_scores":   cap_scores,   # tracked only, never gate-blocking
         "gate_failures":       gate_failures,
         "case_failures":       case_failures,
-        "regression_detected": regression_detected,
         "passed":              sum(r["passed"] for r in results if not r.get("skipped")),
         "skipped":             len(skipped),
         "total":               len(active),
@@ -219,8 +207,35 @@ async def main():
     Path("eval/results.json").write_text(json.dumps(output, indent=2))
     print(json.dumps(output, indent=2))
 
+    # Nudge: a capability category at 100% is a candidate to PROMOTE to regression (lock it into
+    # the hard gate). Printed to stdout and surfaced on the PR via GitHub's step summary.
+    nudges = [
+        f"📈 capability/{cat} = {score:.0%} — promote its cases to regression once reliably passing"
+        for cat, score in sorted(cap_scores.items()) if score >= 1.0
+    ]
+    if nudges:
+        print("\n".join(nudges))
+    _write_step_summary(cap_scores, nudges)
+
     if not output["gate_passed"]:
         sys.exit(1)
+
+
+def _write_step_summary(cap_scores: dict, nudges: list[str]) -> None:
+    """Append capability scores (tracked, non-blocking) + promotion nudges to the PR checks summary.
+
+    No-op outside GitHub Actions (GITHUB_STEP_SUMMARY unset), so local runs are unaffected.
+    """
+    summary_path = os.getenv("GITHUB_STEP_SUMMARY")
+    if not summary_path or not cap_scores:
+        return
+    lines = ["### Capability scores (tracked, non-blocking)", "", "| category | score |", "|---|---|"]
+    for cat, score in sorted(cap_scores.items()):
+        lines.append(f"| {cat} | {score:.0%} |")
+    if nudges:
+        lines += ["", *nudges]
+    with open(summary_path, "a") as f:
+        f.write("\n".join(lines) + "\n")
 
 
 asyncio.run(main())

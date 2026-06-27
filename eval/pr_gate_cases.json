@@ -6,7 +6,7 @@
     "tool": "quick_wiki_integrity_check",
     "inputs": {},
     "expect_keys": ["wiki-check"],
-    "_note": "Tool returns a plain string starting with 'wiki-check:'. In CI, wiki/ is absent so returns 'wiki-check: OK' (no files = no errors)."
+    "_note": "Run wiki check on commited wiki/ and return 'wiki-check: OK'."
   },
   {
     "id": "web_extract_empty_urls",
@@ -63,5 +63,23 @@
     "expect_keys": ["content", "url"],
     "requires_web_provider": true,
     "_note": "Capability — content quality varies by provider. use_summarizer=false avoids LLM cost. Skipped in CI if no provider key set."
+  },
+  {
+    "id": "fetch_arxiv_old_id",
+    "type": "capability",
+    "category": "retrieval",
+    "tool": "fetch_arxiv",
+    "inputs": {"query": "math/0211159"},
+    "expect_keys_or": [["title", "authors"], ["rate_limited"]],
+    "_note": "Capability — old pre-2007 arXiv ID format (category/number). Key-free (arXiv direct). Passes on result or graceful 429."
+  },
+  {
+    "id": "fetch_arxiv_versioned",
+    "type": "capability",
+    "category": "retrieval",
+    "tool": "fetch_arxiv",
+    "inputs": {"query": "2103.00020v1"},
+    "expect_keys_or": [["title"], ["rate_limited"]],
+    "_note": "Capability — explicit version suffix (v1). Key-free (arXiv direct). Passes on result or graceful 429."
   }
 ]
