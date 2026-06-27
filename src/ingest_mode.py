@@ -12,9 +12,9 @@ def get_ingest_mode() -> str:
     mode = os.environ.get("PAPER2WIKI_INGEST_MODE", "").strip().lower()
     if mode not in VALID_INGEST_MODES:
         try:
-            from src.tools.web_tools.registry import load_config
+            from src.tools.web_tools.registry import load_config_file
 
-            mode = load_config().get("ingest", {}).get("mode", "fast").strip().lower()
+            mode = load_config_file().get("ingest", {}).get("mode", "fast").strip().lower()
         except Exception:
             mode = "fast"
     return mode if mode in VALID_INGEST_MODES else "fast"

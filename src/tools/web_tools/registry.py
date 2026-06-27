@@ -50,9 +50,11 @@ def _find_config_path() -> Path | None:
     return default if default.exists() else None
 
 
-def load_config() -> dict[str, Any]:
-    """Load config.yaml. Returns empty dict if not found.
+def load_config_file() -> dict[str, Any]:
+    """Load the **whole** config.yaml (all top-level sections). Empty dict if absent.
 
+    Use this for non-web sections (``model``, ``auxiliary``, ``ingest``).
+    ``load_config()`` returns only the ``web`` block for the web tools.
     """
     path = _find_config_path()
     if path is None:
@@ -62,14 +64,18 @@ def load_config() -> dict[str, Any]:
         import yaml
 
         with open(path) as f:
-            raw = yaml.safe_load(f) or {}
-        return raw.get("web", {})
+            return yaml.safe_load(f) or {}
     except ImportError:
         logger.warning("PyYAML not installed — config.yaml ignored. pip install pyyaml")
         return {}
     except Exception as e:
         logger.warning("Failed to load config from %s: %s", path, e)
         return {}
+
+
+def load_config() -> dict[str, Any]:
+    """The ``web`` section of config.yaml (web-tools settings). Empty if absent."""
+    return load_config_file().get("web", {})
 
 
 class ProviderRegistry:

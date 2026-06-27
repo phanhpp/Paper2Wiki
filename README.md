@@ -9,6 +9,7 @@ A research assistant that transforms research papers into durable artifacts — 
 - **LLM-Wiki**: builds and maintains a graph-structured knowledge base from academic papers
 - **Marp slides**: generates presentation decks from papers or wiki content (sandboxed via Daytona)
 - **Self-improvement**: fetches its own LangSmith traces, detects metric anomalies (tool crashes, token blowouts, latency/step spikes) and qualitative patterns (skill deviations, HITL rejections, tool misuse), then patches its own **skill prompts** and `AGENTS.md` — HITL approval required before any change is committed
+- **Model-agnostic**: bring any LLM provider (Anthropic, OpenAI, Google, OpenRouter, local Ollama…) via `config.yaml` — set one base model for everything, or a different model per task (supervisor, subagents, titling, summaries, eval judge) with its own provider/endpoint/key
 - **General assistance**: answers questions, writes/edits code, and runs repo tools (with HITL where configured)
 
 ---
@@ -25,10 +26,36 @@ Supervisor Agent (Local)
     └── Skill: marp-slide
 ```
 
-- **Supervisor**: Handles high-level orchestration, wiki maintenance, and trace analysis. Runs on your local machine with guarded shell access.
+- **Supervisor**: Handles high-level orchestration, wiki maintenance, and trace analysis. Runs on your local machine with guarded shell access. Its model — and each subagent/auxiliary task's — is provider-agnostic, resolved from `config.yaml` (see [Choosing your LLM](#choosing-your-llm)).
 - **Marp Subagent**: An isolated Daytona container dedicated to generating and styling presentation decks.
 - **HITL (Human-in-the-Loop)**: By default, the system interrupts and asks for approval before any `write_file`, `edit_file`, or `execute` (shell/git) operation.
 
+
+---
+
+## Context Management (Automatic Compaction)
+
+Long ingests and trace analyses can generate huge tool outputs and long histories. Paper2Wiki
+relies on the **Deep Agents SDK's built-in context management** — we add **no** summarization
+middleware, so the framework defaults do the work automatically. The agent doesn't "know" it
+happened; its working memory just stays clean.
+
+| Mechanism | When it fires | What happens |
+|---|---|---|
+| **Offloading** | a single tool result exceeds **~20,000 tokens** | the full result is written to the filesystem; the agent keeps only a short **preview + file path** and can re-read on demand |
+| **Summarization** | the context window reaches **~85%** capacity | older history is summarized in place and the run resumes; the full record is preserved (it's never silently lost) |
+
+This is **automatic** in the Deep Agents SDK (in raw LangGraph you'd hand-write an offload node,
+a `summarize_node` with conditional edges, and `trim_messages` yourself).
+
+What we *do* configure in `src/agents/agent.py` are complementary **guardrails**, not compaction:
+
+- `ModelCallLimitMiddleware(run_limit=20)` — caps model calls per run (sized for worst-case ingest).
+- `ToolCallLimitMiddleware("web_extract", run_limit=2, thread_limit=4)` — caps expensive scrapes.
+- `PIIMiddleware` — redacts/masks emails, credit cards, and API keys from input.
+
+We do **not** add the optional `compact_conversation` tool (agent-triggered early compaction) —
+the stateless defaults above are sufficient for current workloads.
 
 ---
 
@@ -38,7 +65,7 @@ Supervisor Agent (Local)
 - [uv](https://docs.astral.sh/uv/) (recommended)
 - [LangSmith account](https://smith.langchain.com/) (free tier)
 - [Daytona account](https://daytona.io/) (free trial, no credit card)
-- Anthropic or OpenAI API key
+- An API key for your chosen LLM provider — Anthropic, OpenAI, Google, etc. (see [Choosing your LLM](#choosing-your-llm))
 
 ---
 
@@ -62,13 +89,28 @@ cp .env.example .env
 `.env`:
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_API_KEY=sk-ant-...  # or OPENAI_API_KEY / GOOGLE_API_KEY — match your chosen model
 LANGSMITH_API_KEY=lsv2_...
 LANGSMITH_TRACING=true        # Required for self-improvement
 LANGSMITH_PROJECT=paper2wiki
 DAYTONA_API_KEY=...           # Required for Marp slides
 WIKI_PATH=./wiki              # Optional: custom wiki location
+PAPER2WIKI_MODEL=             # Optional: base LLM for all roles, e.g. openai:gpt-4o (default: claude-sonnet-4-6)
 ```
+
+### Choosing your LLM
+
+Paper2Wiki is **provider-agnostic** — all models are resolved from `config.yaml` (no code change).
+Pick **one** base model and set that provider's API key; it drives the supervisor, subagents, and
+all auxiliary tasks (titling, trace summaries, eval judge, web summarizer). Set it via
+`PAPER2WIKI_MODEL` (env) or `model.default` in `config.yaml`, using any LangChain value incl.
+`provider:model` (`openai:gpt-4o`, `google_genai:gemini-2.0-flash`, `anthropic:claude-sonnet-4-6`).
+
+Override a single task under `auxiliary.<task>` (tasks: `supervisor`, `subagent`, `title`,
+`summarize`, `judge`, `web_summarize`) — each block takes `provider`/`model`/`base_url`/`api_key`/
+`timeout`/`extra_body`, so a task can use a different provider or an OpenAI-compatible gateway
+(e.g. OpenRouter) with its own key. Quick env override for one task:
+`PAPER2WIKI_MODEL_SUBAGENT=openai:gpt-4o-mini`. See `config.example.yaml`.
 
 ## Usage
 
@@ -129,10 +171,12 @@ PATH — either `source .venv/bin/activate` or use `uv run paper2wiki …`.)
 | `repl` | Interactive chat session (streaming, approvals, meta-commands) | yes |
 | `chat "<msg>"` | Run a single message and exit | yes |
 | `sessions ls [-n N]` | List recent sessions, newest first | no |
+| `sessions stats` | Catalog summary + how many you'd prune at each age threshold | no |
 | `sessions search "<query>"` | Full-text search message history | no |
 | `sessions resume <id\|title>` | Reopen a past session in the REPL | yes |
 | `sessions rename <id\|title> "<new>"` | Rename a session | no |
-| `sessions prune [--older-than-days N] [-y]` | Delete old ended sessions | no |
+| `sessions prune [--older-than-days N] [-y]` | Delete old ended sessions (+ their checkpoints) | no |
+| `sessions prune-orphans [--apply] [--vacuum] [--older-than D] [--full]` | Evict checkpoints with no session row (dry run by default) | no |
 | `config show` | Print the effective config (ingest mode, wiki path, providers) | no |
 
 `sessions`/`config` don't load the agent stack, so they're fast; `repl`/`chat` build the
@@ -162,6 +206,56 @@ supervisor (and, unless `--eval-mode`, a Daytona sandbox).
   mid-stream.)*
 - **Meta-commands:** `/title <name>` · `/new` · `/help` · `/open` (alias `/last`) · `/exit`
   (bare `quit`/`exit`/`bye`/`:q` and Ctrl-D also quit).
+
+### Pruning old sessions
+
+History is kept indefinitely by default (it powers `sessions search`). When you want to clean
+up, run `sessions stats` first to see the totals, time range, and how many sessions you'd delete
+at each age threshold — then prune. **Pruning is manual and explicit** — one command tidies both
+stores in lockstep:
+
+```bash
+paper2wiki sessions stats                      # see totals + what each threshold would delete
+paper2wiki sessions prune                      # delete ended sessions older than 90 days
+paper2wiki sessions prune --older-than-days 30 # custom age threshold
+paper2wiki sessions prune -y                   # skip the confirmation prompt
+```
+
+- **Preview before delete:** `prune` lists the date + title of every session it will remove and
+  asks to confirm, so you can judge each by its title (answer `n` to inspect without deleting).
+- **What's removed:** ended sessions past the threshold — their chat history (`sessions.db`)
+  **and** their resumable graph state (`checkpoints.db`), keyed by the same `thread_id`.
+- **What's kept:** active sessions are never pruned, regardless of age.
+- **Irreversible:** a pruned session can no longer be searched *or* resumed.
+
+`prune` is the only `sessions` subcommand that loads the checkpointer; `ls` / `search` /
+`resume` stay fast.
+
+#### Orphan checkpoints
+
+`prune` only evicts checkpoints whose **session row still exists** — it's driven by deleted
+sessions. Runs that never wrote a session row (`--no-save` turns, eval/test threads, history
+predating `sessions.db`) leave **orphan** checkpoints that `prune` can't reach, and they're
+usually the bulk of `checkpoints.db`. Sweep them separately:
+
+```bash
+paper2wiki sessions prune-orphans                      # dry run — lists orphans + each one's last-activity age
+paper2wiki sessions prune-orphans --full               # list every orphan (not just the first 20)
+paper2wiki sessions prune-orphans --older-than 1       # skip threads active in the last day
+paper2wiki sessions prune-orphans --apply              # actually evict them (via adelete_thread)
+paper2wiki sessions prune-orphans --apply --vacuum     # also shrink the file on disk
+```
+
+- **Dry run by default** — review the list (each orphan shows its last-activity age), then re-run
+  with `--apply`. Use `--full` to print the whole list instead of the first 20.
+- **`--older-than DAYS`** skips recently-active threads (last activity read from each thread's
+  most recent checkpoint) — use it to avoid evicting a session mid-first-turn whose session row
+  hasn't been written yet. Note: **larger values are *more* restrictive** (fewer matches); if it
+  matches nothing it tells you how many orphans exist and their age range.
+- **Safety guard:** if `sessions.db` is empty it refuses (everything would look orphaned).
+- **`--vacuum`** reclaims disk: plain deletes only free pages internally, so the file doesn't
+  shrink until you VACUUM (a one-shot rebuild). Without it, orphans are gone but the file stays
+  the same size.
 
 ### macOS note
 

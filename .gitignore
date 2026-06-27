@@ -88,3 +88,8 @@ requirements.txt
 src/agents/prompt_builder.py
 memories/agents_md_template.md
 docs/
+prometheus/master_key
+
+# gateway secrets (never commit)
+gateway/.env
+gateway/prometheus/master_key

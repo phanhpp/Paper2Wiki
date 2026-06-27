@@ -50,7 +50,7 @@ import math
 import re
 from typing import Callable, Sequence
 
-import anthropic
+from pydantic import BaseModel, Field
 from langsmith import Client
 from langsmith.evaluation import aevaluate
 from langsmith.evaluation.evaluator import EvaluationResult
@@ -60,9 +60,14 @@ from src.tools.observability_eval_tools.anomaly_detection import AnomalyError, _
 from src.tools.observability_eval_tools.create_eval_datasets import create_datasets_from_anomaly_report
 from src.tools import all_tools
 from src.agents.llms import set_up_llms
+from src.llm_roles import get_model_spec
 from langchain_core.tools import tool
 
-_JUDGE_MODEL = "claude-haiku-4-5-20251001"
+
+class _JudgeVerdict(BaseModel):
+    """Structured judge output (replaces hand-parsed JSON)."""
+    score: int = Field(description="1 if the output satisfies the pass criteria, else 0")
+    reason: str = Field(description="Under 10 words")
 
 _DEFAULT_COMPOSITE_WEIGHTS = {
     "no_hard_error": 1.0,
@@ -164,26 +169,22 @@ def build_llm_judge(signal: str, pass_criteria: str) -> Callable:
     Returns:
         A LangSmith-compatible evaluator function.
     """
-    judge = anthropic.Anthropic()
+    judge = set_up_llms(get_model_spec("judge")).with_structured_output(_JudgeVerdict)
     eval_key = f"llm_judge_{signal.split(':')[0]}"  # e.g. "llm_judge_hard_error"
     system_prompt = (
         f"You are evaluating an AI agent's response for a known failure pattern.\n"
         f"Failure signal: {signal}\n"
         f"Pass criteria: {pass_criteria}\n"
-        f"Score 1 if the output satisfies the pass criteria, 0 if it does not.\n"
-        f'Reply with JSON only: {{"score": 0|1, "reason": "<10 words>"}}'
+        f"Score 1 if the output satisfies the pass criteria, 0 if it does not."
     )
 
     def evaluator_fn(inputs: dict, outputs: dict) -> dict:
-        resp = judge.messages.create(
-            model=_JUDGE_MODEL,
-            max_tokens=128,
-            system=system_prompt,
-            messages=[{"role": "user", "content": json.dumps({"inputs": inputs, "outputs": outputs})}],
-        )
         try:
-            result = json.loads(resp.content[0].text)
-            return {"key": eval_key, "score": result["score"], "comment": result.get("reason", "")}
+            verdict = judge.invoke([
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps({"inputs": inputs, "outputs": outputs})},
+            ])
+            return {"key": eval_key, "score": verdict.score, "comment": verdict.reason}
         except Exception:
             return {"key": eval_key, "score": 0, "comment": "parse error"}
 
@@ -410,7 +411,7 @@ def build_target_function(dataset_name: str, client: Client | None = None) -> Ca
         return target
 
     elif run_type == "llm":
-        llm = set_up_llms("claude-haiku-4-5-20251001")
+        llm = set_up_llms(get_model_spec("judge"))
 
         async def target(inputs: dict) -> dict:
             response = await llm.ainvoke(inputs.get("messages", inputs))

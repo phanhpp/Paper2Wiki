@@ -17,6 +17,7 @@ import threading
 import logging
 from typing import Optional
 from src.agents.llms import set_up_llms
+from src.llm_roles import get_model_spec
 
 logger = logging.getLogger(__name__)
 
@@ -234,7 +235,7 @@ def _generate_title(
     user_snippet = (user_msg or "")[:500]
     assistant_snippet = (assistant_msg or "")[:500]
 
-    llm = set_up_llms("claude-haiku-4-5-20251001")
+    llm = set_up_llms(get_model_spec("title"))
 
     response = llm.invoke([
         {"role": "system", "content": _TITLE_PROMPT},

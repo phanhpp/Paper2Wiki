@@ -1,16 +1,29 @@
-"""Summarize a TraceReport into structured per-trace JSON using Claude Haiku."""
+"""Summarize a TraceReport into structured per-trace JSON via the configured LLM."""
 from __future__ import annotations
 
 import json
-import anthropic
 from src.tools.observability_eval_tools.fetch_traces import TraceReport
+from src.agents.llms import set_up_llms
+from src.llm_roles import get_model_spec
 from pydantic import BaseModel, Field
 from typing_extensions import Optional, Literal, Any
 from langchain.tools import tool
 import asyncio
-_ASYNC_CLIENT = anthropic.AsyncAnthropic()
-_MODEL = "claude-haiku-4-5-20251001"
-_MAX_TOKENS = 4192
+
+# Provider-agnostic: model resolved from config (role "summarize"), built lazily
+# and cached so the (heavy) model init happens once.
+_structured_llm = None
+
+
+def _get_structured_llm():
+    """Cached structured-output model that emits a ``TraceSummaryList``."""
+    global _structured_llm
+    if _structured_llm is None:
+        llm = set_up_llms(get_model_spec("summarize"))
+        _structured_llm = llm.with_structured_output(TraceSummaryList, include_raw=True)
+    return _structured_llm
+
+
 _SYSTEM_PROMPT = (
     "You are a concise technical analyst for a LLM agent system called Paper2Wiki. "
     "You receive formatted LangSmith trace logs and return structured JSON summaries. "
@@ -81,14 +94,14 @@ async def _summarize_batch_async(
     traces = _filter_traces(traces, focus_query)
     prompt = _build_messages(traces, focus_query)
 
-    response = await _ASYNC_CLIENT.messages.parse(
-        model=_MODEL,
-        max_tokens=_MAX_TOKENS,
-        system=_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": prompt}],
-        output_format=TraceSummaryList,
-    )
-    return [item.model_dump() for item in response.parsed_output.summaries]
+    response = await _get_structured_llm().ainvoke([
+        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "user", "content": prompt},
+    ])
+    parsed = response["parsed"]  # include_raw=True → {"raw", "parsed", "parsing_error"}
+    if parsed is None:
+        raise ValueError(f"Trace summary parse failed: {response['parsing_error']}")
+    return [item.model_dump() for item in parsed.summaries]
 
 async def _summarize_traces_async(
     report: TraceReport,

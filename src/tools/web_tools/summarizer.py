@@ -7,14 +7,15 @@ Same architecture as
   500k–2M      → chunked: split → parallel LLM per chunk → synthesis
   > 2M         → refuse
 
-Uses Anthropic SDK with Haiku as the auxiliary model.
+Provider-agnostic: builds the model via ``set_up_llms`` → ``init_chat_model``, so
+the summarizer follows the user's configured LLM (see ``src/llm_roles.py``).
 
 - process_content_with_llm()            → summarize()
 - _call_summarizer_llm()                → _call_llm()
 - _process_large_content_chunked()      → _chunked_summarize()
 
-Config keys (from registry.load_config()):
-- summarizer_model: model to use (default: claude-haiku-4-5-20251001)
+Model comes from the ``web_summarize`` task (``auxiliary.web_summarize`` in
+config.yaml, inheriting the base model). Config keys here:
 - min_length_for_summary: threshold in chars (default: 5000)
 """
 
@@ -24,13 +25,13 @@ import asyncio
 import logging
 from typing import Any
 
-import anthropic
+from src.agents.llms import set_up_llms
+from src.llm_roles import get_model_spec
 
 logger = logging.getLogger(__name__)
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 
-DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 DEFAULT_MIN_LENGTH = 5000
 MAX_OUTPUT = 5000          # hard cap on final summary size
 CHUNK_THRESHOLD = 500_000  # above this, use chunked processing
@@ -68,21 +69,21 @@ _SYSTEM_SYNTHESIS = (
 )
 
 
-# ── Client ────────────────────────────────────────────────────────────────────
+# ── Model (provider-agnostic via init_chat_model) ─────────────────────────────
 
-_client: anthropic.AsyncAnthropic | None = None
+_model = None
 
 
-def _get_client() -> anthropic.AsyncAnthropic:
-    """Lazy-init async Anthropic client. Reads ANTHROPIC_API_KEY from env."""
-    global _client
-    if _client is None:
-        _client = anthropic.AsyncAnthropic()
-    return _client
+def _get_model():
+    """Cached LangChain chat model for the ``web_summarize`` task (built once)."""
+    global _model
+    if _model is None:
+        _model = set_up_llms(get_model_spec("web_summarize"))
+    return _model
 
 
 def _resolve_config() -> dict[str, Any]:
-    """Pull summarizer settings from config, with defaults."""
+    """Pull non-model summarizer settings from config (model comes from llm_roles)."""
     try:
         from src.tools.web_tools.registry import load_config
 
@@ -90,10 +91,7 @@ def _resolve_config() -> dict[str, Any]:
     except Exception:
         cfg = {}
 
-    return {
-        "model": cfg.get("summarizer_model", DEFAULT_MODEL),
-        "min_length": int(cfg.get("min_length_for_summary", DEFAULT_MIN_LENGTH)),
-    }
+    return {"min_length": int(cfg.get("min_length_for_summary", DEFAULT_MIN_LENGTH))}
 
 
 # ── Core LLM call ─────────────────────────────────────────────────────────────
@@ -101,30 +99,29 @@ def _resolve_config() -> dict[str, Any]:
 async def _call_llm(
     content: str,
     system: str,
-    model: str | None = None,
+    model: str | None = None,  # deprecated: model now comes from the web_summarize role
     max_tokens: int = 4096,
 ) -> str | None:
     """Single LLM call with retry. Returns summary text or None.
 
-    Two retries with exponential backoff — same as 
+    Two retries with exponential backoff.
     """
-    cfg = _resolve_config()
-    effective_model = model or cfg["model"]
-    client = _get_client()
+    # Per-call generation params bound onto the cached web_summarize model.
+    llm = _get_model().bind(max_tokens=max_tokens, temperature=0.1)
 
     max_retries = 2
     delay = 2
 
     for attempt in range(max_retries):
         try:
-            resp = await client.messages.create(
-                model=effective_model,
-                max_tokens=max_tokens,
-                system=system,
-                messages=[{"role": "user", "content": content}],
-                temperature=0.1,
-            )
-            text = resp.content[0].text if resp.content else None
+            resp = await llm.ainvoke([
+                {"role": "system", "content": system},
+                {"role": "user", "content": content},
+            ])
+            # content is a str (most providers) or a list of blocks (coerce to text).
+            text = resp.content
+            if isinstance(text, list):
+                text = "".join(b.get("text", "") for b in text if isinstance(b, dict))
             if text:
                 return text
 

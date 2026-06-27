@@ -30,7 +30,7 @@ def _as_text(content) -> str:
         return "\n".join(parts)
     return str(content)
 
-
+# Todo: resolve flow_type by tools involved
 def _save_session(conn, thread_id, messages, started_at, flow_type="ingest", auto_title=True):
     """Save session to db and (optionally) auto-title.
 

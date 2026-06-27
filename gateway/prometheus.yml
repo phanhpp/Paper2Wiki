@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 15s # How often to fetch data from LiteLLM. 15s is the sweet spot.
+
+scrape_configs:
+  - job_name: 'litellm-proxy'
+    bearer_token_file: /etc/prometheus/master_key  
+    metrics_path: '/metrics/'
+    # We add a small buffer since LiteLLM needs a second to process auth checks
+    scrape_timeout: 10s 
+    
+    # This tells Prometheus to pull from your LiteLLM docker service name
+    static_configs:
+      - targets: ['litellm:4000'] 
