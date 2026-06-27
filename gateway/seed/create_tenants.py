@@ -28,18 +28,24 @@ MASTER_KEY = os.environ.get("LITELLM_MASTER_KEY")
 
 # 1. Tier templates — the rules each subscription level enforces.
 #    `models` must match the model_name aliases in gateway/config.yaml.
+#    rpm/tpm = per-team rate limits (requests/tokens per minute). These are OSS — only the managed
+#    "tier policy" abstraction is Enterprise; here the script stamps the tier's limits onto each team.
 TIER_TEMPLATES = {
     "free_tier": {
         "models": ["claude-haiku-4-5-20251001"],   # Haiku only
         "max_budget": 50.0,                         # team cap (USD) — realistic
         "key_budget": 2.0,                          # per-user cap (USD)
         "budget_duration": "1mo",                   # resets monthly
+        "rpm": 20,                                  # team throughput cap: 20 requests/min
+        "tpm": 20_000,                              # team throughput cap: 20k tokens/min
     },
     "pro_tier": {
         "models": ["claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
         "max_budget": 500.0,
         "key_budget": 50.0,
         "budget_duration": "1mo",
+        "rpm": 200,
+        "tpm": 200_000,
     },
 }
 
@@ -120,11 +126,13 @@ def main() -> None:
     for company in COMPANIES_TO_SEED:
         rules = TIER_TEMPLATES[company["tier"]]  # rules for this company's subscription tier
 
-        # One Team per company — carries the tier's allowlist + budget.
+        # One Team per company — carries the tier's allowlist + budget + rate limits.
         team = _post("/team/new", {
             "team_alias": company["company_name"],
             "models": rules["models"],
             "max_budget": rules["max_budget"],
+            "rpm_limit": rules["rpm"],   # per-team requests/min (OSS)
+            "tpm_limit": rules["tpm"],   # per-team tokens/min   (OSS)
         })
         team_id = team["team_id"]
         print(f"🏢 {company['company_name']}  [{company['tier']}]  team_id={team_id}")
