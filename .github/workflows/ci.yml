@@ -52,13 +52,21 @@ jobs:
         run: uv run pytest -m "not integration and not slow and not langsmith" -q
 
       - name: Eval gate
-        # Skip on weekly schedule — this is a PR gate, not a weekly check.
-        if: github.event_name != 'schedule'
-        # Calls tools directly (no agent). Cases needing web provider API keys
-        # are silently skipped when no key is set — see eval/run_gate.py.
-        run: uv run python eval/run_gate.py
+        # Skip on weekly schedule, only works on PRs not direct push to main
+        if: github.event_name == 'pull_request'
+        # Calls tools directly (no agent), fast. Map all web-provider keys; run_gate uses whichever
+        # is set (FIRECRAWL/TAVILY/EXA) so the web-tool cases run on same-repo PRs. On fork PRs
+        # GitHub withholds secrets → those cases skip gracefully (they're `capability`,
+        # non-blocking). See eval/run_gate.py:_HAS_WEB_PROVIDER.
+        env:
+          FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+        run: uv run python eval/run_gate.py # if exits non-zero, the job fails → red check → merge blocked
 
       - name: Post eval results to PR
+        # this just compliment the PR gate by reading results.json
+        # and writes a human-readable summary as a PR comment (pass/fail emoji, scores, failures)
         if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
@@ -210,7 +218,11 @@ jobs:
     permissions:
       contents: write   # commit refreshed memories/baselines.json back to main
     # Only runs on schedule — not on PRs or push to main.
-    # Refreshes anomaly baselines (committed to git) then replays LangSmith hard_error datasets.
+    # Does two things: (1) refresh memories/baselines.json (latency/token medians, committed),
+    # and (2) replay hard_error examples ALREADY in the LangSmith regression datasets.
+    # It does NOT populate those datasets — dataset creation
+    # (create_datasets_from_anomaly_report) is HITL-only via the trace-analysis skill. If no HITL
+    # run has populated them, the replay step is a no-op (nothing to replay).
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dataset == '')
     env:
       LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
@@ -247,7 +259,9 @@ jobs:
           fi
 
       - name: Anomaly regression (pytest-langsmith)
-        # Replays hard_error examples from the datasets populated above.
+        # run tests/test_anomaly_regression.py
+        # Replays hard_error examples from LangSmith datasets populated EARLIER by HITL
+        # (the trace-analysis skill), NOT by this workflow.
         # Gates on: hard_error spans must no longer error after a fix is merged.
         # Tracks (but does not gate on): latency_spike, token_blowout, step_count_spike.
         run: uv run pytest -m "langsmith and not slow and not integration" -q

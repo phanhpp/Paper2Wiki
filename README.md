@@ -348,9 +348,9 @@ Preflight — Every PR
   pytest -m unit            Mocked I/O, deterministic logic, path guards
 
 Track 1 — PR Gate (every PR, no agent, no LLM, no secrets)
-  eval/pr_gate_cases.json   Tool inputs + assertions
+  eval/pr_gate_cases.json   Tool inputs + assertions (regression = blocks; capability = tracked)
   eval/run_gate.py          Invoke tool calling directly, writes eval/results.json
-  regression_baseline.json  Score floor per category; regression drops block merge
+                            regression categories must score 100%; any drop blocks merge
 
 Track 2 — Golden Agent Eval (weekly, or path-conditional on PR)
   golden_datasets/*.json    Versioned ingest/query/marp cases

@@ -6,7 +6,7 @@
     "tool": "quick_wiki_integrity_check",
     "inputs": {},
     "expect_keys": ["wiki-check"],
-    "_note": "Tool returns a plain string starting with 'wiki-check:'. In CI, wiki/ is absent so returns 'wiki-check: OK' (no files = no errors)."
+    "_note": "Run wiki check on commited wiki/ and return 'wiki-check: OK'."
   },
   {
     "id": "web_extract_empty_urls",
@@ -36,23 +36,50 @@
     "_note": "Private IP range blocked by SSRF filter before any provider call. No API key needed."
   },
   {
-    "id": "fetch_arxiv_valid_id",
+    "id": "web_extract_metadata_ip_blocked",
     "type": "regression",
+    "category": "boundary",
+    "tool": "web_extract",
+    "inputs": {"urls": ["http://169.254.169.254/latest/meta-data/"]},
+    "expect_keys": ["blocked"],
+    "_note": "SSRF: cloud-metadata endpoint (link-local 169.254.x) — the classic attack target. Blocked before any provider call. No API key needed."
+  },
+  {
+    "id": "sha256_basic",
+    "type": "regression",
+    "category": "hashing",
+    "tool": "compute_sha256",
+    "inputs": {"text": "hello world"},
+    "expect_value": ["b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"],
+    "_note": "Pure deterministic digest. Exact SHA-256 of 'hello world'."
+  },
+  {
+    "id": "sha256_strips_leading_newlines",
+    "type": "regression",
+    "category": "hashing",
+    "tool": "compute_sha256",
+    "inputs": {"text": "\n\nhello world"},
+    "expect_value": ["b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"],
+    "_note": "Wiki raw-source convention: lstrip('\\n') is on by default, so leading newlines are stripped → SAME hash as 'hello world'. Guards the hash convention used for raw/ integrity."
+  },
+  {
+    "id": "fetch_arxiv_valid_id",
+    "type": "capability",
     "category": "retrieval",
     "tool": "fetch_arxiv",
     "inputs": {"query": "1706.03762"},
     "expect_keys_or": [["title", "pdf_path", "authors"], ["rate_limited"]],
-    "_note": "Passes on paper result or graceful rate_limited response. Tests both happy path and 429 handling."
+    "_note": "Capability (network, non-blocking) — passes on paper result or graceful rate_limited. arXiv direct, no provider key."
   },
   {
     "id": "web_search_returns_results",
-    "type": "regression",
+    "type": "capability",
     "category": "retrieval",
     "tool": "web_search",
     "inputs": {"query": "transformer architecture deep learning"},
     "expect_keys": ["title", "url"],
     "requires_web_provider": true,
-    "_note": "Needs at least one of FIRECRAWL_API_KEY, TAVILY_API_KEY, EXA_API_KEY. Skipped in CI if none set."
+    "_note": "Capability (network, non-blocking) — needs FIRECRAWL/TAVILY/EXA key; skipped if none set."
   },
   {
     "id": "web_extract_arxiv_html",
@@ -62,6 +89,6 @@
     "inputs": {"urls": ["https://arxiv.org/html/1706.03762"], "use_summarizer": false},
     "expect_keys": ["content", "url"],
     "requires_web_provider": true,
-    "_note": "Capability — content quality varies by provider. use_summarizer=false avoids LLM cost. Skipped in CI if no provider key set."
+    "_note": "Capability (network, non-blocking) — content quality varies by provider. use_summarizer=false avoids LLM cost. Skipped if no provider key."
   }
 ]
