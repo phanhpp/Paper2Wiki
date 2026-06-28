@@ -38,10 +38,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # These are deterministic checks — there is no "sometimes passes."
 # If arXiv flakiness causes retrieval failures repeatedly, demote those
 # cases to "capability" type rather than lowering this threshold.
+# NOTE: only categories listed here are gate-checked. A regression case in an unlisted
+# category is scored but silently never blocks — keep this in sync with pr_gate_cases.json.
 REGRESSION_THRESHOLDS = {
     "retrieval": 1.00,
     "health":    1.00,
     "boundary":  1.00,
+    "hashing":   1.00,
 }
 
 # Checked once at startup — web_search/web_extract cases are skipped entirely
@@ -60,7 +63,8 @@ def _load_tool_map() -> dict:
     from src.tools.wiki_integrity_check import quick_wiki_integrity_check
     from src.tools.web_tools.tools import web_search, web_extract
     from src.tools.arxiv_tool import fetch_arxiv
-    tools = [quick_wiki_integrity_check, web_search, web_extract, fetch_arxiv]
+    from src.tools.hash_tools import compute_sha256
+    tools = [quick_wiki_integrity_check, web_search, web_extract, fetch_arxiv, compute_sha256]
     return {t.name: t for t in tools}
 
 

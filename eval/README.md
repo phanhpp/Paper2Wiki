@@ -92,10 +92,10 @@ LangSmith regression datasets.
 - **The *generative* steps are HITL gated:** `create_datasets_from_anomaly_report` (push hard_error
 spans to LangSmith) and drafting new `pr_gate_cases.json` entries happen **only** when a human runs
 the `trace-analysis` skill and approves. CI never populates datasets or writes gate cases.
-  → Consequence: the weekly `pytest -m langsmith` replay is a **no-op until a human has run the skill
-  at least once** to populate the datasets. That's by design — you don't want an agent
-  auto-committing eval cases. The loop closes when the HITL-generated fix + regression case land in
-  the same PR.
+→ Consequence: the weekly `pytest -m langsmith` replay is a **no-op until a human has run the skill
+at least once** to populate the datasets. That's by design — you don't want an agent
+auto-committing eval cases. The loop closes when the HITL-generated fix + regression case land in
+the same PR.
 
 `create_datasets_from_anomaly_report` callers — **only** the `trace-analysis` skill (it's a `@tool`
 exposed to the supervisor; never called by any CI script). See
@@ -108,11 +108,11 @@ exposed to the supervisor; never called by any CI script). See
 `run_gate.py` runs `pr_gate_cases.json`. **Only regression categories block the gate** — each must
 score 100% (`REGRESSION_THRESHOLDS`). One regression case failing → <100% → merge blocked.
 
-**`capability` cases are tracked but never block.** They're scored + printed (and shown on the PR),
+`**capability` cases are tracked but never block.** They're scored + printed (and shown on the PR),
 but a failure/flake can't block merge. This makes them a safe **staging area** for things that work
 but aren't reliable yet (network-flaky web/arXiv calls, aspirational behaviors).
 
-**`results.json` is OUTPUT, not input.** `run_gate.py` reads only `pr_gate_cases.json`, and *writes*
+`**results.json` is OUTPUT, not input.** `run_gate.py` reads only `pr_gate_cases.json`, and *writes*
 `results.json` fresh every run (local and CI). CI does **not** commit it; the repo copy is just the
 last local snapshot and is never read back.
 
@@ -136,47 +136,85 @@ Going the other way: a deterministic regression case turning flaky? Demote it `r
 
 - **Locally:** in the `run_gate.py` stdout.
 - **On a PR:** the capability scores + nudge are written to the **GitHub checks summary** (the
-  rendered box on the PR page) via `$GITHUB_STEP_SUMMARY` — no need to open the job log.
+rendered box on the PR page) via `$GITHUB_STEP_SUMMARY` — no need to open the job log.
 
 ---
 
 ## File map
 
 
-| File                               | Track | Purpose                                                                                                                                                                                                                                                        |
-| ---------------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `eval/pr_gate_cases.json`          | 1     | Deterministic tool test cases — regression + capability                                                                                                                                                                                                        |
-| `eval/results.json`                | 1     | **Output** of `run_gate.py`, rewritten every run. Not committed by CI, never read back.                                                                                                                                                                        |
-| `eval/run_gate.py`                 | 1     | Runs pr_gate_cases.json, writes results.json, exits 1 on regression drop                                                                                                                                                                                       |
-| `eval/golden_datasets/ingest.json` | 2     | 4 cases: 1 already-ingested, 1 full-ingest, 1 partial-ingest, 1 negative                                                                                                                                                                                       |
-| `eval/golden_datasets/query.json`  | 2     | 3 cases: 2 positive, 1 negative                                                                                                                                                                                                                                |
-| `eval/golden_datasets/marp.json`   | 2     | 3 cases: all positive (tech/business/web-search)                                                                                                                                                                                                               |
-| `eval/push_golden_datasets.py`     | 2     | Syncs JSON → LangSmith (`--dataset {ingest,query,marp}`)                                                                                                                                                                                                       |
-| `eval/golden_evaluators.py`        | 2     | Code evals + LLM judges for all 3 datasets                                                                                                                                                                                                                     |
-| `eval/run_weekly_eval.py`          | 2     | Target fns + aevaluate wiring + gate logic                                                                                                                                                                                                                     |
-| `eval/run_weekly_baselines.py`     | 3     | Fetch traces → compute `memories/baselines.json`                                                                                                                                                                                                               |
-| `memories/baselines.json`          | 3     | Per-run-name latency/token medians (3× threshold for anomaly detection)                                                                                                                                                                                        |
-| `tests/test_anomaly_regression.py` | 3     | pytest-langsmith: replays hard_error examples                                                                                                                                                                                                                  |
+| File                               | Track | Purpose                                                                                 |
+| ---------------------------------- | ----- | --------------------------------------------------------------------------------------- |
+| `eval/pr_gate_cases.json`          | 1     | Deterministic tool test cases — regression + capability                                 |
+| `eval/results.json`                | 1     | **Output** of `run_gate.py`, rewritten every run. Not committed by CI, never read back. |
+| `eval/run_gate.py`                 | 1     | Runs pr_gate_cases.json, writes results.json, exits 1 on regression drop                |
+| `eval/golden_datasets/ingest.json` | 2     | 4 cases: 1 already-ingested, 1 full-ingest, 1 partial-ingest, 1 negative                |
+| `eval/golden_datasets/query.json`  | 2     | 3 cases: 2 positive, 1 negative                                                         |
+| `eval/golden_datasets/marp.json`   | 2     | 3 cases: all positive (tech/business/web-search)                                        |
+| `eval/push_golden_datasets.py`     | 2     | Syncs JSON → LangSmith (`--dataset {ingest,query,marp}`)                                |
+| `eval/golden_evaluators.py`        | 2     | Code evals + LLM judges for all 3 datasets                                              |
+| `eval/run_weekly_eval.py`          | 2     | Target fns + aevaluate wiring + gate logic                                              |
+| `eval/run_weekly_baselines.py`     | 3     | Fetch traces → compute `memories/baselines.json`                                        |
+| `memories/baselines.json`          | 3     | Per-run-name latency/token medians (3× threshold for anomaly detection)                 |
+| `tests/test_anomaly_regression.py` | 3     | pytest-langsmith: replays hard_error examples                                           |
 
 
 ---
 
-## TODO — capability coverage
+## Which tools belong in the gate (design principle)
 
-Capability has only one case today (`web_extract_arxiv_html`), and it needs a web key — so unless
-the gate job maps `FIRECRAWL_API_KEY`, it **skips** → empty `capability_scores`. Add cases for real
-signal. **Prioritize key-free cases** (always run); web-key cases run only where a key is mapped.
+- **Blocking gate (regression) = deterministic, no-network, fast logic only** — so it never flakes and a 100% floor is trustworthy. 
+- **Capability = network/external behavior** — tracked, non-blocking.
+- **Complex-object / LLM tools belong in unit tests, not the JSON gate.**
 
-| Add | Category (baseline key) | Needs web key? | Notes |
-|---|---|---|---|
-| `fetch_arxiv_old_id` (`math/0211159`) | retrieval | ❌ no | arXiv direct; `expect_keys: [title, authors]` |
-| `fetch_arxiv_versioned` (`2103.00020v1`) | retrieval | ❌ no | `expect_keys: [title]` |
-| `web_extract_pdf` (direct .pdf URL) | **extraction** (new key) | ⚠️ yes | content-fidelity dimension |
-| recategorize `web_extract_arxiv_html` → extraction | **extraction** (new key) | ⚠️ yes | distinct from "can it fetch" |
-| `wiki_check_detects_broken_link` | **health** (new key) | ❌ no | needs a tiny fixture wiki with a broken `[[link]]` |
 
-Order of value: the two `fetch_arxiv` cases first (key-free, one line each, immediately populate
-`capability_retrieval`), then the `extraction` category, then the `health` fixture case.
+| Tool                                                            | In gate? | As                         | Why                                                                 |
+| --------------------------------------------------------------- | -------- | -------------------------- | ------------------------------------------------------------------- |
+| `compute_sha256`                                                | ✅        | regression (hashing)       | pure function; guards the wiki `lstrip('\n')` raw-source convention |
+| `web_extract` guards (SSRF/empty)                               | ✅        | regression (boundary)      | your guard logic, deterministic, no network                         |
+| `quick_wiki_integrity_check`                                    | ✅        | regression (health)        | deterministic on the committed wiki                                 |
+| `fetch_arxiv` / `web_search` / `web_extract` happy-path         | ✅        | **capability** (retrieval) | network/flaky → tracked, must not block merge                       |
+| `detect_anomalies_async`, `compute_baselines_async`             | ❌        | unit tests                 | take `TraceReport` objects (not JSON) — already covered             |
+| `summarize_traces_async`                                        | ❌        | unit tests                 | it's an LLM call                                                    |
+| `run_trace_report_async`, `create_datasets_from_anomaly_report` | ❌        | unit tests                 | LangSmith network + secrets                                         |
+
+
+### Current gate cases (what each one checks)
+
+**Regression (blocking, deterministic, key-free):**
+
+| Case | Checks |
+|---|---|
+| `sha256_basic` | exact SHA-256 of `"hello world"` — the hashing logic is correct |
+| `sha256_strips_leading_newlines` | `"\n\nhello world"` hashes the **same** as `"hello world"` — confirms `lstrip('\n')` is applied (the wiki `raw/` convention: the body after `---` is hashed with leading newlines stripped, so the digest is stable regardless of blank lines) |
+| `web_extract_empty_urls` | empty URL list returns `[]` immediately, before any provider call |
+| `web_extract_localhost_blocked` | request to `localhost` is refused |
+| `web_extract_private_ip_blocked` | request to a private range (`192.168.x`) is refused |
+| `web_extract_metadata_ip_blocked` | request to `169.254.169.254` is refused |
+| `wiki_check_runs` | wiki integrity check runs on the committed wiki and returns OK |
+
+> **SSRF (Server-Side Request Forgery)** = tricking the server into making requests to addresses it
+> shouldn't — e.g. internal services (`localhost`, private IPs) or the **cloud metadata endpoint**
+> `169.254.169.254`, which on AWS/GCP returns instance credentials. `web_extract` ingests
+> attacker-influenced URLs (from papers/web pages), so it must **block** these before fetching. The
+> four `web_extract_*_blocked` cases are the regression guards that prove it does.
+
+**Capability (tracked, non-blocking — network/external):**
+
+| Case | Checks | Needs key |
+|---|---|---|
+| `fetch_arxiv_valid_id` | arXiv returns a paper (or a graceful `rate_limited`) | no (arXiv direct) |
+| `web_search_returns_results` | a search returns `title`/`url` results | yes |
+| `web_extract_arxiv_html` | extracting an arXiv HTML page returns `content` | yes |
+
+### Candidate additions (deterministic, fast — extend the *blocking* gate)
+
+- `wiki_check_detects_broken_link` (health) — fixture wiki with a known broken `[[link]]` → asserts
+detection. Needs a tiny fixture but is fully deterministic + key-free.
+- More `web_extract` SSRF vectors (boundary) — e.g. IPv6 `[::1]`, `0.0.0.0` — one-liners, key-free.
+- A `compute_sha256` case with `lstrip_newlines: false` (hashing) — pins the non-stripped path.
+
+Keep adding deterministic cases to **regression**; only network/external behaviors go to capability.
 
 ## Golden eval status
 
