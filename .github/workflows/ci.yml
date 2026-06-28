@@ -54,11 +54,14 @@ jobs:
       - name: Eval gate
         # Skip on weekly schedule, only works on PRs not direct push to main
         if: github.event_name == 'pull_request'
-        # Calls tools directly (no agent), fast. FIRECRAWL_API_KEY lets web-tool cases run on
-        # same-repo PRs; on fork PRs GitHub withholds secrets → those cases skip gracefully
-        # (they're `capability`, non-blocking). See eval/run_gate.py.
+        # Calls tools directly (no agent), fast. Map all web-provider keys; run_gate uses whichever
+        # is set (FIRECRAWL/TAVILY/EXA) so the web-tool cases run on same-repo PRs. On fork PRs
+        # GitHub withholds secrets → those cases skip gracefully (they're `capability`,
+        # non-blocking). See eval/run_gate.py:_HAS_WEB_PROVIDER.
         env:
           FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
         run: uv run python eval/run_gate.py # if exits non-zero, the job fails → red check → merge blocked
 
       - name: Post eval results to PR
