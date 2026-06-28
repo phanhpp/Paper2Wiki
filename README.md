@@ -347,10 +347,14 @@ A three-track eval system turns production failures into regression coverage. Un
 Preflight — Every PR
   pytest -m unit            Mocked I/O, deterministic logic, path guards
 
-Track 1 — PR Gate (every PR, no agent, no LLM, no secrets)
-  eval/pr_gate_cases.json   Tool inputs + assertions (regression = blocks; capability = tracked)
+Track 1 — PR Gate (every PR, no agent, no LLM; secret-free core)
+  eval/pr_gate_cases.json   Tool inputs + assertions
+                            regression (blocks): deterministic, no-network — hashing / boundary
+                                                 (SSRF guards) / health. Must score 100%.
+                            capability (tracked): network/external (web search/extract, arXiv).
+                                                 Never blocks; promote to regression once stable.
   eval/run_gate.py          Invoke tool calling directly, writes eval/results.json
-                            regression categories must score 100%; any drop blocks merge
+                            Web-provider keys optional: web cases run when a key is set, else skip.
 
 Track 2 — Golden Agent Eval (weekly, or path-conditional on PR)
   golden_datasets/*.json    Versioned ingest/query/marp cases
@@ -364,7 +368,7 @@ Track 3 — Anomaly Replay Loop (weekly + HITL only)
   test_anomaly_regression.py Replays hard_error examples; fixed bugs must stay fixed
 ```
 
-**Track 1: deterministic PR gate** — fast, secret-free regression checks that exercise tools directly with versioned inputs and assertions. This catches boundary bugs, retrieval failures, and schema regressions before any LLM or agent runtime is involved.
+**Track 1: deterministic PR gate** — fast regression checks that exercise tools directly with versioned inputs and assertions, before any LLM or agent runtime. The **blocking** cases are deterministic and key-free (hash-convention correctness, SSRF/boundary guards, wiki integrity), so the 100% floor never flakes. Network/external behavior (web search/extract, arXiv) is tracked as non-blocking **capability** — it uses a web-provider key when one is set (mapped in CI), and skips gracefully otherwise.
 
 **Track 2: golden agent evals** — end-to-end agent runs over curated ingest, query, and slide-generation scenarios. Code checks validate trajectories and required artifacts, while LLM judges score groundedness, faithfulness, and task-specific quality.
 
@@ -372,6 +376,16 @@ Track 3 — Anomaly Replay Loop (weekly + HITL only)
 
 **Closed feedback loop** — the trace-analysis skill surfaces failures across the full stack (tool hard errors, latency spikes, token blowouts, step-count anomalies, HITL rejections). For hard errors it auto-generates candidate eval/pr_gate_cases.json entries with inferred assertions and waits for HITL approval before committing. The fix and its regression case land in the same PR, permanently hardening the gate against that failure recurring.
 
+
+### Optional: LiteLLM gateway (multi-tenant proxy)
+
+`gateway/` holds an **optional**, self-contained LiteLLM proxy for learning/operating multi-tenant
+LLM access — virtual keys + per-team budgets/RBAC, spend alerts, Prometheus metrics, fallbacks,
+a prompt-injection guardrail, and a semantic response cache (Postgres + Redis). It's **not part of
+the published package** (lives outside `src/`); the app only talks to it over HTTP when
+`PAPER2WIKI_LLM_GATEWAY=litellm` is set, and never imports `litellm`. Setup, rationale, and the
+"lie to LangChain" routing trick are in [`gateway/README.md`](gateway/README.md) and
+`docs/litellm/`.
 
 ### Wiki Integrity (Linting)
 

@@ -194,9 +194,11 @@ Three tiers — each catches a different class of failure.
 
 ### Tier 2 — PR gate + path-conditional golden evals (every PR, LangSmith secrets optional)
 
-**PR gate** (`eval/run_gate.py`, `eval/pr_gate_cases.json`): deterministic tool-level checks with no LLM calls. Two case types:
-- `regression` — must hold 100%; any drop blocks merge
-- `capability` — tracked but not blocking; promoted to regression once stable
+**PR gate** (`eval/run_gate.py`, `eval/pr_gate_cases.json`): tool-level checks, no agent/LLM. Two case types:
+- `regression` (blocks) — **deterministic, no-network** only (categories: `hashing`, `boundary`/SSRF guards, `health`). Must hold 100%; any drop blocks merge. Only categories listed in `REGRESSION_THRESHOLDS` are gate-checked.
+- `capability` (tracked, never blocks) — network/external behavior (web search/extract, arXiv). Promote to `regression` (change `type`) once it's reliably deterministic. There is **no baseline file** — promotion is the lock-in. `run_gate.py` prints a promotion nudge (also surfaced on the PR via `$GITHUB_STEP_SUMMARY`).
+
+Secrets: the blocking core is secret-free; web-provider keys (`FIRECRAWL`/`TAVILY`/`EXA`) are *optional* — mapped into the gate job so web cases run on same-repo PRs, and skip gracefully on forks / when unset.
 
 **Golden evals** (`eval/run_weekly_eval.py`): run the full agent against LangSmith golden datasets (ingest / query / marp) with LLM-as-judge evaluators. Path-conditional — only triggered when relevant files change (avoids burning LLM calls on doc-only PRs).
 
@@ -220,8 +222,8 @@ Golden agent evals (`eval-ingest` / `eval-query` / `eval-marp`) are path-conditi
 # Tier 1 — unit (no secrets)
 uv run pytest -m unit
 
-# Tier 2 — PR gate (no secrets)
-uv run python eval/run_gate.py
+# Tier 2 — PR gate (secret-free core; web cases need a FIRECRAWL/TAVILY/EXA key, else skip)
+uv run --env-file .env python eval/run_gate.py
 
 # Tier 2 — golden evals (requires LANGSMITH_API_KEY + ANTHROPIC_API_KEY)
 uv run --env-file .env python eval/run_weekly_eval.py --dataset ingest
