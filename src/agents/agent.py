@@ -18,6 +18,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from src.sessions.sessions_db_setup import SESSIONS_DIR
 from pathlib import Path
 from langchain.agents.middleware import PIIMiddleware, ModelCallLimitMiddleware, ToolCallLimitMiddleware
+from src.middleware import WikiRubricMiddleware
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -239,6 +240,10 @@ async def create_supervisor(thread_id: str | None = None, eval_mode: bool = Fals
                 thread_limit=4, # across all runs in the thread
                 run_limit=2, # across all calls in a single run
             ),
+            # Loop 2: verify wiki work before the run is allowed to finish.
+            # Deterministic checks only — no LLM call. Toggle via
+            # `verification.enabled` in config.yaml.
+            WikiRubricMiddleware.from_config(),
             # AnthropicPromptCachingMiddleware(
             #     ttl="10m",
             #     min_messages_to_cache=2, # only cache if it's multi-turn conversation
