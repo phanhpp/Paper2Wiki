@@ -14,8 +14,8 @@ inside the command bodies, which import the agent lazily so the env is set first
 from __future__ import annotations
 
 import typer
-from dotenv import load_dotenv
 
+from src.env import load_env
 from src.cli.commands import chat as chat_cmd
 from src.cli.commands import config as config_cmd
 from src.cli.commands import sessions as sessions_cmd
@@ -33,7 +33,7 @@ app = typer.Typer(
 @app.callback() # run before any command executes
 def _main() -> None:
     """Load environment variables before any command executes."""
-    load_dotenv()
+    load_env()
     
 
 

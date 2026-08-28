@@ -60,11 +60,11 @@ def test_sessions_ls_smoke():
 def test_chat_missing_anthropic_key_exits_1(monkeypatch):
     """`chat` fails fast (exit 1) when ANTHROPIC_API_KEY is absent, before building the agent.
 
-    load_dotenv is stubbed so the callback can't repopulate the key from .env.
+    load_env is stubbed so the callback can't repopulate the key from .env.
     """
     import src.cli.app as appmod
 
-    monkeypatch.setattr(appmod, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr(appmod, "load_env", lambda *a, **k: None)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     result = runner.invoke(app, ["chat", "hi", "--eval-mode"])
