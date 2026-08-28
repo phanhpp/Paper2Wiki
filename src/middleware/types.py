@@ -32,17 +32,37 @@ class RunContext:
     filesystem snapshot rather than from tool calls, so pages written through
     any route are still seen — the shell, the sandbox download tool, or a tool
     added later that we know nothing about.
+
+    File paths come in pairs: a list of *relative* paths, plus the directory they
+    are relative to. A check joins the two to open a file::
+
+        wiki_root      = /Users/you/llm_wiki/wiki
+        writes         = ["concepts/attention.md"]
+        open it with     wiki_root / "concepts/attention.md"
+
+        artifacts_root = /Users/you/llm_wiki/marp-slides
+        artifacts      = ["deck.md"]
+        open it with     artifacts_root / "deck.md"
+
+    They are relative because that is how the snapshots record them, which keeps
+    them short and independent of where the repo lives.
     """
 
-    paths: list[str]
-    writes: list[str]           # wiki-relative paths written this run
-    reads: list[str]            # paths read this run (from awrap_tool_call)
-    tools: list[str]            # tool names called this run
-    question: str               # the user's message for this turn
-    answer: str                 # last AI message, flattened to text
-    wiki_root: Path
-    artifacts: list[str] = field(default_factory=list)   # repo-relative, outside the wiki
-    artifacts_root: Path | None = None                   # e.g. <repo>/marp-slides
+    paths: list[str]            # which contracts matched: ingest / query / marp
+
+    # --- the wiki ---
+    wiki_root: Path             # absolute path to wiki/
+    writes: list[str]           # files written this run, relative to wiki_root
+
+    # --- marp decks, which live outside the wiki ---
+    artifacts_root: Path | None = None                   # absolute path to marp-slides/
+    artifacts: list[str] = field(default_factory=list)   # files written, relative to artifacts_root
+
+    # --- everything else ---
+    reads: list[str] = field(default_factory=list)   # files read (from awrap_tool_call)
+    tools: list[str] = field(default_factory=list)   # tool names called this run
+    question: str = ""          # what the user asked this turn
+    answer: str = ""            # the agent's reply, as plain text
 
     def wrote_under(self, *prefixes: str) -> list[str]:
         """Paths written this run that sit under any of ``prefixes``."""

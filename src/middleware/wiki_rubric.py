@@ -1,11 +1,30 @@
 """Checks the agent's wiki work before letting a run finish.
 
-When a run ends we work out what it did (wrote a page? answered from the wiki?
-made slides?), check that work, and if something is wrong we send the agent back
-to fix it. Up to `max_iterations` times, then we report and stop.
+The flow, once per turn::
 
-No AI model is used here. Every check just reads files and compares strings, so
-this costs nothing to run. See this package's README for the full picture.
+    before_agent      list every file in wiki/ and marp-slides/, and note
+                      what the user asked
+          |
+    (agent works)     awrap_tool_call notes each tool it uses and each file
+                      it reads
+          |
+    after_agent       list the files again and compare -> what it wrote
+                      |
+                      +- wrote entities/ or concepts/  -> ingest checks
+                      +- wrote marp-slides/            -> marp checks
+                      +- user asked to use the wiki    -> query checks
+                      +- none of those                 -> stop, say nothing
+                      |
+                      +- all checks pass -> stop
+                      +- something wrong -> send the agent back with the list
+                                            of problems, up to max_iterations
+                                            times, then report and stop
+
+Why it exists: `quick_wiki_integrity_check` is a tool, so the model can skip it
+or ignore what it says. This moves the decision out of the model's hands.
+
+No AI model is used here — every check reads files and compares strings, so the
+loop costs nothing. See this package's README for the checks themselves.
 """
 
 from __future__ import annotations
