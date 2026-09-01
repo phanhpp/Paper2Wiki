@@ -60,6 +60,9 @@ _TRACE_FRAME_RE = re.compile(r"^\[depth=\d+\]\s+(.+?)\s*$")
 TOOL_FLOWS = {
     "fetch_arxiv": "wiki-ingestion",
     "parse_pdf_docling": "wiki-ingestion",
+    # web_search/web_extract are the fast-mode (default) ingest path
+    "web_search": "wiki-ingestion",
+    "web_extract": "wiki-ingestion",
     "quick_wiki_integrity_check": "wiki-health",
     "run_trace_report_async": "trace-analysis",
     "fetch_traces": "trace-analysis",
