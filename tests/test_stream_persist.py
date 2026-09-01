@@ -74,7 +74,7 @@ class _SpyRenderer:
     def on_tool_result(self, name, content): self.tool_results.append((name, content))
     def on_turn_end(self): ...
     def on_debug(self, message): ...
-    def handle_interrupts(self, interrupts): return []
+    async def handle_interrupts(self, interrupts): return []
 
 
 class _MessagesAgent:

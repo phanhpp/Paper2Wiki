@@ -37,34 +37,34 @@ def _feed_input(monkeypatch, responses):
 
 
 @pytest.mark.unit
-def test_handle_interrupts_approve(monkeypatch):
+async def test_handle_interrupts_approve(monkeypatch):
     """'a' (or any unrecognized choice) maps to an approve decision."""
     _feed_input(monkeypatch, ["a"])
-    decisions = DefaultRenderer().handle_interrupts([_interrupt()])
+    decisions = await DefaultRenderer().handle_interrupts([_interrupt()])
     assert decisions == [{"type": "approve"}]
 
 
 @pytest.mark.unit
-def test_handle_interrupts_reject_no_reason(monkeypatch):
+async def test_handle_interrupts_reject_no_reason(monkeypatch):
     """'r' with an empty reason maps to a bare reject decision."""
     _feed_input(monkeypatch, ["r", ""])
-    decisions = DefaultRenderer().handle_interrupts([_interrupt()])
+    decisions = await DefaultRenderer().handle_interrupts([_interrupt()])
     assert decisions == [{"type": "reject"}]
 
 
 @pytest.mark.unit
-def test_handle_interrupts_reject_with_reason(monkeypatch):
+async def test_handle_interrupts_reject_with_reason(monkeypatch):
     """'r' with a reason attaches it as the message sent back to the model."""
     _feed_input(monkeypatch, ["r", "use the feat/cli branch, not main"])
-    decisions = DefaultRenderer().handle_interrupts([_interrupt()])
+    decisions = await DefaultRenderer().handle_interrupts([_interrupt()])
     assert decisions == [{"type": "reject", "message": "use the feat/cli branch, not main"}]
 
 
 @pytest.mark.unit
-def test_handle_interrupts_respond(monkeypatch):
+async def test_handle_interrupts_respond(monkeypatch):
     """'s' returns the typed text as a respond decision (ask-user tools)."""
     _feed_input(monkeypatch, ["s", "the answer is 42"])
-    decisions = DefaultRenderer().handle_interrupts(
+    decisions = await DefaultRenderer().handle_interrupts(
         [_interrupt("ask_user", allowed=["approve", "respond"])]
     )
     assert decisions == [{"type": "respond", "message": "the answer is 42"}]
@@ -81,79 +81,79 @@ def test_choices_for_filters_to_allowed():
 
 
 @pytest.mark.unit
-def test_handle_interrupts_edit_json(monkeypatch):
+async def test_handle_interrupts_edit_json(monkeypatch):
     """'e' with JSON args produces an edit decision carrying the parsed args."""
     _feed_input(monkeypatch, ["e", '{"path": "b.md"}'])
-    decisions = DefaultRenderer().handle_interrupts([_interrupt()])
+    decisions = await DefaultRenderer().handle_interrupts([_interrupt()])
     assert decisions == [
         {"type": "edit", "edited_action": {"name": "write_file", "args": {"path": "b.md"}}}
     ]
 
 
 @pytest.mark.unit
-def test_handle_interrupts_edit_python_dict(monkeypatch):
+async def test_handle_interrupts_edit_python_dict(monkeypatch):
     """'e' with a Python-dict literal (not JSON) is parsed via the ast.literal_eval fallback."""
     _feed_input(monkeypatch, ["e", "{'path': 'c.md'}"])
-    decisions = DefaultRenderer().handle_interrupts([_interrupt()])
+    decisions = await DefaultRenderer().handle_interrupts([_interrupt()])
     assert decisions == [
         {"type": "edit", "edited_action": {"name": "write_file", "args": {"path": "c.md"}}}
     ]
 
 
 @pytest.mark.unit
-def test_handle_interrupts_edit_invalid_falls_back_to_approve(monkeypatch):
+async def test_handle_interrupts_edit_invalid_falls_back_to_approve(monkeypatch):
     """'e' with unparseable args safely falls back to approve rather than crashing."""
     _feed_input(monkeypatch, ["e", "not parseable !!"])
-    decisions = DefaultRenderer().handle_interrupts([_interrupt()])
+    decisions = await DefaultRenderer().handle_interrupts([_interrupt()])
     assert decisions == [{"type": "approve"}]
 
 
 @pytest.mark.unit
-def test_handle_interrupts_yolo_sets_session_auto_approve(monkeypatch):
+async def test_handle_interrupts_yolo_sets_session_auto_approve(monkeypatch):
     """'yolo' approves and latches auto-approve so later interrupts skip the prompt."""
     renderer = DefaultRenderer()
     _feed_input(monkeypatch, ["yolo"])
-    first = renderer.handle_interrupts([_interrupt()])
+    first = await renderer.handle_interrupts([_interrupt()])
     assert first == [{"type": "approve"}]
     assert renderer.auto_approve is True
 
     # Subsequent interrupts auto-approve without prompting (input would raise IndexError).
-    second = renderer.handle_interrupts([_interrupt("edit_file")])
+    second = await renderer.handle_interrupts([_interrupt("edit_file")])
     assert second == [{"type": "approve"}]
 
 
 @pytest.mark.unit
-def test_auto_approve_constructor_short_circuits(monkeypatch):
+async def test_auto_approve_constructor_short_circuits(monkeypatch):
     """auto_approve=True approves without ever calling input()."""
     def _boom(*a, **k):
         raise AssertionError("input() should not be called when auto_approve=True")
 
     monkeypatch.setattr("builtins.input", _boom)
-    decisions = DefaultRenderer(auto_approve=True).handle_interrupts([_interrupt()])
+    decisions = await DefaultRenderer(auto_approve=True).handle_interrupts([_interrupt()])
     assert decisions == [{"type": "approve"}]
 
 
 @pytest.mark.unit
-def test_rich_renderer_maps_choices_via_rich_prompt(monkeypatch):
+async def test_rich_renderer_maps_choices_via_rich_prompt(monkeypatch):
     """RichRenderer reads the HITL choice via rich.prompt.Prompt.ask (not input())."""
     import src.cli.renderer as rr
 
     answers = iter(["r", ""])  # choice, then empty reason
     monkeypatch.setattr(rr.Prompt, "ask", staticmethod(lambda *a, **k: next(answers)))
     renderer = rr.RichRenderer()
-    decisions = renderer.handle_interrupts([_interrupt()])
+    decisions = await renderer.handle_interrupts([_interrupt()])
     assert decisions == [{"type": "reject"}]
 
 
 @pytest.mark.unit
-def test_rich_renderer_edit_uses_rich_prompt(monkeypatch):
+async def test_rich_renderer_edit_uses_rich_prompt(monkeypatch):
     """RichRenderer's edit path reads both the choice and the new args via Prompt.ask."""
     import src.cli.renderer as rr
 
     answers = iter(["e", '{"path": "z.md"}'])
     monkeypatch.setattr(rr.Prompt, "ask", staticmethod(lambda *a, **k: next(answers)))
     renderer = rr.RichRenderer()
-    decisions = renderer.handle_interrupts([_interrupt()])
+    decisions = await renderer.handle_interrupts([_interrupt()])
     assert decisions == [
         {"type": "edit", "edited_action": {"name": "write_file", "args": {"path": "z.md"}}}
     ]
@@ -161,12 +161,14 @@ def test_rich_renderer_edit_uses_rich_prompt(monkeypatch):
 
 @pytest.mark.unit
 def test_renderers_conform_to_protocol():
-    """Both renderers satisfy the Renderer protocol (incl. on_tool_result)."""
+    """All three renderers satisfy the Renderer protocol (incl. on_tool_result)."""
     from src.agents.renderer import Renderer
     import src.cli.renderer as rr
+    from src.slack.renderer import SlackRenderer
 
     assert isinstance(DefaultRenderer(), Renderer)
     assert isinstance(rr.RichRenderer(), Renderer)
+    assert isinstance(SlackRenderer(object(), "C1", "1.1"), Renderer)
 
 
 @pytest.mark.unit

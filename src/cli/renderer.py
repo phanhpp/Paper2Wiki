@@ -4,8 +4,9 @@ Implements the ``Renderer`` protocol from ``src/agents/renderer.py``:
 - assistant text streams as live-updating Markdown via ``rich.live.Live``
 - tool calls render as styled lines
 - HITL interrupts render as a panel; the choice is read with ``rich.prompt.Prompt`` (validated
-  choices + styling). ``Prompt.ask`` blocks on stdin, which is fine even though
-  ``handle_interrupts`` runs inside the active event loop — unlike prompt_toolkit's sync
+  choices + styling). ``handle_interrupts`` is ``async`` (the protocol requires it, so a
+  chat front-end can await a click), but nothing here awaits: ``Prompt.ask`` blocks on
+  stdin, which is fine even inside the active event loop — unlike prompt_toolkit's sync
   ``prompt()``, it does not start its own loop. Between-turn REPL input uses prompt_toolkit's
   async API instead — see ``src/cli/commands/chat.py``.
 """
@@ -232,10 +233,10 @@ class RichRenderer:
 
     # --- HITL --------------------------------------------------------------
 
-    def handle_interrupts(self, interrupts: list) -> list[dict]:
+    async def handle_interrupts(self, interrupts: list) -> list[dict]:
         self._end_live()
 
-        def prompt_fn(action, review_config, choices):
+        async def prompt_fn(action, review_config, choices):
             body = Text()
             body.append("Tool: ", style="bold")
             body.append(f"{action['name']}\n")
@@ -254,12 +255,12 @@ class RichRenderer:
                 console=self.console,
             )
 
-        def edit_fn(action):
+        async def edit_fn(action):
             return Prompt.ask("New args (JSON or Python dict)", console=self.console)
 
-        def message_fn(action, kind):
+        async def message_fn(action, kind):
             label = ("Reason to send the model (optional)" if kind == "reject"
                      else "Reply to return as the tool result")
             return Prompt.ask(label, default="", console=self.console)
 
-        return build_decisions(interrupts, prompt_fn, edit_fn, message_fn, self._state)
+        return await build_decisions(interrupts, prompt_fn, edit_fn, message_fn, self._state)
