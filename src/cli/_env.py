@@ -46,17 +46,26 @@ def apply_env(ingest_mode: IngestMode | None, wiki_path: str | None) -> None:
         os.environ["WIKI_PATH"] = wiki_path
 
 
-def require_keys(eval_mode: bool) -> None:
+def require_keys(eval_mode: bool, *, slack: bool = False) -> None:
     """Fail fast with a readable message when required credentials are missing.
 
     ``ANTHROPIC_API_KEY`` is always required. ``DAYTONA_API_KEY`` is only needed when the
-    Daytona-sandboxed marp subagent is built (i.e. not in eval mode).
+    Daytona-sandboxed marp subagent is built (i.e. not in eval mode). The Slack
+    credentials are only needed by ``serve`` — every other command works without
+    them, since Slack is an optional second way in, not part of the core CLI.
     """
     missing = []
     if not os.environ.get("ANTHROPIC_API_KEY"):
         missing.append("ANTHROPIC_API_KEY")
     if not eval_mode and not os.environ.get("DAYTONA_API_KEY"):
         missing.append("DAYTONA_API_KEY (or pass --eval-mode to skip the Daytona sandbox)")
+    if slack:
+        # Workspace-scoped and per-user: each person creates their own Slack app.
+        # docs/slack_setup.md walks through it — the two tokens come from two
+        # different pages, which is the usual thing to get wrong.
+        for var in ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "SLACK_CHANNEL_ID"):
+            if not os.environ.get(var):
+                missing.append(f"{var} (see docs/slack_setup.md)")
 
     if missing:
         typer.secho(
