@@ -17,6 +17,7 @@ SECRET_PATTERNS = [
     re.compile(r"ghp_[A-Za-z0-9]{20,}"),
     re.compile(r"AKIA[0-9A-Z]{16}"),
     re.compile(r"xox[baprs]-[A-Za-z0-9-]{20,}"),
+    re.compile(r"xapp-[0-9]-[A-Za-z0-9-]{20,}"),  # Slack app-level (Socket Mode) token
     re.compile(r"AIza[0-9A-Za-z_-]{20,}"),
     re.compile(r"-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----"),
 ]
