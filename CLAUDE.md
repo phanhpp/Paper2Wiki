@@ -36,6 +36,7 @@ python scripts/lint.py --wiki-dir wiki/
 # Most reliable invocation (run from repo root; .env auto-loaded). See docs/cli.md.
 uv run python -m src.cli.app repl                  # interactive chat
 uv run python -m src.cli.app chat "ingest <url>"   # one-shot
+uv run python -m src.cli.app serve                 # listen on Slack (Loop 3)
 uv run python -m src.cli.app sessions ls           # browse sessions
 uv run python -m src.cli.app config show           # effective config
 ```
@@ -54,6 +55,16 @@ uv run python -m src.cli.app config show           # effective config
 > in `docs/cli.md`.
 
 Required `.env` vars: `ANTHROPIC_API_KEY`, `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT`, `DAYTONA_API_KEY` (Marp). Web ingest needs at least one of `FIRECRAWL_API_KEY`, `TAVILY_API_KEY`, `EXA_API_KEY`. Optional: `WIKI_PATH` (defaults to `./wiki`), `PAPER2WIKI_INGEST_MODE` (`fast` | `quality`). See `.env.example`.
+
+**`.env` has one reader: `src/env.py:load_env()`.** Call it from entry points only —
+the CLI callback, eval script `__main__` blocks, a notebook's first cell. Never at module
+import time under `src/`. `src/agents/llms.py` used to call `load_dotenv()` at module level,
+so importing the agent (which five test files do) set `LANGSMITH_API_KEY` +
+`LANGSMITH_TRACING=true` for the whole pytest process and `pytest -m unit` traced fake-model
+runs into the live `paper2wiki` project — junk traces that can skew `memories/baselines.json`.
+`tests/conftest.py` now forces `LANGSMITH_TRACING=false` at *module* level, not in a fixture:
+a fixture runs after collection, and `langsmith.utils.get_env_var` is `lru_cache`d, so a late
+env change may never be read.
 
 ## Architecture
 
@@ -135,6 +146,34 @@ Skills available to the supervisor:
 - `skills/trace-analysis/` — LangSmith trace analysis workflow
 - `skills/web-tools/` — web search/extract provider selection and call patterns (Firecrawl, Tavily, Exa)
 - `skills/marp-slide/` — Marp slide creation (injected into the Daytona sandbox)
+
+### Slack front-end (`src/slack/`) — Loop 3
+
+`paper2wiki serve` runs the same agent, same wiki, driven by Slack messages instead of
+the terminal. **Socket Mode** (the app dials out over a websocket), so there's no
+webhook, no public URL and no cron — it answers only while `serve` is running, which is
+the honest cost of a laptop assistant.
+
+Slack is **optional**: `repl`/`chat`/`sessions`/`config` all work with no Slack tokens.
+Only `serve` requires `SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN` + `SLACK_CHANNEL_ID`, checked
+by `require_keys(..., slack=True)`. They're workspace-scoped and per-user, so every user
+creates their own app — walkthrough in `docs/slack_setup.md`; **the bot must be
+`/invite`d to the channel even when it's public**, or it silently receives nothing.
+
+Three design points (detail in `src/slack/README.md`, rationale in `docs/loop3_slack.md`):
+- **No new schema.** `sessions.db`'s `id` *is* the LangGraph `thread_id`, so
+  `thread_id_for()` derives `slack-{channel}-{thread_ts or message_ts}` — same Slack
+  thread → same id → `checkpoints.db` resumes it.
+- **One turn at a time.** A single worker task drains an `asyncio.Queue`, awaiting each
+  job fully before the next: the two SQLite DBs are single-writer, and Loop 2's snapshot
+  diff would otherwise attribute a concurrent run's writes to the wrong run.
+- **`Renderer.handle_interrupts` is async** (`src/agents/renderer.py`), and so is
+  `build_decisions` — its three callbacks are awaited. The terminal renderers are
+  `async def` that never await (stdin blocks); Slack awaits an `asyncio.Future` that
+  `submit_decision()` resolves when the button is clicked, so the whole app runs on one
+  event loop with no threads. Decision shapes still come from the shared
+  `build_decisions()`, so Slack and the terminal can't drift. `edit`/`respond` aren't
+  offered in Slack (they need typed args); reject-with-reason works via a modal.
 
 ### CLI front-end (`src/cli/`)
 
