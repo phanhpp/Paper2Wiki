@@ -33,7 +33,7 @@ import os
 import re
 from typing import Any
 
-from src.slack.renderer import SlackRenderer, submit_decision
+from src.slack.renderer import SlackRenderer, step_log, submit_decision
 from src.slack.threads import reply_ts_for, thread_id_for
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,8 @@ logger = logging.getLogger(__name__)
 _REJECT_MODAL = "hitl_reject"
 # action_id is "hitl:<token>:<choice>" — see SlackRenderer._post_approval_request.
 _HITL_ACTION = re.compile(r"^hitl:")
+# action_id is "steps:<token>" — the "View details" button on the status line.
+_STEPS_ACTION = re.compile(r"^steps:")
 
 
 def build_app(
@@ -106,15 +108,20 @@ def build_app(
 
         # Immediate ack. The first marp request in a thread waits tens of seconds
         # for a Daytona sandbox to cold-start, and silence looks like a hang.
+        status_ts = None
         try:
-            await client.chat_postMessage(
+            ack = await client.chat_postMessage(
                 channel=channel, thread_ts=reply_ts, text="🤔 On it…",
             )
+            status_ts = ack.get("ts")
         except Exception:
             logger.exception("Slack ack failed")
 
+        # The renderer takes this message over as a live status line: it shows the
+        # current tool while the turn runs, then settles into a step summary.
         renderer = SlackRenderer(
-            post_client, channel, reply_ts, auto_approve=auto_approve, debug=debug,
+            post_client, channel, reply_ts,
+            status_ts=status_ts, auto_approve=auto_approve, debug=debug,
         )
 
         async def _turn() -> None:
@@ -175,6 +182,32 @@ def build_app(
 
         await _settle(client, body, choice)
 
+    @app.action(_STEPS_ACTION)
+    async def on_view_steps(ack, body: dict, client) -> None:
+        """Open a modal with this turn's tool calls and their output.
+
+        Slack has no collapsible section, so "expand" means a modal.
+        """
+        await ack()
+        token = body["actions"][0]["action_id"].split(":", 1)[1]
+        text = step_log(token) or "That step log has expired."
+        try:
+            await client.views_open(
+                trigger_id=body["trigger_id"],
+                view={
+                    "type": "modal",
+                    "title": {"type": "plain_text", "text": "Steps"},
+                    "close": {"type": "plain_text", "text": "Close"},
+                    "blocks": [{
+                        "type": "section",
+                        # Slack caps a text block at 3000 chars.
+                        "text": {"type": "mrkdwn", "text": text[:2900]},
+                    }],
+                },
+            )
+        except Exception:
+            logger.exception("Could not open the steps modal")
+
     @app.view(_REJECT_MODAL)
     async def on_reject_submit(ack, view: dict) -> None:
         await ack()
@@ -195,22 +228,48 @@ def build_app(
     return app
 
 
-def check_credentials(bot_token: str) -> str:
-    """Verify the bot token before opening the websocket; return the bot name.
+def check_credentials(bot_token: str, app_token: str) -> str:
+    """Verify both tokens before opening the websocket; return the bot name.
 
     ``AsyncApp`` (unlike the sync ``App``) does not call ``auth.test`` at start-up,
-    so without this a bad token surfaces as an opaque connection failure.
+    and Socket Mode retries connection failures forever — so a misconfigured token
+    otherwise scrolls tracebacks instead of saying what is wrong. Both are checked
+    here so the problem is named once, up front.
     """
     from slack_sdk import WebClient
     from slack_sdk.errors import SlackApiError
 
+    client = WebClient(token=bot_token)
     try:
-        resp = WebClient(token=bot_token).auth_test()
+        resp = client.auth_test()
     except SlackApiError as exc:
         raise RuntimeError(
             f"SLACK_BOT_TOKEN rejected by Slack ({exc.response.get('error')}). "
-            "It should start 'xoxb-'. See docs/slack_setup.md."
+            "It should start 'xoxb-' and comes from OAuth & Permissions, after "
+            "installing the app. See docs/slack_setup.md."
         ) from exc
+
+    # apps.connections.open is the only way to prove the app-level token works.
+    # It just hands back a websocket URL, which we discard — connecting is the
+    # handler's job.
+    try:
+        WebClient(token=app_token).apps_connections_open(app_token=app_token)
+    except SlackApiError as exc:
+        error = exc.response.get("error")
+        if error == "missing_scope":
+            raise RuntimeError(
+                "SLACK_APP_TOKEN is missing the 'connections:write' scope "
+                f"(it has: {exc.response.get('provided')}).\n"
+                "App-level token scopes cannot be edited — generate a new one:\n"
+                "  Basic Information -> App-Level Tokens -> Generate Token and Scopes\n"
+                "  add 'connections:write', then put the new xapp-... in .env"
+            ) from exc
+        raise RuntimeError(
+            f"SLACK_APP_TOKEN rejected by Slack ({error}). It should start "
+            "'xapp-' and comes from Basic Information -> App-Level Tokens. "
+            "See docs/slack_setup.md."
+        ) from exc
+
     return resp.get("user", "the bot")
 
 
@@ -243,8 +302,8 @@ def serve(
     app_token = os.environ["SLACK_APP_TOKEN"]
     channel = channel_id or os.environ["SLACK_CHANNEL_ID"]
 
-    bot_name = check_credentials(bot_token)
-    logger.info("Authenticated as %s", bot_name)
+    bot_name = check_credentials(bot_token, app_token)
+    print(f"Connected as {bot_name} — listening on {channel}. Ctrl-C to stop.")
 
     async def _run() -> None:
         from slack_bolt.adapter.socket_mode.aiohttp import AsyncSocketModeHandler

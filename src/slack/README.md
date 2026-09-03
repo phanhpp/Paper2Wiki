@@ -177,6 +177,28 @@ that's the deadlock this avoids.
 What comes back — approve / reject / edit — is built by `build_decisions()` in
 `src/agents/renderer.py`, which the terminal uses too. Shared, so the two can't disagree.
 
+## What gets posted
+
+One tool call used to mean one Slack message, which buried the answer under 30+ of them
+on a single ingest. Instead there's **one status line that keeps changing**:
+
+```
+🤔 On it…                         posted by app.py before the agent starts
+🔧 read_file  {...}               edited in place, one per tool call
+🔧 fetch_arxiv {...}
+✅ 2 steps   [View details]       settles when the answer starts
+Ingested the paper.               the answer, its own message
+```
+
+Tool *results* aren't posted at all — they're collected into a step log behind the
+**View details** button, which opens a modal. Slack has no collapsible section, so a
+modal is the only real "expand". Results are truncated to 6 lines / 400 chars each, and
+the modal caps at Slack's 3000-char block limit.
+
+Step logs are kept in memory, capped at the last 50 turns (`_MAX_STEP_LOGS`), so a
+long-running `serve` can't grow without bound. Click **View details** on an older turn
+and you get "that step log has expired" rather than a crash.
+
 ## Known limits
 
 - **No** `edit` **or** `respond` **in Slack.** Both need typed *arguments*, which would mean a

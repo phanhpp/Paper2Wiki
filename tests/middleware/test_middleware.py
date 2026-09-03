@@ -285,3 +285,40 @@ def test_record_captures_reads_from_args_and_from_results():
     # a search that matched nothing records the tool but no reads
     empty = ToolMessage(content="No files found", tool_call_id="c3")
     assert mw._record(Req("glob", {"pattern": "**/*.md"}), empty) == {"run_tools": ["glob"]}
+
+
+@pytest.mark.unit
+def test_tool_returning_a_command_is_merged_not_nested():
+    """A tool that already returns a Command (the subagent `task` tool does).
+
+    Nesting it under "messages" hands a Command to the messages reducer, which
+    raises `Unsupported message type: <class 'langgraph.types.Command'>` and
+    kills the whole turn. Hit live by a marp request.
+    """
+    from langgraph.types import Command
+
+    mw = WikiRubricMiddleware(enabled=True)
+
+    class _Req:
+        tool_call = {"name": "task", "args": {"description": "make slides"}}
+
+    inner = Command(update={"messages": ["the subagent's reply"], "other": 1})
+    out = mw._with_record(_Req(), inner)
+
+    assert isinstance(out, Command)
+    assert out.update["messages"] == ["the subagent's reply"]  # untouched
+    assert out.update["other"] == 1                            # untouched
+    assert out.update["run_tools"] == ["task"]                 # ours merged in
+
+
+@pytest.mark.unit
+def test_normal_tool_result_is_still_wrapped_in_messages():
+    """The ordinary path must keep passing the result back to the model."""
+    mw = WikiRubricMiddleware(enabled=True)
+
+    class _Req:
+        tool_call = {"name": "grep", "args": {"pattern": "x"}}
+
+    out = mw._with_record(_Req(), "plain result")
+    assert out.update["messages"] == ["plain result"]
+    assert out.update["run_tools"] == ["grep"]

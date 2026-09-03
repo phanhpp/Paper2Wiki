@@ -141,11 +141,52 @@ def test_each_segment_gets_its_own_message():
 
 
 @pytest.mark.unit
-def test_tool_result_is_truncated():
+def test_tool_activity_updates_the_status_line_instead_of_posting():
+    """One message that changes, not one message per tool call."""
     fake = FakeSlackClient()
-    r = SlackRenderer(fake, "C1", "111.1")
+    r = SlackRenderer(fake, "C1", "111.1", status_ts="status1")
+    r.on_turn_start()
+    r.on_tool_call("grep", {"pattern": "attention"})
     r.on_tool_result("grep", "line\n" * 50)
-    assert "truncated" in fake.texts[0]
+    r.on_tool_call("read_file", {"file_path": "wiki/index.md"})
+
+    assert fake.posted == []                       # nothing new in the channel
+    assert all(u["ts"] == "status1" for u in fake.updated)
+    assert "grep" in fake.updated[0]["text"]
+    assert "read_file" in fake.updated[-1]["text"]
+
+
+@pytest.mark.unit
+def test_status_settles_into_a_summary_with_a_details_button():
+    fake = FakeSlackClient()
+    r = SlackRenderer(fake, "C1", "111.1", status_ts="status1")
+    r.on_turn_start()
+    r.on_tool_call("grep", {"pattern": "x"})
+    r.on_tool_result("grep", "a result")
+    r.on_token("here is the answer")
+    r.on_turn_end()
+
+    summary = [u for u in fake.updated if u["ts"] == "status1"][-1]
+    assert "1 step" in summary["text"]
+    button = summary["blocks"][0]["accessory"]
+    assert button["text"]["text"] == "View details"
+
+    from src.slack.renderer import step_log
+    log = step_log(button["action_id"].split(":", 1)[1])
+    assert "grep" in log and "a result" in log
+
+
+@pytest.mark.unit
+def test_step_log_is_capped():
+    """A long-running `serve` must not accumulate step logs forever."""
+    from src.slack.renderer import _MAX_STEP_LOGS, _STEP_LOGS, _remember_steps
+
+    _STEP_LOGS.clear()
+    for i in range(_MAX_STEP_LOGS + 10):
+        _remember_steps(f"t{i}", f"log {i}")
+    assert len(_STEP_LOGS) == _MAX_STEP_LOGS
+    assert "t0" not in _STEP_LOGS          # oldest evicted
+    assert f"t{_MAX_STEP_LOGS + 9}" in _STEP_LOGS
 
 
 @pytest.mark.unit
@@ -252,8 +293,8 @@ async def test_build_app_registers_every_handler():
     from src.slack.app import build_app
 
     app = build_app(bot_token="xoxb-fake", channel_id="C1")
-    # message + button action + modal submit + modal dismiss
-    assert len(app._async_listeners) == 4
+    # message + hitl button + steps button + modal submit + modal dismiss
+    assert len(app._async_listeners) == 5
 
 
 async def _deliver(app, event, client):

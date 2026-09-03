@@ -42,6 +42,11 @@ _PENDING: dict[str, "asyncio.Future[tuple[str, str]]"] = {}
 # full option set in the terminal.
 _BUTTON_CHOICES = ("a", "r", "yolo")
 
+# token -> the rendered step log for one turn, shown when "View details" is
+# clicked. Capped so a long-running `serve` cannot grow without bound.
+_STEP_LOGS: dict[str, str] = {}
+_MAX_STEP_LOGS = 50
+
 _BUTTON_LABEL = {"a": "Approve", "r": "Reject", "yolo": "Approve all"}
 _BUTTON_STYLE = {"a": "primary", "r": "danger"}
 
@@ -68,6 +73,18 @@ def _settle_future(future: "asyncio.Future", choice: str, reason: str) -> None:
     """Resolve a pending decision, ignoring a double-click that lost the race."""
     if not future.done():
         future.set_result((choice, reason))
+
+
+def step_log(token: str) -> str | None:
+    """Return the stored step log for a turn, or None if it has been evicted."""
+    return _STEP_LOGS.get(token)
+
+
+def _remember_steps(token: str, text: str) -> None:
+    """Store one turn's step log, dropping the oldest once the cap is hit."""
+    _STEP_LOGS[token] = text
+    while len(_STEP_LOGS) > _MAX_STEP_LOGS:
+        _STEP_LOGS.pop(next(iter(_STEP_LOGS)))
 
 
 def _truncate(text: str, *, max_lines: int, max_chars: int) -> str:
@@ -106,6 +123,7 @@ class SlackRenderer:
         channel: str,
         thread_ts: str,
         *,
+        status_ts: str | None = None,
         auto_approve: bool = False,
         debug: bool = False,
         edit_interval: float = 0.7,
@@ -114,6 +132,9 @@ class SlackRenderer:
         self.client = client
         self.channel = channel
         self.thread_ts = thread_ts
+        # ts of the "On it…" message posted before the agent started. The renderer
+        # takes it over as a live status line, then settles it into a summary.
+        self.status_ts = status_ts
         self.debug = debug
         self.edit_interval = edit_interval
         self.decision_timeout = decision_timeout
@@ -126,6 +147,9 @@ class SlackRenderer:
         # Reason captured from a reject modal, handed to build_decisions'
         # message_fn on the next call.
         self._pending_reason = ""
+        # One entry per tool call this turn: "🔧 name(args)" then its result.
+        self._steps: list[str] = []
+        self._settled = False
 
     @property
     def auto_approve(self) -> bool:
@@ -145,6 +169,53 @@ class SlackRenderer:
             # already done and persisted, only the display fails.
             logger.exception("Slack post failed")
             return None
+
+    def _set_status(self, text: str) -> None:
+        """Rewrite the status line in place (the message app.py already posted)."""
+        if self.status_ts is None:
+            return
+        try:
+            self.client.chat_update(
+                channel=self.channel, ts=self.status_ts, text=text, blocks=[],
+            )
+        except Exception:
+            logger.exception("Slack status update failed")
+
+    def _settle_status(self) -> None:
+        """Turn the status line into a summary with a "View details" button.
+
+        Called once, when the first token arrives or the turn ends — whichever
+        comes first. Slack has no collapsible section, so the step log lives
+        behind a button that opens a modal.
+        """
+        if self._settled or self.status_ts is None:
+            return
+        self._settled = True
+
+        if not self._steps:
+            self._set_status("✅ Done")
+            return
+
+        token = uuid.uuid4().hex
+        _remember_steps(token, "\n\n".join(self._steps))
+        n = len(self._steps)
+        try:
+            self.client.chat_update(
+                channel=self.channel,
+                ts=self.status_ts,
+                text=f"✅ {n} step{'s' if n != 1 else ''}",
+                blocks=[{
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": f"✅ {n} step{'s' if n != 1 else ''}"},
+                    "accessory": {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "View details"},
+                        "action_id": f"steps:{token}",
+                    },
+                }],
+            )
+        except Exception:
+            logger.exception("Slack status settle failed")
 
     def notice(self, text: str) -> None:
         """Post a one-off message (errors, status) outside the streamed text."""
@@ -184,28 +255,43 @@ class SlackRenderer:
         self._sent = ""
         self._ts = None
         self._last_edit = 0.0
+        self._steps = []
+        self._settled = False
 
     def on_token(self, text: str) -> None:
         """Buffer streamed text; edit Slack at most once per ``edit_interval``."""
+        if not self._buffer:
+            # First token: the answer is starting, so freeze the status line into
+            # its summary rather than overwriting it with prose.
+            self._settle_status()
         self._buffer += text
         self._flush()
 
     def on_tool_call(self, name: str, args: Any) -> None:
-        """Announce a tool call — in Slack this is the only progress signal."""
+        """Show the current step in the status line, and record it.
+
+        One message that keeps changing, rather than one message per tool — an
+        ingest makes 30+ calls, and posting each would bury the answer.
+        """
         self._flush(force=True)
-        self._post(f"🔧 `{name}`  `{str(args)[:120]}`")
+        short = str(args)[:80]
+        self._set_status(f"🔧 {name}  `{short}`")
+        self._steps.append(f"🔧 *{name}*  `{str(args)[:300]}`")
 
     def on_tool_result(self, name: str, content: str) -> None:
-        """Post a truncated preview of the tool's output."""
+        """Attach the tool's output to the step log — not posted to the channel."""
         preview = _truncate(
             content, max_lines=self._PREVIEW_LINES, max_chars=self._PREVIEW_CHARS,
         )
-        if preview:
-            self._post(f"↳ `{name}`\n```\n{preview}\n```")
+        if preview and self._steps:
+            self._steps[-1] += f"\n```\n{preview}\n```"
 
     def on_turn_end(self) -> None:
         """Commit whatever text is left in the buffer."""
         self._flush(force=True)
+        # A turn that only called tools and produced no text still needs its
+        # status line settled.
+        self._settle_status()
 
     def on_debug(self, message: str) -> None:
         """Diagnostics go to the log, never to the channel."""

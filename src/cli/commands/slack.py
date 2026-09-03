@@ -33,7 +33,6 @@ def serve(
     # Lazy import: must follow apply_env() so tool registration sees the ingest mode.
     from src.slack.app import serve as _serve
 
-    typer.secho("Listening on Slack — Ctrl-C to stop.", fg=typer.colors.GREEN)
     try:
         _serve(
             channel_id=channel_id,
@@ -43,3 +42,8 @@ def serve(
         )
     except KeyboardInterrupt:
         typer.secho("\nStopped.", fg=typer.colors.YELLOW)
+    except RuntimeError as exc:
+        # Raised by check_credentials with an actionable message — show just that,
+        # not a traceback.
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)

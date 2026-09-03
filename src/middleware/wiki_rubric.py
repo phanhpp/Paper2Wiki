@@ -23,6 +23,30 @@ The flow, once per turn::
 Why it exists: `quick_wiki_integrity_check` is a tool, so the model can skip it
 or ignore what it says. This moves the decision out of the model's hands.
 
+Recording a tool call — runs on every call::
+
+    awrap_tool_call(request, handler)
+        result = await handler(request)          the tool runs
+              |
+        _record(request, result)                 our notes for this call:
+              |                                  {"run_tools": ["task"], ...}
+              |
+        _with_record(request, result)            put the notes somewhere safe
+              |
+              +-- result is a Message  ->  Command(update={notes, "messages":[result]})
+              |
+              +-- result is a Command  ->  replace(result, update={its update | notes})
+                                           (only subagents; keeps its "messages",
+                                            adds ours beside it)
+              |
+              v
+        state: run_tools / run_reads  ---->  after_agent reads them to decide
+                                             which checks to run
+
+The bug this fixed: the first branch was used for both, so a subagent's Command
+landed inside "messages" — every item there must be a Message, so LangGraph
+raised `Unsupported message type: <class 'langgraph.types.Command'>`.
+
 No AI model is used here — every check reads files and compares strings, so the
 loop costs nothing. See this package's README for the checks themselves.
 """
@@ -31,7 +55,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Annotated, Any, Callable
 
@@ -277,6 +301,10 @@ class WikiRubricMiddleware(AgentMiddleware[WikiRubricState]):
     def _record(self, request, result: Any = None) -> dict[str, Any]:
         """Write down the tool's name, and any files it showed the agent.
 
+        Returns our notes for this one tool call, e.g.::
+
+            {"run_tools": ["read_file"], "run_reads": ["wiki/index.md"]}
+
         We do this because reading a file changes nothing on disk, so comparing
         the wiki before and after would never reveal it. Only the tool call knows.
 
@@ -285,6 +313,10 @@ class WikiRubricMiddleware(AgentMiddleware[WikiRubricState]):
           grep/glob/ls     - in its result, as a list of matching paths
 
         Both count as the agent having seen the page, so both go in run_reads.
+
+        ``run_tools`` matters on its own too: ``classify()`` treats the name
+        ``task`` as proof a subagent ran, which is how the marp path is detected
+        (``classify.py:MARP_TOOLS``). Lose it and a slide deck is never checked.
         """
         name = request.tool_call.get("name", "")
         update: dict[str, Any] = {"run_tools": [name]}
@@ -303,29 +335,51 @@ class WikiRubricMiddleware(AgentMiddleware[WikiRubricState]):
 
         return update
 
+    def _with_record(self, request, result):
+        """Attach our state update to whatever the tool returned.
+
+        Two shapes to handle:
+
+        *A normal result* (a ToolMessage) — wrap it in a Command, passing it back
+        under "messages". Returning a Command replaces the normal return, so
+        without that the model never sees what the tool said.
+
+        *A Command* — some tools return one already; the subagent ``task`` tool
+        does. Merge into its update instead of nesting it under "messages", which
+        would hand a Command to the messages reducer and raise
+        ``Unsupported message type: <class 'langgraph.types.Command'>``. Our keys
+        (run_reads/run_tools) never collide with the tool's, so a shallow merge
+        keeps both.
+        """
+        recorded = self._record(request, result)
+        if isinstance(result, Command):
+            if not isinstance(result.update, dict):
+                # A non-dict update (rare) can't be merged safely — record
+                # nothing rather than corrupt the tool's own return.
+                return result
+            return replace(result, update={**result.update, **recorded})
+        return Command(update={**recorded, "messages": [result]})
+
     def wrap_tool_call(self, request, handler):
         """Run the tool, then write down what it was.
 
-        We must pass the tool's own result back in "messages". Returning a
-        Command replaces the normal return, so without that line the model never
-        sees what the tool said.
+        The sync variant is only for tests — see ``awrap_tool_call``.
         """
         result = handler(request)
         if not self.enabled:
             return result
-        return Command(update={**self._record(request, result), "messages": [result]})
+        return self._with_record(request, result)
 
     async def awrap_tool_call(self, request, handler):
         """Same as above, for async. This is the one that really runs.
 
         Our agent is async, and LangChain will not use the sync version as a
-        backup — it raises an error instead. The sync one above is only for
-        tests.
+        backup — it raises an error instead.
         """
         result = await handler(request)
         if not self.enabled:
             return result
-        return Command(update={**self._record(request, result), "messages": [result]})
+        return self._with_record(request, result)
 
     # --- after_agent: once per attempt, including each retry ----------------
 
