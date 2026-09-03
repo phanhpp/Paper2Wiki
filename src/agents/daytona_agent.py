@@ -2,7 +2,6 @@
 Create coding/visualize agent with Daytona sandbox for safe code execution
 """
 from pathlib import Path
-from dotenv import load_dotenv
 from daytona import CreateSandboxFromSnapshotParams, Daytona
 from deepagents import create_deep_agent
 from langchain_daytona import DaytonaSandbox
@@ -13,7 +12,6 @@ from src.prompts.system_prompt import SUBAGENT_PROMPT
 from src.tools.sandbox_tools import make_download_and_save_tool, make_sandbox_state_and_fs_tools
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-load_dotenv(REPO_ROOT / ".env")
 checkpointer = MemorySaver()
 
 def _seed_sandbox(backend: DaytonaSandbox, skill_paths: list[Path]) -> None:

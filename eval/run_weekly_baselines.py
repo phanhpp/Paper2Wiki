@@ -72,5 +72,8 @@ def parse_args() -> argparse.Namespace:
 
 
 if __name__ == "__main__":
+    from src.env import load_env
+
+    load_env()
     args = parse_args()
     sys.exit(asyncio.run(run(project=args.project, days=args.days, limit=args.limit)))

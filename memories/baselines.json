@@ -4,12 +4,73 @@
       "median_latency": 5.38512,
       "median_tokens": null,
       "sample_count": 5
+    },
+    "parse_pdf_docling": {
+      "median_latency": 50.0,
+      "median_tokens": null,
+      "sample_count": 0,
+      "seeded": true,
+      "note": "Docling PDF parsing, CPU-bound."
+    },
+    "quick_wiki_integrity_check": {
+      "median_latency": 1.5,
+      "median_tokens": null,
+      "sample_count": 0,
+      "seeded": true,
+      "note": "Pure-Python frontmatter/wikilink/index/log check, expected fast."
+    },
+    "web_search": {
+      "median_latency": 3.0,
+      "median_tokens": null,
+      "sample_count": 0,
+      "seeded": true,
+      "note": "Typical Firecrawl/Tavily/Exa search round trip."
+    },
+    "web_extract": {
+      "median_latency": 4.0,
+      "median_tokens": null,
+      "sample_count": 0,
+      "seeded": true,
+      "note": "Typical single-page scrape/extract round trip."
+    },
+    "save_sandbox_output": {
+      "median_latency": 2.0,
+      "median_tokens": null,
+      "sample_count": 0,
+      "seeded": true,
+      "note": "Daytona file download after the sandbox already exists (excludes cold sandbox startup, which is a separate, much slower step outside this tool)."
+    },
+    "get_sandbox_state": {
+      "median_latency": 1.5,
+      "median_tokens": null,
+      "sample_count": 0,
+      "seeded": true,
+      "note": "Daytona sandbox state inspection call."
+    },
+    "list_sandbox_files": {
+      "median_latency": 1.5,
+      "median_tokens": null,
+      "sample_count": 0,
+      "seeded": true,
+      "note": "Daytona sandbox file listing call."
     }
   },
   "by_flow": {
     "wiki-ingestion": {
       "median_steps": 2,
       "sample_count": 3
+    },
+    "wiki-health": {
+      "median_steps": 1,
+      "sample_count": 0,
+      "seeded": true,
+      "note": "Only quick_wiki_integrity_check contributes; normally called once per trace."
+    },
+    "sandbox-dev": {
+      "median_steps": 3,
+      "sample_count": 0,
+      "seeded": true,
+      "note": "save_sandbox_output/get_sandbox_state/list_sandbox_files combined in one marp trace."
     }
   }
 }

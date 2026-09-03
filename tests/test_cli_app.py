@@ -18,10 +18,10 @@ runner = CliRunner()
 
 @pytest.mark.unit
 def test_help_lists_all_commands():
-    """`--help` registers and lists all four top-level commands."""
+    """`--help` registers and lists all five top-level commands."""
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for cmd in ("repl", "chat", "sessions", "config"):
+    for cmd in ("repl", "chat", "serve", "sessions", "config"):
         assert cmd in result.output
 
 
@@ -60,11 +60,11 @@ def test_sessions_ls_smoke():
 def test_chat_missing_anthropic_key_exits_1(monkeypatch):
     """`chat` fails fast (exit 1) when ANTHROPIC_API_KEY is absent, before building the agent.
 
-    load_dotenv is stubbed so the callback can't repopulate the key from .env.
+    load_env is stubbed so the callback can't repopulate the key from .env.
     """
     import src.cli.app as appmod
 
-    monkeypatch.setattr(appmod, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr(appmod, "load_env", lambda *a, **k: None)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     result = runner.invoke(app, ["chat", "hi", "--eval-mode"])
@@ -93,3 +93,39 @@ def test_invalid_ingest_mode_value_rejected():
     """An unknown --ingest-mode value is rejected by the Enum (non-zero exit)."""
     result = runner.invoke(app, ["config", "show", "--ingest-mode", "bogus"])
     assert result.exit_code != 0
+
+
+@pytest.mark.unit
+def test_serve_without_slack_tokens_exits_1(monkeypatch):
+    """`serve` fails fast, naming the missing vars and pointing at the setup doc."""
+    import src.cli.app as appmod
+
+    monkeypatch.setattr(appmod, "load_env", lambda *a, **k: None)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    for var in ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "SLACK_CHANNEL_ID"):
+        monkeypatch.delenv(var, raising=False)
+
+    result = runner.invoke(app, ["serve", "--eval-mode"])
+    assert result.exit_code == 1
+    assert "SLACK_BOT_TOKEN" in result.output
+    assert "docs/slack_setup.md" in result.output
+
+
+@pytest.mark.unit
+def test_chat_works_without_slack_tokens(monkeypatch):
+    """Slack is optional: missing Slack vars must not block the core CLI.
+
+    Stops at the *next* failure (no ANTHROPIC_API_KEY) rather than complaining
+    about Slack, which proves the Slack check is scoped to `serve`.
+    """
+    import src.cli.app as appmod
+
+    monkeypatch.setattr(appmod, "load_env", lambda *a, **k: None)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    for var in ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "SLACK_CHANNEL_ID"):
+        monkeypatch.delenv(var, raising=False)
+
+    result = runner.invoke(app, ["chat", "hi", "--eval-mode"])
+    assert result.exit_code == 1
+    assert "ANTHROPIC_API_KEY" in result.output
+    assert "SLACK_" not in result.output

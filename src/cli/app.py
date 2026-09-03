@@ -14,11 +14,12 @@ inside the command bodies, which import the agent lazily so the env is set first
 from __future__ import annotations
 
 import typer
-from dotenv import load_dotenv
 
+from src.env import load_env
 from src.cli.commands import chat as chat_cmd
 from src.cli.commands import config as config_cmd
 from src.cli.commands import sessions as sessions_cmd
+from src.cli.commands import slack as slack_cmd
 
 # TODO: add auto-completion support
 app = typer.Typer(
@@ -33,12 +34,13 @@ app = typer.Typer(
 @app.callback() # run before any command executes
 def _main() -> None:
     """Load environment variables before any command executes."""
-    load_dotenv()
+    load_env()
     
 
 
 app.command("repl")(chat_cmd.repl) # register the repl command
 app.command("chat")(chat_cmd.chat) # register the chat command
+app.command("serve")(slack_cmd.serve) # register the Slack listener
 app.add_typer(sessions_cmd.app, name="sessions", help="Browse/search/resume/prune saved sessions.")
 app.add_typer(config_cmd.app, name="config", help="Inspect ingest mode, wiki path, and available web providers.")
 

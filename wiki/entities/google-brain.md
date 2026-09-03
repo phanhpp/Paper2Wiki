@@ -4,7 +4,7 @@ created: 2025-01-27
 updated: 2025-01-27
 type: entity
 tags: [lab, company]
-sources: [raw/papers/attention_is_all_you_need.pdf]
+sources: [raw/papers/attention_is_all_you_need.md]
 confidence: high
 ---
 

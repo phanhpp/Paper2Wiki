@@ -170,6 +170,7 @@ PATH — either `source .venv/bin/activate` or use `uv run paper2wiki …`.)
 |---|---|---|
 | `repl` | Interactive chat session (streaming, approvals, meta-commands) | yes |
 | `chat "<msg>"` | Run a single message and exit | yes |
+| `serve` | Listen on a Slack channel and run the agent on each message | yes |
 | `sessions ls [-n N]` | List recent sessions, newest first | no |
 | `sessions stats` | Catalog summary + how many you'd prune at each age threshold | no |
 | `sessions search "<query>"` | Full-text search message history | no |
@@ -326,18 +327,41 @@ The agent uses a dedicated subagent in a Daytona sandbox to create presentations
 
 ---
 
+## Loop Engineering
+
+Paper2Wiki is built as a worked example of [loop engineering](https://www.langchain.com/blog/the-art-of-loop-engineering) — stacking feedback and execution loops *around* the model instead of relying on the model alone. Each loop catches what the tighter loop inside it cannot.
+
+| Loop | Goal | How Paper2Wiki implements it |
+|---|---|---|
+| **1 · Agent** | automate the work | Supervisor + Daytona marp subagent (Deep Agents SDK); skill-driven tools for ingest, query, slides, and trace analysis. HITL on every `write_file` / `edit_file` / `execute`. |
+| **2 · Verification** | correctness | `WikiRubricMiddleware` (`src/middleware/`) classifies each run as ingest / query / marp from a **filesystem diff** — catching writes made through the shell, which tool-call scanning misses — then runs 16 deterministic checks (frontmatter, wikilink resolution, `index.md` + `log.md`, graph nodes/edges, source hashes). On failure it sends the agent back with the specific gaps, capped at `max_iterations`, then surfaces the verdict. **No LLM, so the loop is free.** |
+| **3 · Event-driven** | run without being asked | `paper2wiki serve` — a Slack front-end over Socket Mode (outbound websocket, so no public URL or webhook). A message starts a turn, a threaded reply resumes it, approvals are Block Kit buttons. Same agent, same wiki as the terminal — it reuses the `Renderer` protocol, so the agent and persistence layers are untouched. |
+| **4 · Hill-climbing** | improve the harness | Weekly CI refreshes anomaly baselines from live traces; the `trace-analysis` skill converts detected failures into versioned LangSmith datasets and candidate PR-gate cases; `hard_error` examples are replayed weekly to prove fixes hold. A production bug lands its regression test in the same PR as its fix. |
+
+**Human oversight is a primitive at every level**, not an escape hatch: tool approvals in Loops 1 and 3, the retry cap surfacing to the user in Loop 2, and mandatory approval before any harness change is committed in Loop 4.
+
+**Not built yet:** Loop 3's *scheduled* half (a cron/heartbeat trigger — today it only reacts to messages), Loop 2's two semantic query checks (they need an embedding index), and Loop 4's judge calibration (LLM judges score quality but don't yet gate merges).
+
+---
+
 ## Developer Information
 
 ### Project Structure
 
 ```text
 llm_wiki/
-├── src/agents/       # Supervisor & Daytona subagent logic
+├── src/agents/       # Supervisor & Daytona subagent logic (Loop 1)
+├── src/middleware/   # WikiRubricMiddleware — in-run verification (Loop 2)
+├── src/slack/        # Socket Mode front-end (Loop 3)
 ├── src/tools/        # Ingest (Docling, arXiv), Trace, & Wiki tools
+├── src/cli/          # Terminal REPL / one-shot chat / session browsing
 ├── skills/           # Skill definitions (Markdown + logic)
 ├── wiki/             # The knowledge base
 └── marp-slides/      # Presentation outputs
 ```
+
+`src/middleware/` and `src/slack/` each carry their own `README.md` explaining the
+checks and the message flow respectively.
 
 ### Tests & CI
 

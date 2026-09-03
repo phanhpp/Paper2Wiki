@@ -1,13 +1,13 @@
 # from langchain_anthropic import ChatAnthropic
 from langchain.chat_models import init_chat_model
-from dotenv import load_dotenv
 from deepagents import (
     GeneralPurposeSubagentProfile,
     HarnessProfile,
     register_harness_profile,
 )
 
-load_dotenv()
+# NOTE: no load_dotenv() here. Entry points call src.env.load_env() — importing
+# this module must not reconfigure the process. See src/env.py.
 
 MODEL_CONFIG = {
     "claude-haiku-4-5-20251001": {

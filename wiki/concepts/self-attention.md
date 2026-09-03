@@ -4,7 +4,7 @@ created: 2025-01-27
 updated: 2025-01-27
 type: concept
 tags: [architecture, training]
-sources: [raw/papers/attention_is_all_you_need.pdf]
+sources: [raw/papers/attention_is_all_you_need.md]
 authors: [Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Łukasz Kaiser, Illia Polosukhin]
 confidence: high
 ---

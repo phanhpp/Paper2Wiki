@@ -706,4 +706,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    from src.env import load_env
+
+    load_env()
     main()

@@ -165,7 +165,7 @@ async def run_turn_stream_async(
 
         # Handle interrupts and resume
         renderer.on_turn_end()  # newline before HITL prompt
-        decisions = renderer.handle_interrupts(pending_interrupts)
+        decisions = await renderer.handle_interrupts(pending_interrupts)
         payload = Command(resume={"decisions": decisions})
         # Loop back, stream the resumed execution
 

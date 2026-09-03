@@ -156,6 +156,9 @@ def main(dry_run: bool, dataset: str | None) -> int:
 
 
 if __name__ == "__main__":
+    from src.env import load_env
+
+    load_env()
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--dry-run", action="store_true", help="Preview without writing to LangSmith")
     p.add_argument("--dataset", choices=["ingest", "query", "marp"], help="Push only this dataset")

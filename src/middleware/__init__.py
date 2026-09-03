@@ -1,0 +1,16 @@
+"""Loop 2 — in-run verification middleware for Paper2Wiki.
+
+See ``README.md`` in this package for what is checked and how to add a check,
+and ``docs/loop_engineer/implement_plan.md`` for the design rationale.
+"""
+
+from src.middleware.types import CheckResult, Evaluation, RunContext
+from src.middleware.wiki_rubric import WikiRubricMiddleware, WikiRubricState
+
+__all__ = [
+    "CheckResult",
+    "Evaluation",
+    "RunContext",
+    "WikiRubricMiddleware",
+    "WikiRubricState",
+]

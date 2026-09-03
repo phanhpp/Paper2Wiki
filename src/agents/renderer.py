@@ -51,8 +51,13 @@ class Renderer(Protocol):
         """Internal diagnostic message; shown only when debug is enabled."""
         ...
 
-    def handle_interrupts(self, interrupts: list) -> list[dict]:
-        """Prompt the user for HITL decisions and return the decisions list."""
+    async def handle_interrupts(self, interrupts: list) -> list[dict]:
+        """Prompt the user for HITL decisions and return the decisions list.
+
+        Async because the answer does not always arrive on the calling thread:
+        a terminal blocks on stdin, but a chat front-end gets the click later as
+        a separate event and needs to ``await`` it without freezing the loop.
+        """
         ...
 
 
@@ -84,11 +89,14 @@ def legend(choices: list[str]) -> str:
     return " / ".join(CHOICE_LABEL[c] for c in choices)
 
 
-def build_decisions(interrupts, prompt_fn, edit_fn, message_fn, state: "_AutoApprove") -> list[dict]:
+async def build_decisions(interrupts, prompt_fn, edit_fn, message_fn, state: "_AutoApprove") -> list[dict]:
     """Shared HITL decision loop.
 
     For each requested action it offers only the decisions the tool allows
     (``choices_for``) and asks the front-end to resolve them:
+    All three callbacks are awaited, so a front-end can either answer inline
+    (the terminal, blocking on stdin) or wait on an event (Slack, a button click).
+
     - ``prompt_fn(action, review_config, choices)`` → the chosen key (``a/e/r/s/yolo``)
     - ``edit_fn(action)`` → raw new-args string (for ``e``)
     - ``message_fn(action, kind)`` → free-text for ``r`` (reason, optional) and
@@ -112,7 +120,7 @@ def build_decisions(interrupts, prompt_fn, edit_fn, message_fn, state: "_AutoApp
             continue
 
         choices = choices_for(review_config.get("allowed_decisions"))
-        choice = prompt_fn(action, review_config, choices)
+        choice = await prompt_fn(action, review_config, choices)
 
         if choice == "yolo":
             state.auto_approve = True
@@ -120,16 +128,16 @@ def build_decisions(interrupts, prompt_fn, edit_fn, message_fn, state: "_AutoApp
         elif choice == "r":
             # Reject + (optional) reason — feedback to the model so it tries a
             # different approach, the tool is NOT executed.
-            reason = (message_fn(action, "reject") or "").strip()
+            reason = (await message_fn(action, "reject") or "").strip()
             decision = {"type": "reject"}
             if reason:
                 decision["message"] = reason
             decisions.append(decision)
         elif choice == "s":
             # Respond — return the text as a successful tool result (ask-user tools).
-            decisions.append({"type": "respond", "message": message_fn(action, "respond") or ""})
+            decisions.append({"type": "respond", "message": await message_fn(action, "respond") or ""})
         elif choice == "e":
-            new_args = edit_fn(action)
+            new_args = await edit_fn(action)
             try:
                 parsed = json.loads(new_args)
             except json.JSONDecodeError:
@@ -189,18 +197,20 @@ class DefaultRenderer:
         if self.debug:
             print(message)
 
-    def handle_interrupts(self, interrupts: list) -> list[dict]:
-        def prompt_fn(action, review_config, choices):
+    async def handle_interrupts(self, interrupts: list) -> list[dict]:
+        # The callbacks are async to satisfy build_decisions' contract; stdin is
+        # blocking, so nothing is actually awaited inside them.
+        async def prompt_fn(action, review_config, choices):
             print(f"\n🔔 Tool: {action['name']}")
             print(f"   Args: {action['args']}")
             return input(f"{legend(choices)}: ").lower()
 
-        def edit_fn(action):
+        async def edit_fn(action):
             return input("New args (JSON or Python dict): ")
 
-        def message_fn(action, kind):
+        async def message_fn(action, kind):
             if kind == "reject":
                 return input("Reason to send the model (optional): ")
             return input("Reply to return as the tool result: ")
 
-        return build_decisions(interrupts, prompt_fn, edit_fn, message_fn, self._state)
+        return await build_decisions(interrupts, prompt_fn, edit_fn, message_fn, self._state)

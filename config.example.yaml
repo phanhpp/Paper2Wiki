@@ -70,3 +70,20 @@ ingest:
   # Override without a config file: PAPER2WIKI_INGEST_MODE=fast (env var takes priority)
   # Note: explicit user instructions in the prompt override this setting.
   mode: fast
+
+# ── Loop 2: in-run verification ───────────────────────────────────────────────
+# After each run the WikiRubricMiddleware classifies what the agent did (ingest /
+# query / marp), checks it, and on failure sends it back to the model with the
+# specific gaps. No LLM call — every check is deterministic or a similarity
+# score. LLM-as-judge grading stays in eval/run_weekly_eval.py.
+verification:
+  enabled: true            # kill switch: false makes the middleware inert
+  max_iterations: 2        # retries before giving up and surfacing the failure
+
+  # Query-path semantic checks (not yet implemented — see docs/loop_engineer/).
+  # Both thresholds are biased toward PASSING: a verification loop that cries
+  # wolf on normal usage gets switched off, and then you have nothing.
+  embedding_model: text-embedding-3-small
+  thresholds:
+    page_relevance: 0.40   # J1 — are the pages read relevant? err LOW
+    index_coverage: 0.60   # J2 — does the wiki cover this question? err HIGH
