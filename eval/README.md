@@ -55,11 +55,12 @@
 │      │             step_count_spike                                         │
 │      │      skips: run_type==chain AND name==LangGraph (infra noise)        │
 │      │  create_datasets_from_anomaly_report()                               │
-│      │      ──► LangSmith anomaly datasets  (HITL approval required)        │
+│      │      ──► LangSmith anomaly datasets   (tracked; no interrupt fires)  │
+│      │      ──► suggested pr_gate cases      (hard_error + run_type==tool)  │
 │      ▼                                                                      │
-│  tests/test_anomaly_regression.py  (pytest -m langsmith)                   │
-│      replays hard_error examples from anomaly datasets                      │
-│      gates: hard_error spans must not recur after fix is merged             │
+│  approved cases appended to eval/pr_gate_cases.json  (HITL: write_file)     │
+│      ──► from then on they run on EVERY PR via Track 1                      │
+│      Promotion is the durable coverage — there is no separate weekly replay │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 NOTE: memories/baselines.json  (Track 3 latency/token medians)
@@ -80,22 +81,34 @@ Regression tests measure performance consistency across application versions ove
 | --------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------ |
 | **Every PR / push**                     | `pytest -m unit` + `eval/run_gate.py` (Track 1)                                                | ✅ fully auto, no secrets |
 | **PR touching ingest/query/marp paths** | the matching golden eval (Track 2)                                                             | ✅ auto, path-conditional |
-| **Weekly schedule**                     | `run_weekly_baselines.py` (refresh `memories/baselines.json`) + `pytest -m langsmith` (replay) | ✅ auto                   |
+| **Weekly schedule**                     | `run_weekly_baselines.py` — refresh `memories/baselines.json` only                             | ✅ auto                   |
 | **On-demand: "Analyze my traces"**      | `trace-analysis` skill → detect anomalies → **create datasets + draft pr_gate cases**          | ❌ **HITL**               |
 
 
 **The split that trips people up — two speeds:**
 
 - **Automatic (CI) is *consume-only*.** Track 1 runs existing `pr_gate_cases.json` against a frozen
-floor; Track 3 weekly refreshes `memories/baselines.json` and *replays* whatever is already in the
-LangSmith regression datasets.
-- **The *generative* steps are HITL gated:** `create_datasets_from_anomaly_report` (push hard_error
-spans to LangSmith) and drafting new `pr_gate_cases.json` entries happen **only** when a human runs
-the `trace-analysis` skill and approves. CI never populates datasets or writes gate cases.
-→ Consequence: the weekly `pytest -m langsmith` replay is a **no-op until a human has run the skill
-at least once** to populate the datasets. That's by design — you don't want an agent
-auto-committing eval cases. The loop closes when the HITL-generated fix + regression case land in
-the same PR.
+floor; Track 3 weekly refreshes `memories/baselines.json`. Neither generates anything new.
+- **The *generative* step needs a human.** `create_datasets_from_anomaly_report` and the new
+`pr_gate_cases.json` entries only happen when someone runs the `trace-analysis` skill. CI never
+populates datasets or writes gate cases.
+
+**Precisely which part is enforced** (`agent.py:208` — `interrupt_on` covers `execute`,
+`write_file`, `edit_file`):
+
+| Step | Interrupt? |
+|---|---|
+| Push failed spans → LangSmith datasets | **no** — the skill asks by convention; nothing enforces it |
+| Append approved cases → `pr_gate_cases.json` | **yes** — it is a `write_file` |
+
+So the datasets are a *superset* of what reaches the gate.
+
+**Why there is no weekly replay.** There used to be a `pytest -m langsmith` job replaying
+hard_error examples from those datasets. It was removed as redundant: a hard error becomes durable
+coverage by being **promoted into `pr_gate_cases.json`**, which then runs on *every* PR — strictly
+more often than weekly. The only thing lost is the `recovery_quality` LLM judge ("did it fail
+*gracefully*"), which a deterministic gate can't express; that was judged not worth a second
+harness. The loop closes when the fix and its gate case land in the same PR.
 
 `create_datasets_from_anomaly_report` callers — **only** the `trace-analysis` skill (it's a `@tool`
 exposed to the supervisor; never called by any CI script). See
@@ -156,7 +169,6 @@ rendered box on the PR page) via `$GITHUB_STEP_SUMMARY` — no need to open the 
 | `eval/run_weekly_eval.py`          | 2     | Target fns + aevaluate wiring + gate logic                                              |
 | `eval/run_weekly_baselines.py`     | 3     | Fetch traces → compute `memories/baselines.json`                                        |
 | `memories/baselines.json`          | 3     | Per-run-name latency/token medians (3× threshold for anomaly detection)                 |
-| `tests/test_anomaly_regression.py` | 3     | pytest-langsmith: replays hard_error examples                                           |
 
 
 ---

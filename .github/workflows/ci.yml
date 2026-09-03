@@ -49,7 +49,7 @@ jobs:
       - run: uv sync --frozen
 
       - name: Unit tests
-        run: uv run pytest -m "not integration and not slow and not langsmith" -q
+        run: uv run pytest -m "not integration and not slow" -q
 
       - name: Eval gate
         # Skip on weekly schedule, only works on PRs not direct push to main
@@ -213,26 +213,21 @@ jobs:
         run: uv run python eval/run_weekly_eval.py --dataset marp --use-cached-all
 
   weekly:
-    name: Weekly (LangSmith regression)
+    name: Weekly (anomaly baselines)
     runs-on: ubuntu-latest
     permissions:
       contents: write   # commit refreshed memories/baselines.json back to main
     # Only runs on schedule — not on PRs or push to main.
-    # Does two things: (1) refresh memories/baselines.json (latency/token medians, committed),
-    # and (2) replay hard_error examples ALREADY in the LangSmith regression datasets.
-    # It does NOT populate those datasets — dataset creation
-    # (create_datasets_from_anomaly_report) is HITL-only via the trace-analysis skill. If no HITL
-    # run has populated them, the replay step is a no-op (nothing to replay).
+    # One job: refresh memories/baselines.json (rolling latency/token/step medians) from
+    # recent traces, and commit it, so local detect_anomalies_async compares against
+    # CI-fresh thresholds.
+    #
+    # There is deliberately no replay step here. A hard error becomes durable coverage by
+    # being promoted into eval/pr_gate_cases.json, which runs on EVERY PR — replaying the
+    # same examples weekly duplicated that. See eval/README.md.
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dataset == '')
     env:
       LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      LANGSMITH_TRACING: "true"
-      LANGSMITH_TEST_SUITE: "paper2wiki-regression"
-      LANGSMITH_EXPERIMENT: ${{ github.sha }}
-      LANGSMITH_TEST_CACHE: tests/cassettes
-      LANGSMITH_EXPERIMENT_METADATA: >
-        {"git_sha": "${{ github.sha }}", "branch": "${{ github.ref_name }}"}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -258,10 +253,3 @@ jobs:
             git push
           fi
 
-      - name: Anomaly regression (pytest-langsmith)
-        # run tests/test_anomaly_regression.py
-        # Replays hard_error examples from LangSmith datasets populated EARLIER by HITL
-        # (the trace-analysis skill), NOT by this workflow.
-        # Gates on: hard_error spans must no longer error after a fix is merged.
-        # Tracks (but does not gate on): latency_spike, token_blowout, step_count_spike.
-        run: uv run pytest -m "langsmith and not slow and not integration" -q

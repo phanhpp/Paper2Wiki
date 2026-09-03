@@ -336,7 +336,7 @@ Paper2Wiki is built as a worked example of [loop engineering](https://www.langch
 | **1 · Agent** | automate the work | Supervisor + Daytona marp subagent (Deep Agents SDK); skill-driven tools for ingest, query, slides, and trace analysis. HITL on every `write_file` / `edit_file` / `execute`. |
 | **2 · Verification** | correctness | `WikiRubricMiddleware` (`src/middleware/`) classifies each run as ingest / query / marp from a **filesystem diff** — catching writes made through the shell, which tool-call scanning misses — then runs 16 deterministic checks (frontmatter, wikilink resolution, `index.md` + `log.md`, graph nodes/edges, source hashes). On failure it sends the agent back with the specific gaps, capped at `max_iterations`, then surfaces the verdict. **No LLM, so the loop is free.** |
 | **3 · Event-driven** | run without being asked | `paper2wiki serve` — a Slack front-end over Socket Mode (outbound websocket, so no public URL or webhook). A message starts a turn, a threaded reply resumes it, approvals are Block Kit buttons. Same agent, same wiki as the terminal — it reuses the `Renderer` protocol, so the agent and persistence layers are untouched. |
-| **4 · Hill-climbing** | improve the harness | Weekly CI refreshes anomaly baselines from live traces; the `trace-analysis` skill converts detected failures into versioned LangSmith datasets and candidate PR-gate cases; `hard_error` examples are replayed weekly to prove fixes hold. A production bug lands its regression test in the same PR as its fix. |
+| **4 · Hill-climbing** | improve the harness | Weekly CI refreshes anomaly baselines from live traces; the `trace-analysis` skill turns detected failures into versioned LangSmith datasets and candidate PR-gate cases, HITL-approved. A production bug lands its regression test in the same PR as its fix — and that case then runs on every PR thereafter. |
 
 **Human oversight is a primitive at every level**, not an escape hatch: tool approvals in Loops 1 and 3, the retry cap surfacing to the user in Loop 2, and mandatory approval before any harness change is committed in Loop 4.
 
@@ -389,14 +389,15 @@ Track 2 — Golden Agent Eval (weekly, or path-conditional on PR)
 Track 3 — Anomaly Replay Loop (weekly + HITL only)
   run_weekly_baselines.py   Fetches traces and refreshes latency/token/step medians
   trace-analysis skill      HITL-approved anomaly detection + dataset creation
-  test_anomaly_regression.py Replays hard_error examples; fixed bugs must stay fixed
+  (promotion, not replay)   An approved hard_error becomes a pr_gate_cases.json entry,
+                            which then runs on every PR — that is what locks the fix in
 ```
 
 **Track 1: deterministic PR gate** — fast regression checks that exercise tools directly with versioned inputs and assertions, before any LLM or agent runtime. The **blocking** cases are deterministic and key-free (hash-convention correctness, SSRF/boundary guards, wiki integrity), so the 100% floor never flakes. Network/external behavior (web search/extract, arXiv) is tracked as non-blocking **capability** — it uses a web-provider key when one is set (mapped in CI), and skips gracefully otherwise.
 
 **Track 2: golden agent evals** — end-to-end agent runs over curated ingest, query, and slide-generation scenarios. Code checks validate trajectories and required artifacts, while LLM judges score groundedness, faithfulness, and task-specific quality.
 
-**Track 3: anomaly replay loop** — weekly CI fetches recent LangSmith traces to update baselines, then replays HITL-approved `hard_error` examples from LangSmith datasets to confirm previously fixed failures do not recur.
+**Track 3: anomaly loop** — weekly CI fetches recent LangSmith traces to refresh the anomaly baselines. The `trace-analysis` skill (HITL) turns detected failures into LangSmith datasets and, for tool hard errors, candidate PR-gate cases. **Promotion is what makes a fix durable**: once a case is in `pr_gate_cases.json` it runs on every PR, so there is no separate weekly replay to maintain.
 
 **Closed feedback loop** — the trace-analysis skill surfaces failures across the full stack (tool hard errors, latency spikes, token blowouts, step-count anomalies, HITL rejections). For hard errors it auto-generates candidate eval/pr_gate_cases.json entries with inferred assertions and waits for HITL approval before committing. The fix and its regression case land in the same PR, permanently hardening the gate against that failure recurring.
 

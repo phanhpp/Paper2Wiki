@@ -37,6 +37,7 @@ python scripts/lint.py --wiki-dir wiki/
 uv run python -m src.cli.app repl                  # interactive chat
 uv run python -m src.cli.app chat "ingest <url>"   # one-shot
 uv run python -m src.cli.app serve                 # listen on Slack (Loop 3)
+uv run python -m src.cli.app fetch git-repo        # phase-1 connector fetch (no LLM)
 uv run python -m src.cli.app sessions ls           # browse sessions
 uv run python -m src.cli.app config show           # effective config
 ```
@@ -147,6 +148,27 @@ Skills available to the supervisor:
 - `skills/web-tools/` — web search/extract provider selection and call patterns (Firecrawl, Tavily, Exa)
 - `skills/marp-slide/` — Marp slide creation (injected into the Daytona sandbox)
 
+### Connectors (`src/connectors/`) — phase 1 of ingest
+
+Ingest splits in two: **phase 1** hits a source and dumps raw responses to
+`connectors/<name>/raw/` with **no LLM**; **phase 2** is an agent run that reads those
+dumps and writes wiki pages. Re-synthesising is then free — nothing is re-fetched.
+
+**Connectors never write files.** They implement one method — `fetch(config, cursor) ->
+Iterator[Item]` — and `base.py` owns every write, hash and ledger update. That is what
+makes the ledger's guarantees unforgeable rather than merely documented.
+
+The ledger (`manifest.json`) records **one entry per item**, not per run:
+`content_hash` (dedupe), `deleted_at` (deletion detection), `cursor` (incremental fetch),
+`synthesised_at` (the phase-1/phase-2 boundary — without it synthesis cost grows with the
+archive). Written after *every* item, so a crash keeps what completed. Deletion is only
+inferred on a full sweep, since a cursor-based run sees a window.
+
+`connectors/` is gitignored — dumps get large and eventually personal.
+
+Design rationale and what was taken from OpenWiki: `src/connectors/README.md` and
+`docs/openwiki/targets.md`.
+
 ### Slack front-end (`src/slack/`) — Loop 3
 
 `paper2wiki serve` runs the same agent, same wiki, driven by Slack messages instead of
@@ -245,15 +267,18 @@ Evaluator gating: each golden dataset example lists the evaluators it opts into 
 
 ### Tier 3 — Weekly CI (scheduled)
 
-Weekly job (`ci.yml` `weekly`):
+Weekly job (`ci.yml` `weekly`) does **one** thing:
 - `eval/run_weekly_baselines.py` — fetches traces, `compute_baselines_async` merges medians into `memories/baselines.json`, CI commits and pushes to `main`
-- `pytest -m langsmith` — replays `hard_error` examples from HITL-reviewed LangSmith datasets; gates on no regressions (does not read `baselines.json`)
+
+There is deliberately **no weekly replay**. A `pytest -m langsmith` job used to replay `hard_error` examples from the anomaly datasets; it was removed as redundant, because a hard error becomes durable coverage by being *promoted into* `eval/pr_gate_cases.json`, which then runs on **every** PR — strictly more often. The only signal lost is the `recovery_quality` LLM judge, which a deterministic gate can't express.
 
 Golden agent evals (`eval-ingest` / `eval-query` / `eval-marp`) are path-conditional on PRs; weekly schedule runs all three when enabled.
 
 ### Closed feedback loop
 
 `trace-analysis` skill → surfaces hard errors, latency spikes, token blowouts, HITL rejections → auto-generates candidate `eval/pr_gate_cases.json` entries with inferred assertions → HITL approval → fix and regression case land in the same PR, permanently hardening the gate.
+
+**Which half is actually enforced:** `interrupt_on` covers `execute`/`write_file`/`edit_file` (`agent.py:208`), so pushing spans to LangSmith datasets fires **no** prompt — the skill asks by convention. Only appending to `pr_gate_cases.json` is enforced, because it's a `write_file`. The datasets are therefore a superset of what reaches the gate.
 
 ### Commands
 
@@ -268,13 +293,12 @@ uv run --env-file .env python eval/run_gate.py
 uv run --env-file .env python eval/run_weekly_eval.py --dataset ingest
 uv run --env-file .env python eval/run_weekly_eval.py --dataset query --use-cached-transformer-query
 
-# Tier 3 — weekly baselines + langsmith regression
+# Tier 3 — weekly baselines (no replay step; see Tier 3 above)
 uv run --env-file .env python eval/run_weekly_baselines.py
-uv run --env-file .env pytest -m "langsmith and not slow and not integration" -q
 ```
 
 **Known CI constraints:**
-- `wiki/` is not committed — wiki-dependent tests skip gracefully when pages are absent
+- `wiki/` **is** committed (16 files) and acts as a test fixture — five test files read it, and the `wiki_check_runs` gate case runs the integrity check against it. Tests still skip gracefully when pages are absent, but the committed wiki is what they normally exercise
 - `test_fetch_arxiv_downloads_paper` hits real arXiv network — marked `integration`, excluded from CI to avoid 429s
 
 **When adding a new tool**, add:
