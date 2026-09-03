@@ -87,3 +87,15 @@ verification:
   thresholds:
     page_relevance: 0.40   # J1 — are the pages read relevant? err LOW
     index_coverage: 0.60   # J2 — does the wiki cover this question? err HIGH
+
+# ── Connectors: phase 1 of ingest, deterministic and LLM-free ────────────────
+# `paper2wiki fetch <name>` hits a source, dumps the raw response under
+# connectors/<name>/raw/, and records each item in manifest.json. Nothing is
+# written to the wiki here — synthesis is a separate agent run, which can be
+# repeated for free because the raw data is already local.
+connectors:
+  git-repo:
+    enabled: false           # set true and list repos below
+    repos: []
+      # - id: any2wiki
+      #   path: ~/dev/llm_wiki

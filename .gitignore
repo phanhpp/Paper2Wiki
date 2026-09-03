@@ -90,3 +90,8 @@ prometheus/master_key
 # gateway secrets (never commit)
 gateway/.env
 gateway/prometheus/master_key
+
+# connector raw dumps — large, and eventually personal (gmail, slack).
+# Leading slash matters: a bare `connectors/` would also ignore src/connectors/
+# and tests/connectors/, silently excluding the code itself.
+/connectors/

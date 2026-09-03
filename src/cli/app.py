@@ -18,6 +18,7 @@ import typer
 from src.env import load_env
 from src.cli.commands import chat as chat_cmd
 from src.cli.commands import config as config_cmd
+from src.cli.commands import fetch as fetch_cmd
 from src.cli.commands import sessions as sessions_cmd
 from src.cli.commands import slack as slack_cmd
 
@@ -41,6 +42,7 @@ def _main() -> None:
 app.command("repl")(chat_cmd.repl) # register the repl command
 app.command("chat")(chat_cmd.chat) # register the chat command
 app.command("serve")(slack_cmd.serve) # register the Slack listener
+app.command("fetch")(fetch_cmd.fetch) # register the connector fetch
 app.add_typer(sessions_cmd.app, name="sessions", help="Browse/search/resume/prune saved sessions.")
 app.add_typer(config_cmd.app, name="config", help="Inspect ingest mode, wiki path, and available web providers.")
 
