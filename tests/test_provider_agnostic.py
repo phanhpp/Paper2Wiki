@@ -327,32 +327,45 @@ def test_model_flag_changes_which_api_key_is_required(monkeypatch):
     assert _required_model_key() == "OPENAI_API_KEY"
 
 
+def _option_names(command_path: list[str]) -> set[str]:
+    """Every option string a command accepts, read from the command itself.
+
+    Deliberately not parsed out of ``--help``: under CI's ``FORCE_COLOR`` Rich styles an
+    option name in pieces (``\x1b[1;36m-\x1b[0m\x1b[1;36m-model\x1b[0m``), so the literal
+    "--model" is absent from the output, and a narrow terminal truncates it anyway. Both
+    made the old assertion pass locally and fail in CI.
+    """
+    import typer
+
+    from src.cli.app import app
+
+    command = typer.main.get_command(app)
+    for name in command_path:
+        command = command.get_command(None, name)
+    return {opt for param in command.params for opt in param.opts}
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "command",
     [["repl"], ["chat"], ["serve"], ["sessions", "resume"], ["config", "show"]],
 )
 def test_model_flag_is_registered_on_every_model_using_command(command):
-    from typer.testing import CliRunner
-
-    from src.cli.app import app
-
-    result = CliRunner().invoke(app, command + ["--help"])
-    assert result.exit_code == 0
-    assert "--model" in result.output
-    assert "-m" in result.output
+    opts = _option_names(command)
+    assert "--model" in opts
+    assert "-m" in opts, "the short form must work everywhere the long one does"
 
 
 @pytest.mark.unit
 def test_fetch_has_no_model_flag():
-    """`fetch` never calls a model, so the flag would be a lie."""
-    from typer.testing import CliRunner
+    """`fetch` never calls a model, so the flag would be a lie.
 
-    from src.cli.app import app
-
-    result = CliRunner().invoke(app, ["fetch", "--help"])
-    assert result.exit_code == 0
-    assert "--model" not in result.output
+    This one used to pass for the wrong reason: under FORCE_COLOR the literal "--model"
+    is never in the rendered help, so `not in result.output` held whether or not the flag
+    existed.
+    """
+    opts = _option_names(["fetch"])
+    assert "--model" not in opts and "-m" not in opts
 
 
 @pytest.mark.unit

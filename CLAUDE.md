@@ -76,7 +76,32 @@ The supervisor agent is constructed in `src/agents/agent.py:create_supervisor()`
 
 1. **Supervisor** (`GuardedLocalShellBackend`, `virtual_mode=True`) — handles wiki ingestion, trace analysis, and general tasks. Runs on the local filesystem but cannot escape the repo root.
 2. **`marp-slide-creator` subagent** — a Daytona-sandboxed Deep Agent for slide creation. Constructed in `src/agents/daytona_agent.py`. Skills are uploaded to `/home/daytona/skills/` in the sandbox at startup. Sandbox is persisted and restored per `thread_id`.
-3. **HITL interrupts** — both agents use `interrupt_on` for `execute`, `write_file`, and `edit_file`. `stream.py:_handle_interrupts()` prompts the user at the CLI; typing `yolo` enables session-scoped auto-approve.
+3. **HITL interrupts** — both agents use `interrupt_on` for `execute`, `write_file`, and `edit_file`. `renderer.handle_interrupts()` prompts the user; typing `yolo` enables session-scoped auto-approve.
+
+**Three things about the supervisor that are easy to get wrong, and all three have bitten:**
+
+**`execute` gets an allowlisted environment, never `inherit_env=True`.** `LocalShellBackend`
+defaults to an **empty** env, so shell commands ran with nothing set. `git` survived (`sh`
+supplies a fallback `PATH`) but `gh` could not read `~/.config/gh/hosts.yml` and reported
+*"You are not logged into any GitHub hosts"* — an auth error for a missing variable.
+`backend_wrapper.shell_env()` now passes a fixed list (`HOME`, `PATH`, `SSH_AUTH_SOCK`, …).
+**Do not switch to `inherit_env=True`**: `os.environ` holds every provider key, and
+`execute` is *not* path-guarded — only HITL stands between it and the filesystem.
+`tests/test_no_secrets_in_repo.py` fails if a secret ever reaches that env.
+
+**Interrupts are read from `aget_state()`, not the `values` stream.** They used to be
+detected mid-stream, which prompted **twice for one tool call** — `values` re-emits the
+whole state each super-step, so the interrupt just resolved reappeared on resume. **Do not
+"fix" a repeat by deduplicating on `Interrupt.id`**: it is
+`xxh3_128_hexdigest(checkpoint_ns)` — a hash of the *node position*, not the interrupt's unique ID — so if
+two genuine approvals at the same node, they will share the exact same Interrupt.id. Ignoring matching IDs would bypass the second interrupt object and automatically approve the action without asking you. Pinned by `tests/test_stream_interrupts.py`. This bug hit Slack too; both
+front-ends share `run_turn_stream_async`.
+
+**File tools and `execute` use different path spaces.** `virtual_mode=True` makes
+`read_file`/`write_file` show `/`-rooted virtual paths (`/wiki/index.md`); `execute` runs a
+real shell already in the repo root, where those do not exist. The agent used to try
+`git -C /llm_wiki …`. The rule now lives in the supervisor prompt (`## Paths`) and in
+`skills/trace-analysis/SKILL.md`.
 
 **LLMs** (`src/agents/llms.py`): models are built via the `set_up_llms(model, **kwargs)` factory. Known models (`MODEL_CONFIG`) use tuned settings (retries, timeout, max_tokens, effort); any other string (e.g. `openai:gpt-4o`) is passed straight to `init_chat_model` with generic defaults — so the app is **provider-agnostic**. A `HarnessProfile` for sonnet is registered (disables the general-purpose subagent, adds a "read the relevant skill first" system-prompt suffix).
 
@@ -87,7 +112,9 @@ The supervisor agent is constructed in `src/agents/agent.py:create_supervisor()`
 ### Persistence (two SQLite databases in `.sessions/`)
 
 - **`checkpoints.db`** — LangGraph `AsyncSqliteSaver`; stores graph state for interrupt/resume. Lazily initialized as a module-level singleton in `agent.py`.
-- **`sessions.db`** — clean message history + FTS5 full-text search. Schema defined in `src/sessions/sessions_db_setup.py`. Auto-initialized on import via `_sessions_conn` singleton. Use `session_manager.prune_sessions()` for manual cleanup (auto-pruning is intentionally off).
+- **`sessions.db`** — clean message history + FTS5 full-text search. `--no-save`
+  (`persist=False`) skips this DB only — it still calls `aget_state()` on
+  `checkpoints.db` each turn, which is how a pending interrupt is detected. Schema defined in `src/sessions/sessions_db_setup.py`. Auto-initialized on import via `_sessions_conn` singleton. Use `session_manager.prune_sessions()` for manual cleanup (auto-pruning is intentionally off).
 
 **Pruning is coupled across both DBs by `thread_id`.** `sessions prune` deletes ended sessions from `sessions.db` *and* evicts their checkpoint state from `checkpoints.db` (via `agent.py:prune_checkpoints` → `adelete_thread`) in one invocation, driven by the ids `prune_sessions` returns. `prune_sessions` stays sync (blocking sqlite3); the async eviction's single `asyncio.run` boundary lives in the CLI `prune` command. Full-thread deletion only — never `aprune(keep_latest)` (DeltaChannel-unsafe). User guide in `src/sessions/README.md`.
 

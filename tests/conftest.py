@@ -18,6 +18,21 @@ import pytest
 os.environ["LANGSMITH_TRACING"] = "false"
 os.environ["LANGCHAIN_TRACING_V2"] = "false"  # the older name, still honoured
 
+# Colour off, at import time and for the same reason as above.
+#
+# CI sets FORCE_COLOR, and Rich then styles an option name in pieces —
+# ``\x1b[1;36m-\x1b[0m\x1b[1;36m-model\x1b[0m`` — so the literal "--model" is not in the
+# output and any assertion on rendered text fails there while passing locally. NO_COLOR
+# also stops spinner frames leaking into captured output.
+os.environ["NO_COLOR"] = "1"
+os.environ["TERM"] = "dumb"
+os.environ.pop("FORCE_COLOR", None)
+
+# A fixed, wide terminal. Rich truncates table cells to fit ("https://openrouter.ai/…"),
+# so any test reading a value out of a table depends on the width it happened to run at.
+os.environ["COLUMNS"] = "200"
+os.environ["LINES"] = "50"
+
 
 @pytest.fixture(scope="session")
 def langsmith_experiment_metadata() -> dict:
