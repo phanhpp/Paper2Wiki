@@ -100,27 +100,21 @@ async def run_turn_stream_async(
     started_at = int(time.time())
 
     while True:
-        pending_interrupts = None
-
         # Signal "agent is thinking" before any output — the renderer shows a transient
         # spinner that the first token/tool-call tears down. Runs each iteration so the
         # post-interrupt resume (below) gets a fresh spinner during its think gap too.
         renderer.on_turn_start()
 
-        # Stream values (for interrupts) + messages (for token output)
+        # Stream messages (token output) + updates (tool calls). Interrupts are NOT read
+        # from here — see the state check after the loop for why.
         async for chunk in agent.astream(
             payload,
             config=merged_config,
             version="v2",
             subgraphs=True,
-            stream_mode=["values", "messages", "updates"],
+            stream_mode=["messages", "updates"],
         ):
-            if chunk["type"] == "values":  # Interrupts ride on values stream parts in v2
-                if chunk.get("interrupts"):
-                    pending_interrupts = chunk["interrupts"]
-                    break  # stop streaming, handle HITL
-
-            elif chunk["type"] == "updates":
+            if chunk["type"] == "updates":
                 for node_name, node_data in chunk["data"].items():
                     if not isinstance(node_data, dict):
                         continue
@@ -159,12 +153,27 @@ async def run_turn_stream_async(
                             if text:
                                 renderer.on_token(text)
 
+        renderer.on_turn_end()  # newline after streaming / before any HITL prompt
+
+        # Ask the graph whether it is interrupted, rather than watching the stream.
+        #
+        # This used to read ``chunk["interrupts"]`` off the ``values`` stream, which
+        # prompted **twice for one tool call**: ``values`` emits the whole state after
+        # each super-step, so when the loop restarts to resume, the first snapshot still
+        # carries the interrupt we just resolved and it looks like a new one.
+        #
+        # Deduplicating on ``Interrupt.id`` would be worse than the bug: the id is
+        # ``xxh3_128_hexdigest(checkpoint_ns)`` (langgraph/types.py:568) — a hash of the
+        # *node position*, not the individual interrupt. Two genuine approvals at the same
+        # node share an id, so skipping repeats would silently auto-approve the second.
+        #
+        # The persisted checkpoint has no such ambiguity: it either holds a pending
+        # interrupt or it does not.
+        state = await agent.aget_state(merged_config)
+        pending_interrupts = getattr(state, "interrupts", None)
         if not pending_interrupts:
-            renderer.on_turn_end()  # newline after streaming
             break
 
-        # Handle interrupts and resume
-        renderer.on_turn_end()  # newline before HITL prompt
         decisions = await renderer.handle_interrupts(pending_interrupts)
         payload = Command(resume={"decisions": decisions})
         # Loop back, stream the resumed execution

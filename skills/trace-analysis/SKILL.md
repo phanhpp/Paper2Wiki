@@ -271,6 +271,14 @@ HITL is enforced automatically at the infrastructure level via `interrupt_on` fo
 
 ## Git Commands
 
+**Run every command from the repo root, with relative paths.** The shell is already there.
+Never use `git -C <path>` or `cd` — the virtual `/`-rooted paths your file tools show do
+not exist in the shell, so `git -C /llm_wiki …` fails with
+`fatal: cannot change to '/llm_wiki'`.
+
+**A fresh branch has no upstream**, so the first push needs
+`git push -u origin <branch>`; a bare `git push` fails.
+
 Always use `--no-pager` and `-n <limit>` to avoid pager hanging.
 
 **Read-only (safe):**

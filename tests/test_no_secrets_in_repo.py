@@ -62,3 +62,41 @@ def test_no_obvious_secrets_in_tracked_text_files() -> None:
                 break
 
     assert offenders == [], f"Potential secrets found in files: {offenders}"
+
+
+@pytest.mark.unit
+def test_shell_env_passes_no_secrets(monkeypatch):
+    """`execute`'s environment is an allowlist, so a new API key cannot leak into it.
+
+    The shell backend defaults to an *empty* environment, which broke `gh` (no HOME → it
+    reports "not logged into any GitHub hosts"). The fix passes a fixed list of variables
+    through — never `inherit_env=True`, which would hand every provider key to any command
+    the model decides to run.
+    """
+    from src.agents.backend_wrapper import SHELL_ENV_PASSTHROUGH, shell_env
+
+    # Secrets that exist in a real .env, plus one invented to prove the list is closed.
+    for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "LANGSMITH_API_KEY",
+                 "DAYTONA_API_KEY", "SLACK_BOT_TOKEN", "FIRECRAWL_API_KEY",
+                 "SOME_FUTURE_API_KEY"):
+        monkeypatch.setenv(name, "sk-should-never-reach-the-shell")
+
+    env = shell_env()
+
+    assert "sk-should-never-reach-the-shell" not in env.values()
+    assert not [k for k in env if any(w in k for w in ("KEY", "TOKEN", "SECRET", "PASSWORD"))]
+    # Anything added to the allowlist later must be justified as non-secret.
+    assert set(env) <= set(SHELL_ENV_PASSTHROUGH)
+
+
+@pytest.mark.unit
+def test_shell_env_provides_what_git_and_gh_need(monkeypatch):
+    """HOME and PATH are the two that break tooling when missing."""
+    from src.agents.backend_wrapper import shell_env
+
+    monkeypatch.setenv("HOME", "/home/someone")
+    monkeypatch.setenv("PATH", "/usr/local/bin:/usr/bin")
+    env = shell_env()
+
+    assert env["HOME"] == "/home/someone", "no HOME → gh reports itself as not logged in"
+    assert env["PATH"] == "/usr/local/bin:/usr/bin", "no PATH → gh is not found at all"

@@ -1,9 +1,40 @@
+import os
 from pathlib import Path
 
 from deepagents.backends import LocalShellBackend
 from deepagents.backends.protocol import ReadResult, WriteResult, EditResult, GrepResult, LsResult
 
 SENSITIVE_PATTERNS = [".env", "secrets.", "credentials.", "id_rsa", ".pem", ".key", ".aws/", ".ssh/"]
+
+# Environment variables passed through to `execute`.
+#
+# LocalShellBackend defaults to an **empty** environment (inherit_env=False), which is the
+# safe default but breaks ordinary tooling in a way that misreports itself: with no HOME,
+# `gh` cannot read ~/.config/gh/hosts.yml and says "You are not logged into any GitHub
+# hosts" — an auth error for what is really a missing variable.
+#
+# So: allowlist, never inherit. `os.environ` holds ANTHROPIC_API_KEY, LANGSMITH_API_KEY and
+# friends, and `inherit_env=True` would expose every one of them to any command the model
+# chooses to run. Nothing secret belongs on this list.
+SHELL_ENV_PASSTHROUGH = (
+    "PATH",            # find git, gh, uv — the default sh PATH misses /usr/local/bin
+    "HOME",            # ~/.gitconfig, ~/.config/gh/hosts.yml, the macOS keyring
+    "USER", "LOGNAME", # git author fallback
+    "SHELL", "TERM",
+    "LANG", "LC_ALL",  # without these, git mangles non-ASCII paths
+    "TMPDIR",
+    "SSH_AUTH_SOCK",   # git push over ssh — the agent cannot push without it
+    "TZ",
+)
+
+
+def shell_env() -> dict[str, str]:
+    """The allowlisted environment for `execute`, built from the current process.
+
+    Secrets are excluded by construction: only names in ``SHELL_ENV_PASSTHROUGH`` are
+    copied, so adding a new API key to .env can never leak it into a shell command.
+    """
+    return {k: os.environ[k] for k in SHELL_ENV_PASSTHROUGH if k in os.environ}
 
 # In eval mode: reads allowed only from these prefixes, writes only to wiki/.
 _EVAL_READ_ALLOWED = ("wiki/", "skills/", "memories/", "large_tool_results/")

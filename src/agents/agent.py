@@ -5,7 +5,7 @@ from src.tools import all_tools
 from src.prompts.system_prompt import PHASE_1_SUPERVISOR_PROMPT
 from langgraph.store.memory import InMemoryStore
 import aiosqlite
-from src.agents.backend_wrapper import GuardedLocalShellBackend
+from src.agents.backend_wrapper import GuardedLocalShellBackend, shell_env
 # NOTE: create_daytona_agent (→ langchain_daytona → the Daytona SDK) is imported lazily inside
 # create_supervisor, only when eval_mode is False. The import itself is ~3.6s; the real cost is at
 # call time — create_daytona_agent provisions/restores a sandbox over the network (tens of seconds).
@@ -190,6 +190,10 @@ async def create_supervisor(thread_id: str | None = None, eval_mode: bool = Fals
     supervisor_backend = GuardedLocalShellBackend(
         root_dir=str(REPO_ROOT),
         virtual_mode=True,
+        # Without this the shell gets an empty environment: `gh` reports itself as not
+        # logged in, and `git push` over ssh cannot reach the agent. Allowlisted, so no
+        # API key is ever visible to a shell command — see backend_wrapper.shell_env.
+        env=shell_env(),
         eval_mode=eval_mode,
     )
 

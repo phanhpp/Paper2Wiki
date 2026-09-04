@@ -1,7 +1,8 @@
 """Unit tests for the ``persist`` switch on ``run_turn_stream_async``.
 
 ``persist=False`` (the CLI's ``--no-save``) must skip sessions.db entirely: no
-``aget_state`` snapshot, no ``_save_session`` row/title. ``persist=True`` keeps the
+``_save_session`` row, title or history. It does **not** skip ``aget_state`` —
+that reads checkpoints.db and is how a pending HITL interrupt is detected. ``persist=True`` keeps the
 existing behaviour. All I/O is mocked — no DB, no network, no LLM.
 """
 
@@ -35,15 +36,23 @@ async def test_persist_false_skips_sessions_db(monkeypatch):
     )
 
     agent = _FakeAgent()
-    monkeypatch.setattr(agent, "aget_state",
-                        lambda config: state_calls.append(1) or _FakeState())
+
+    async def _spy_state(config):
+        state_calls.append(1)
+        return _FakeState()
+
+    monkeypatch.setattr(agent, "aget_state", _spy_state)
 
     await stream_mod.run_turn_stream_async(
         "hi", agent=agent, thread_id="t-nosave", persist=False,
     )
 
-    assert save_calls == []   # nothing written
-    assert state_calls == []  # snapshot not even taken
+    assert save_calls == []   # nothing written to sessions.db
+    # `aget_state` IS called once per turn — that is how interrupts are detected, and it
+    # reads checkpoints.db, which `--no-save` never claimed to skip. What it guarantees is
+    # no sessions.db row, title or history, which the two assertions here and the
+    # get_sessions_conn guard above cover.
+    assert state_calls == [1]
 
 
 @pytest.mark.unit
@@ -89,6 +98,9 @@ class _MessagesAgent:
     async def astream(self, *args, **kwargs):
         for chunk in self._chunks:
             yield chunk
+
+    async def aget_state(self, config):
+        return _FakeState()
 
 
 @pytest.mark.unit
