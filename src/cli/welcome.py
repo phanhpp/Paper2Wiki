@@ -1,8 +1,16 @@
-"""Rich welcome banner for the interactive REPL (Claude Code–style header).
+"""The banner printed once when the REPL starts.
 
-Static, printed once at REPL start — no ``Live`` needed (the banner never changes).
-Rendered via a single ``Panel`` so it stays one cohesive block above the
-prompt_toolkit input loop. See ``docs/rich_header.md`` for the Rich primitives used.
+Shows the session id, ingest mode, and any active flags, so you can see what you are
+talking to before you type. It never changes after printing, so it is a plain ``Panel``
+— no live-updating machinery needed.
+
+It is printed *before* the agent is built, because building the agent is slow (imports,
+and provisioning a Daytona sandbox); showing the header first means startup does not
+look frozen.
+
+Functions:
+    print_welcome(console, ...) — print the banner.
+    _bot_text()                 — build the styled name line inside it.
 """
 
 from __future__ import annotations

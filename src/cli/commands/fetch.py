@@ -1,7 +1,17 @@
-"""``paper2wiki fetch`` — phase 1 of ingest: pull raw source data, no LLM.
+"""``paper2wiki fetch`` — download raw source data. No LLM involved.
 
-Thin CLI wrapper, mirroring ``commands/slack.py``: options live here next to
-Typer, the work lives in ``src/connectors/``.
+Ingest happens in two phases, and this is the first one: hit a source, write the raw
+responses to ``connectors/<name>/``, record each item in a manifest, stop. Turning that
+into wiki pages is phase two — a separate agent run.
+
+Splitting them means re-writing a bad page costs nothing: the source data is already on
+disk, so nothing is re-downloaded. Unchanged items are skipped by content hash, so a
+second fetch is nearly free.
+
+The real work is in ``src/connectors/``; this file only declares the flags.
+
+Functions:
+    fetch(connector, ...) — run one connector, or every configured one if omitted.
 """
 
 from __future__ import annotations

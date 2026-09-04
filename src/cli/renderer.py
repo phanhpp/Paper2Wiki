@@ -1,14 +1,33 @@
-"""Rich + prompt_toolkit renderer for the CLI front-end.
+"""Draws the agent's output in the terminal.
 
-Implements the ``Renderer`` protocol from ``src/agents/renderer.py``:
-- assistant text streams as live-updating Markdown via ``rich.live.Live``
-- tool calls render as styled lines
-- HITL interrupts render as a panel; the choice is read with ``rich.prompt.Prompt`` (validated
-  choices + styling). ``handle_interrupts`` is ``async`` (the protocol requires it, so a
-  chat front-end can await a click), but nothing here awaits: ``Prompt.ask`` blocks on
-  stdin, which is fine even inside the active event loop — unlike prompt_toolkit's sync
-  ``prompt()``, it does not start its own loop. Between-turn REPL input uses prompt_toolkit's
-  async API instead — see ``src/cli/commands/chat.py``.
+The agent does not know it is talking to a terminal. It calls the ``Renderer`` methods
+in ``src/agents/renderer.py``, and whoever is listening decides what that looks like —
+here it is Rich; in Slack it is messages and buttons. Swapping front-ends changes only
+this file.
+
+What one turn looks like:
+
+    on_turn_start()   a "Thinking…" spinner appears
+    on_token()        first token: spinner off, a Markdown block starts and grows
+    on_tool_result()  a short preview; the full text is kept for /open
+    on_turn_end()     the finished Markdown stays on screen
+
+Methods (the protocol):
+    on_turn_start / on_turn_end  — begin and end a turn.
+    on_token(text)               — a chunk of the answer arrived.
+    on_tool_call(name, args)     — the agent is calling a tool.
+    on_tool_result(name, text)   — print a short preview, keep the full text for /open.
+    on_debug(message)            — only shown with --debug.
+    handle_interrupts(...)       — draw the approval prompt and return the decision.
+
+Other methods:
+    open_last_tool_output()  — page the last turn's full tool output (/open, Ctrl-O).
+    restore_echo()           — turn terminal echo back on if a turn died mid-stream.
+
+``handle_interrupts`` is ``async`` because Slack needs to await a button click. Nothing
+here actually awaits — ``Prompt.ask`` blocks on stdin, which is safe inside a running
+loop. (prompt_toolkit's sync ``prompt()`` would not be: it starts its own loop. The REPL
+uses its async API instead — see ``commands/chat.py``.)
 """
 
 from __future__ import annotations
@@ -150,7 +169,8 @@ class RichRenderer:
     def on_token(self, text: str) -> None:
         """Append a streamed text chunk to the live Markdown block (Live #2).
 
-        The first call hands off from the spinner: stop Live #1, then open Live #2.
+        On the first call the spinner is replaced: stop it, then start the Markdown
+        block in its place.
         Subsequent calls just grow the buffer and re-render it.
 
         self._buffer is a plain Python string used as a cumulative accumulation tank.
@@ -193,7 +213,7 @@ class RichRenderer:
         self.console.print(f"🔧 {name}({args_preview})", style="cyan")
 
     def on_tool_result(self, name: str, content: str) -> None:
-        """Show a short, dim preview of a tool result; stash the full text.
+        """Show a short, dim preview of a tool result, and keep the full text.
 
         Tool results (e.g. a 1000-line ``read_file``) are not streamed as Markdown —
         that smears the live view. Instead we print the first few lines and keep the

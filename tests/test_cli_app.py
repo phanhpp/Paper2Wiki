@@ -18,10 +18,10 @@ runner = CliRunner()
 
 @pytest.mark.unit
 def test_help_lists_all_commands():
-    """`--help` registers and lists all five top-level commands."""
+    """`--help` registers and lists all six top-level commands."""
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for cmd in ("repl", "chat", "serve", "sessions", "config"):
+    for cmd in ("repl", "chat", "serve", "fetch", "sessions", "config"):
         assert cmd in result.output
 
 
@@ -108,7 +108,7 @@ def test_serve_without_slack_tokens_exits_1(monkeypatch):
     result = runner.invoke(app, ["serve", "--eval-mode"])
     assert result.exit_code == 1
     assert "SLACK_BOT_TOKEN" in result.output
-    assert "docs/slack_setup.md" in result.output
+    assert "README.md" in result.output
 
 
 @pytest.mark.unit

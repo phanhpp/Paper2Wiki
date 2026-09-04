@@ -1,4 +1,14 @@
-"""Inspect the effective runtime configuration."""
+"""``paper2wiki config show`` — print the settings actually in effect.
+
+Answers "what will this run actually do?" without starting the agent: which model each
+task resolved to, which ingest mode, which wiki directory, and which web-search providers
+have keys. Reads config the same way the app does, so what it prints is what the app will
+use — including any flags you pass here, which is how you preview an override before
+committing to it.
+
+Functions:
+    show(...) — print the resolved ingest mode, wiki path, and available web providers.
+"""
 
 from __future__ import annotations
 
@@ -19,9 +29,10 @@ console = Console()
 def show(
     ingest_mode: Annotated[IngestMode | None, typer.Option("--ingest-mode", help="Preview this ingest mode.")] = None,
     wiki_path: Annotated[str | None, typer.Option("--wiki-path", help="Preview this wiki path.")] = None,
+    model: Annotated[str | None, typer.Option("--model", "-m", help="Preview this base model.")] = None,
 ) -> None:
-    """Show the resolved ingest mode, wiki path, and available web providers."""
-    apply_env(ingest_mode, wiki_path)
+    """Show the resolved model, ingest mode, wiki path, and available web providers."""
+    apply_env(ingest_mode, wiki_path, model)
 
     from src.ingest_mode import get_ingest_mode
 
@@ -31,6 +42,17 @@ def show(
 
     table.add_row("Ingest mode", get_ingest_mode())
     table.add_row("Wiki path", os.environ.get("WIKI_PATH", "./wiki (default)"))
+
+    # Per-task, because any task can be pointed at a different model.
+    try:
+        from src.llm_roles import VALID_ROLES, get_model_spec
+
+        for role in sorted(VALID_ROLES):
+            spec = get_model_spec(role)
+            suffix = f"  [dim]via {spec.base_url}[/]" if spec.base_url else ""
+            table.add_row(f"Model · {role}", f"{spec.model}{suffix}")
+    except Exception as exc:  # pragma: no cover - defensive
+        table.add_row("Model", f"[dim]unavailable ({exc})[/]")
 
     try:
         from src.tools.web_tools.registry import registry

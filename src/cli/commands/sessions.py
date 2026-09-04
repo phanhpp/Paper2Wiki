@@ -1,8 +1,24 @@
-"""Browse and manage saved sessions (sessions.db).
+"""``paper2wiki sessions ...`` — browse, search and clean up past conversations.
 
-These commands only touch the sessions DB (no agent/checkpointer), except ``resume`` which
-hands off to the REPL, and ``prune`` which also evicts the matching checkpoints from
-checkpoints.db (so it loads the async checkpointer — see its docstring).
+Every past chat is saved in ``sessions.db`` (readable history, full-text searchable) and
+in ``checkpoints.db`` (the resumable graph state). The two are linked by ``thread_id``.
+
+Most of these commands only read ``sessions.db``, so they are fast — they never load the
+agent. Two exceptions: ``resume`` starts the REPL, and the two prune commands also delete
+from ``checkpoints.db``, so they load the checkpointer.
+
+Commands:
+    ls             — list recent sessions, newest first.
+    stats          — totals and how many each age threshold would delete.
+    search         — full-text search over message history.
+    resume         — reopen a session in the REPL, by id or title.
+    rename         — give a session a new title.
+    prune          — delete old finished sessions, and their saved state.
+    prune-orphans  — delete saved state that has no session left (dry run by default).
+
+Helpers:
+    _fmt_ts, _session_table   — formatting for the output tables.
+    _complete_session_ref     — tab-completion for ids and titles.
 """
 
 from __future__ import annotations
@@ -305,6 +321,7 @@ def resume(
     )],
     ingest_mode: Annotated[IngestMode | None, typer.Option("--ingest-mode", help="Override ingest mode.")] = None,
     wiki_path: Annotated[str | None, typer.Option("--wiki-path", help="Override the wiki directory.")] = None,
+    model: Annotated[str | None, typer.Option("--model", "-m", help="Override the base model, e.g. openai:gpt-4o.")] = None,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Auto-approve all HITL prompts.")] = False,
     eval_mode: Annotated[bool, typer.Option("--eval-mode", help="Skip the Daytona sandbox.")] = False,
     debug: Annotated[bool, typer.Option("--debug", help="Show diagnostic output.")] = False,
@@ -333,6 +350,7 @@ def resume(
         thread_id=thread_id,
         ingest_mode=ingest_mode,
         wiki_path=wiki_path,
+        model=model,
         yes=yes,
         eval_mode=eval_mode,
         debug=debug,
@@ -373,19 +391,19 @@ def prune(
     older_than_days: Annotated[int, typer.Option("--older-than-days", help="Age threshold in days.")] = 90,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
 ) -> None:
-    """Delete ended sessions older than the threshold (+ their checkpoints).
+    """Delete finished sessions older than the age limit, and their saved state.
 
-    Pruning is coupled across both SQLite DBs by ``thread_id``: every session
-    deleted from sessions.db has its checkpoint state evicted from
-    checkpoints.db in the same invocation. A pruned session is never resumed,
-    so its checkpoint is pure garbage — keeping them in lockstep stops the two
-    DBs from drifting into orphaned state.
+    Each session is stored in two places, linked by ``thread_id``: its readable
+    history in ``sessions.db``, and its resumable state in ``checkpoints.db``.
+    This deletes from both in one go. Once a session is gone you can never resume
+    it, so its saved state is dead weight — deleting both together is what stops
+    ``checkpoints.db`` filling up with state no session points at any more.
 
-    ``prune_sessions`` stays synchronous (blocking sqlite3); the checkpoint
-    eviction (``prune_checkpoints``, async) runs here at the CLI boundary via
-    ``asyncio.run`` — the one spot guaranteed to have no event loop running.
-    This makes ``prune`` the only ``sessions`` subcommand that loads the async
-    checkpointer; ``ls`` / ``search`` / ``resume`` stay agent-free and fast.
+    One wrinkle worth knowing: deleting the history is ordinary blocking code,
+    but deleting the saved state is async. It is started here, in the command,
+    because this is the one place guaranteed to have no event loop already
+    running. That makes ``prune`` the only ``sessions`` command that loads the
+    checkpointer — ``ls`` / ``search`` / ``resume`` never do, so they stay fast.
     """
     from src.sessions.session_manager import prune_sessions
     from src.sessions.sessions_db_setup import close_sessions_conn, get_sessions_conn

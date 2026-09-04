@@ -1,14 +1,26 @@
-"""Paper2Wiki CLI entry point (``paper2wiki``).
+"""The entry point — where every command is registered.
 
-Top-level commands:
-  repl          interactive chat session
-  chat MSG      one-shot message
-  sessions ...  browse/search/resume/prune saved sessions
-  config show   inspect effective configuration
+Running ``paper2wiki <command>`` (or ``python -m src.cli.app <command>``) starts here.
+This file only connects the commands to their names; each one is written in ``commands/``.
 
-``.env`` is loaded in the root callback so credentials are available before any command runs.
-Per-command flags that affect tool registration (``--ingest-mode``/``--wiki-path``) are applied
-inside the command bodies, which import the agent lazily so the env is set first.
+Commands:
+    repl          interactive chat session.
+    chat MSG      run one message and exit.
+    serve         listen on a Slack channel, run the agent per message (Loop 3).
+    fetch [NAME]  pull raw source data into connectors/. No LLM.
+    sessions ...  browse, search, resume or prune past sessions.
+    config show   print the settings actually in effect.
+
+Two ordering rules this file exists to enforce:
+
+1. ``.env`` is loaded in the root callback, so credentials exist before any command runs.
+2. Flags that change which tools get registered (``--ingest-mode``, ``--wiki-path``) are
+   applied inside each command body, which then imports the agent *lazily*. Importing it
+   at the top of a module would lock in the tool list before the flags were read.
+
+Functions:
+    _main() — the root callback; loads .env before any command.
+    main()  — module entry point for ``python -m src.cli.app``.
 """
 
 from __future__ import annotations
@@ -22,7 +34,10 @@ from src.cli.commands import fetch as fetch_cmd
 from src.cli.commands import sessions as sessions_cmd
 from src.cli.commands import slack as slack_cmd
 
-# TODO: add auto-completion support
+# TODO: enable auto-completion. `sessions resume`/`rename` already pass
+# autocompletion=_complete_session_ref, and `--install-completion` is the documented
+# way to enable it — but add_completion=False removes that flag, so neither can fire.
+# Flip this to True, or drop the completers.
 app = typer.Typer(
     name="paper2wiki",
     help="Paper2Wiki — a self-improving LLM knowledge base.",
