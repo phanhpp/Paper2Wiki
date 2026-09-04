@@ -21,18 +21,53 @@ Config shape (``config.yaml``)::
         timeout: 120
         extra_body: {}
 
-Resolution for a task:
+Which model a task gets
+-----------------------
 
-  model    = ``PAPER2WIKI_MODEL_<TASK>`` env > ``auxiliary.<task>.model``
-             > ``PAPER2WIKI_MODEL`` env > ``model.default`` > built-in fallback
-  provider = ``auxiliary.<task>.provider`` > ``model.provider``  ('auto'/'' → infer)
-  base_url/api_key = task value > base value > None  (None → provider env var)
-  timeout / extra_body = task value > default
+Five levels. The **first one that exists wins**, i.e. priority order::
 
-Model strings pass to ``init_chat_model``: any LangChain value works, incl. the
-``provider:model`` form (``openai:gpt-4o``). Router/multi-key features
-(fallbacks, credential pools) are intentionally NOT here — they belong to the
-LiteLLM gateway layer, which the SDK path can't honour.
+    Task-Specific Env Var → Task Config → Global Env Var → Base Config → Default Fallback
+
+    level                     lives in      example                      applies to
+    ------------------------  ------------  ---------------------------  ----------
+    1. Task-Specific Env Var  .env          PAPER2WIKI_MODEL_SUMMARIZE   one task
+    2. Task Config            config.yaml   auxiliary.summarize.model    one task
+    3. Global Env Var         .env          PAPER2WIKI_MODEL             every task
+    4. Base Config            config.yaml   model.default                every task
+    5. Default Fallback       built in      _FALLBACK_MODEL              every task
+
+The pattern behind the order: **task beats global, and env beats config.**
+
+Levels 4 and 3 are how you choose your model; levels 2 and 1 are how you make one
+task differ — permanently in the file, or temporarily with an env var.
+
+Non-Model Settings - All live in config.yaml 
+
+Besides the model name, other parameters (like keys, URLs, and timeouts) follow these lookup rules:
+
+    provider:   Task Config  -->  Global 'model:' block  -->  None
+            (None, '', or 'auto' means automatically infer from the model name)
+
+    base_url:   Task Config  -->  Global 'model:' block  -->  None
+    api_key:    Task Config  -->  Global 'model:' block  -->  None
+                (None means LangChain reads the provider's standard env var, e.g., OPENAI_API_KEY)
+
+    timeout:    Task Config ONLY  (Not inherited from global 'model:' block)
+    extra_body: Task Config ONLY  (Not inherited from global 'model:' block)
+
+⚬	Task Config: Specific overrides for individual tasks in config.yaml (under the auxiliary: block).
+⚬	Important: timeout and extra_body are isolated. Setting timeout in the global 'model:' block 
+    will not pass down to tasks like summarize or judge. 
+    If a task needs a custom timeout or extra parameters, you must set them inside that task's own config.
+
+Notes
+-----
+
+Model strings go straight to ``init_chat_model``, so any LangChain value works,
+including the ``provider:model`` form (``openai:gpt-4o``).
+
+Fallback chains and credential pools are deliberately **not** here. They belong to
+the LiteLLM gateway layer, which this SDK path cannot express.
 """
 
 from __future__ import annotations

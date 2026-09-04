@@ -5,7 +5,7 @@ from pathlib import Path
 from daytona import CreateSandboxFromSnapshotParams, Daytona
 from deepagents import create_deep_agent
 from langchain_daytona import DaytonaSandbox
-from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.memory import MemorySaver
 
 from src.prompts.system_prompt import SUBAGENT_PROMPT
@@ -51,7 +51,7 @@ def download_outputs(
 
 
 def create_daytona_agent(
-    model: ChatAnthropic,
+    model: BaseChatModel,
     skills: list[str],
     auto_stop_interval: int = 3, # stop after 3min idle (default is 15)
     auto_delete_interval: int = 5, # delete 5min after stopped (default is 10)

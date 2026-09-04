@@ -271,3 +271,74 @@ def test_set_up_llms_string_paths_unchanged(monkeypatch):
     assert captured["model"] == "openai:gpt-4o"
     assert captured["max_tokens"] == llms._GENERIC_DEFAULTS["max_tokens"]
     assert "effort" not in captured
+
+
+@pytest.mark.unit
+def test_model_precedence_full_chain(monkeypatch):
+    """Five levels can name a model; the first that exists wins, in this order:
+
+        Task-Specific Env Var → Task Config → Global Env Var → Base Config → Fallback
+
+    Documented in the module docstring and README's "Choosing your LLM". Asserted here
+    as one ordered sequence so the order itself is locked, not just each level.
+    """
+    import src.llm_roles as lr
+
+    cfg = {
+        "model": {"default": "level4-base-config"},
+        "auxiliary": {"summarize": {"model": "level2-task-config"}},
+    }
+    _set_config(monkeypatch, cfg)
+
+    # 1. task env var beats everything
+    monkeypatch.setenv("PAPER2WIKI_MODEL_SUMMARIZE", "level1-task-env-var")
+    monkeypatch.setenv("PAPER2WIKI_MODEL", "level3-global-env-var")
+    assert lr.get_model_spec("summarize").model == "level1-task-env-var"
+
+    # 2. drop it → the task's config block
+    monkeypatch.delenv("PAPER2WIKI_MODEL_SUMMARIZE")
+    assert lr.get_model_spec("summarize").model == "level2-task-config"
+
+    # 3. drop that → the global env var
+    _set_config(monkeypatch, {"model": {"default": "level4-base-config"}})
+    assert lr.get_model_spec("summarize").model == "level3-global-env-var"
+
+    # 4. drop that → model.default
+    monkeypatch.delenv("PAPER2WIKI_MODEL")
+    assert lr.get_model_spec("summarize").model == "level4-base-config"
+
+    # 5. nothing configured → the built-in fallback
+    _set_config(monkeypatch, {})
+    assert lr.get_model_spec("summarize").model == lr._FALLBACK_MODEL
+
+
+@pytest.mark.unit
+def test_timeout_and_extra_body_do_not_inherit_from_base(monkeypatch):
+    """provider/base_url/api_key inherit from the `model:` block; timeout/extra_body don't.
+
+    CLAUDE.md claimed all five inherited. They don't, and the asymmetry is easy to
+    reintroduce, so it is pinned here.
+    """
+    import src.llm_roles as lr
+
+    _set_config(monkeypatch, {
+        "model": {
+            "default": "base-model",
+            "provider": "anthropic",
+            "base_url": "https://base",
+            "api_key": "base-key",
+            "timeout": 99,
+            "extra_body": {"from": "base"},
+        },
+        "auxiliary": {"summarize": {}},   # task sets nothing
+    })
+    spec = lr.get_model_spec("summarize")
+
+    # these three inherit
+    assert spec.provider == "anthropic"
+    assert spec.base_url == "https://base"
+    assert spec.api_key == "base-key"
+
+    # these two do not
+    assert spec.timeout is None, "timeout must not inherit from the model: block"
+    assert spec.extra_body == {}, "extra_body must not inherit from the model: block"

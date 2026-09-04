@@ -5,12 +5,22 @@ from __future__ import annotations
 import re
 from typing import Any
 
-import anthropic
 from pydantic import BaseModel
 
 from src.ingest_mode import get_ingest_mode
 
-JUDGE_MODEL = "claude-sonnet-4-6"
+
+def _judge():
+    """The judge model for the configured provider.
+
+    Resolved through ``get_model_spec("judge")`` like every other auxiliary task, so a
+    non-Anthropic base model (or an ``auxiliary.judge`` override) is honoured here too.
+    Imported lazily so importing this module doesn't pull in the agent stack.
+    """
+    from src.agents.llms import set_up_llms
+    from src.llm_roles import get_model_spec
+
+    return set_up_llms(get_model_spec("judge"))
 
 
 def call_matches(expected: str | dict, actual: dict) -> bool:
@@ -60,16 +70,13 @@ class _MultiJudgeOutput(BaseModel):
 def llm_judge(system: str, user_content: str, key: str, max_input_chars: int = 12000) -> dict:
     """Call the Sonnet judge with structured output; return a LangSmith result dict."""
     compacted_content = compact_text(user_content)
-    client = anthropic.Anthropic()
     try:
-        resp = client.messages.parse(
-            model=JUDGE_MODEL,
-            max_tokens=512,
-            system=system,
-            messages=[{"role": "user", "content": compacted_content[:max_input_chars]}],
-            output_format=_JudgeOutput,
+        result = _judge().with_structured_output(_JudgeOutput).invoke(
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": compacted_content[:max_input_chars]},
+            ]
         )
-        result = resp.parsed_output
         return {
             "key": key,
             "score": float(result.score),
@@ -89,15 +96,11 @@ def llm_judge_multi(rubric: str, answer: str, keys: list[str], max_input_chars: 
     field_defs.update({f"{k}_reason": (str, _Field(...)) for k in keys})
     _Output = _create_model("_MultiJudgeOutput", **field_defs)
 
-    client = anthropic.Anthropic()
     try:
-        resp = client.messages.parse(
-            model=JUDGE_MODEL,
-            max_tokens=512,
-            messages=[{"role": "user", "content": (rubric + "\n\nAnswer to evaluate:\n" + compacted)[:max_input_chars]}],
-            output_format=_Output,
+        parsed = _judge().with_structured_output(_Output).invoke(
+            [{"role": "user", "content": (rubric + "\n\nAnswer to evaluate:\n" + compacted)[:max_input_chars]}]
         )
-        scores = resp.parsed_output.model_dump()
+        scores = parsed.model_dump()
     except Exception as exc:
         preview = str(exc)[:120]
         return [{"key": k, "score": 0.0, "comment": f"judge error: {preview}"} for k in keys]
