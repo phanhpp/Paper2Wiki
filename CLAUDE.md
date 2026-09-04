@@ -331,6 +331,11 @@ uv run --env-file .env python eval/run_weekly_baselines.py
 **When adding a new tool**, add:
 1. A unit test with mocked I/O covering the main logic branches
 2. A golden dataset example in the appropriate `eval/golden_datasets/*.json`
+3. **An entry in `_TOOL_EXECUTION`** (`src/tools/observability_eval_tools/create_eval_datasets.py`)
+   — `local` (no network, no API key), `web` (needs a search-provider key) or `network`.
+   It decides whether a failure of that tool can become a *blocking* gate case; only
+   `local` may, since regression cases are scored at 1.00 and anything that flakes would
+   block every PR. `tests/test_eval_case_generation.py` fails until you classify it.
 
 ## Pending Cleanup
 

@@ -29,6 +29,36 @@ _TOOL_EVAL_CATEGORY: dict[str, str] = {
     "quick_wiki_integrity_check": "health",
 }
 
+# How each tool executes — this decides whether its failures may become *blocking*
+# regression cases. Only "local" may: ``REGRESSION_THRESHOLDS`` scores retrieval and
+# boundary at 1.00, so a network case there blocks every PR the moment the provider
+# hiccups. (That is not hypothetical — the case that prompted this was generated from
+# an HTTP 429, and would have flaked on exactly the error that created it.)
+#
+# **Every tool in ``src/tools/__init__.py:all_tools`` must appear here.**
+# ``tests/test_eval_case_generation.py`` fails when one is missing — a comment asking
+# you to remember would not be a reminder.
+_TOOL_EXECUTION: dict[str, str] = {
+    # local — no network, no API key; reproducible in the secret-free gate
+    "compute_sha256":                      "local",
+    "quick_wiki_integrity_check":          "local",
+    "detect_anomalies_async":              "local",   # a TraceReport + the baselines file
+
+    # web — needs a search-provider key; run_gate skips these when none is set
+    "web_search":                          "web",
+    "web_extract":                         "web",
+
+    # network — reaches an external API or an LLM
+    "fetch_arxiv":                         "network",
+    "parse_pdf_docling":                   "network",
+    "run_trace_report_async":              "network",
+    "summarize_traces_async":              "network",
+    "compute_baselines_async":             "network",
+    "create_datasets_from_anomaly_report": "network",
+}
+
+_WEB_PROVIDER_KINDS = frozenset({"web"})
+
 _SCOPE_BY_RUN_TYPE: dict[str, str] = {
     "tool":  "tool",
     "chain": "flow",
@@ -127,17 +157,26 @@ def _generate_PR_cases(report: AnomalyReport) -> list[dict[str, Any]]:
                 continue
             seen_ids.add(span.id)
 
-            cases.append({
-                "id": f"regression_{span.run_name}_{span.id[:8]}",
-                "type": "regression",
+            # Unknown tool → "network" → capability. Fail-safe: a wrong capability is
+            # tracked and harmless, a wrong regression blocks every PR.
+            kind = _TOOL_EXECUTION.get(span.run_name, "network")
+            case_type = "regression" if kind == "local" else "capability"
+
+            case: dict[str, Any] = {
+                "id": f"{case_type}_{span.run_name}_{span.id[:8]}",
+                "type": case_type,
                 "category": _TOOL_EVAL_CATEGORY.get(span.run_name, "boundary"),
                 "tool": span.run_name,
                 "inputs": _normalize_example_inputs(span.inputs),
-                # No expect_* set — reviewer must fill in after fixing the crash:
-                # - valid input that crashed → add expect_keys once tool works
-                # - invalid input → add expect_error: true (graceful handling)
-                "_review": "fill in expect_keys or expect_error after fix is merged",
-            })
+                # The marker that this case is incomplete: no expect_* is set yet.
+                # - valid input that crashed → expect_keys, once the tool works
+                # - invalid input → expect_error_contains, NOT bare expect_error, which
+                #   passes on any exception (run_gate.py:141) including a network failure
+                "_review": "fill in expect_keys or expect_error_contains after the fix is merged",
+            }
+            if kind in _WEB_PROVIDER_KINDS:
+                case["requires_web_provider"] = True  # run_gate skips it without a key
+            cases.append(case)
 
     return cases
 

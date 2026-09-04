@@ -7,12 +7,18 @@ on:
       - 'src/**'
       - 'skills/**'
       - 'eval/**'
+      - 'tests/**'          # a test-only PR must still run the tests it changes
+      - 'pyproject.toml'    # a dependency bump changes what everything runs against
+      - 'uv.lock'
   push:
     branches: [main]
     paths:
     - 'src/**'
     - 'skills/**'
     - 'eval/**'
+    - 'tests/**'
+    - 'pyproject.toml'
+    - 'uv.lock'
     # Github doesn't allow both paths and paths-ignore 
   # schedule:
   #   - cron: "0 2 * * 1"   # weekly on Monday at 02:00 UTC — uncomment when ready
@@ -32,6 +38,13 @@ on:
 permissions:
   contents: read
   pull-requests: write   # needed so the eval gate can post a PR comment
+
+# One run per branch. Pushing three commits to a PR used to start three full runs and
+# leave the earlier two going; now the older ones are cancelled. Never cancel a run on
+# main — that one is the record of what actually shipped.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   unit-and-eval:
@@ -100,7 +113,11 @@ jobs:
   detect-changes:
     name: Detect changed paths
     runs-on: ubuntu-latest
-    if: github.event_name != 'schedule' && (github.event_name != 'workflow_dispatch' || github.event.inputs.dataset == '')
+    # Not on push: a merge to main would re-run the golden evals the PR already ran,
+    # and those cost real LLM calls (the cheap `Eval gate` step is already PR-only).
+    if: >
+      github.event_name != 'schedule' && github.event_name != 'push' &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.dataset == '')
     outputs:
       ingest: ${{ steps.filter.outputs.ingest_any_changed }}
       query:  ${{ steps.filter.outputs.query_any_changed }}

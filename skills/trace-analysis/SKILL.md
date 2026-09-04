@@ -132,12 +132,12 @@ The tool returns:
   "datasets": {"<dataset_name>": {"new": N, "total": N}},
   "suggested_cases": [
     {
-      "id": "regression_fetch_arxiv_a3f92c1",
-      "type": "regression",
+      "id": "capability_fetch_arxiv_a3f92c1",
+      "type": "capability",
       "category": "retrieval",
       "tool": "fetch_arxiv",
       "inputs": {"query": "1706.03762"},
-      "_review": "fill in expect_keys or expect_error after fix is merged"
+      "_review": "fill in expect_keys or expect_error_contains after the fix is merged"
     }
   ]
 }
@@ -153,8 +153,8 @@ Each case in `eval/pr_gate_cases.json` has these fields:
 
 | Field | Required | Description |
 |---|---|---|
-| `id` | ✅ | Unique snake_case string. Convention: `regression_<tool>_<short_hash>` for auto-generated cases |
-| `type` | ✅ | `"regression"` — blocks merge if it drops below threshold. `"capability"` — tracked only, never gate-blocking |
+| `id` | ✅ | Unique snake_case string. Auto-generated cases get `<type>_<tool>_<span_hash>` from the tool — you never write one |
+| `type` | ✅ | `"regression"` — blocks merge if it drops below threshold. `"capability"` — tracked only, never gate-blocking. **Set by the tool, not by you** — see below |
 | `category` | ✅ | Groups cases for scoring: `"retrieval"`, `"health"`, `"boundary"` |
 | `tool` | ✅ | Exact tool name as registered (matches `t.name` in `all_tools`) |
 | `inputs` | ✅ | Dict passed to `tool.ainvoke(inputs)` — must be JSON-serializable |
@@ -168,9 +168,19 @@ At least one `expect_*` field is required for `run_gate.py` to assert anything m
 
 #### Completing auto-generated cases (HITL)
 
+#### Why a case is regression or capability
+
+The tool sets `type` from how the tool being tested executes:
+
+- **`regression`** (blocks a merge) — only tools needing **no network and no API key**.
+  `REGRESSION_THRESHOLDS` scores these at 1.00, so anything that can flake blocks every
+  PR when it does.
+- **`capability`** (tracked, never blocks) — everything else: `fetch_arxiv`,
+  `web_search`, `web_extract`, the trace tools. Promotable once the case runs offline.
+
 Auto-generated cases have `_review` set and no `expect_*` field. Before presenting to the user, **use the anomaly signal and tool name to suggest the missing assertion:**
 
-- Read `span.signals` for the error message. If it contains an HTTP error, invalid ID, malformed input → the input was invalid → suggest `"expect_error": true`
+- Read `span.signals` for the error message. If it contains an HTTP error, invalid ID, malformed input → the input was invalid → suggest **`"expect_error_contains": "<distinctive fragment of the real message>"`**. Prefer this over bare `"expect_error": true`, which passes on *any* exception (`run_gate.py:141`) — a network outage passes it too, so the case would test nothing. Use bare `expect_error` only when there is no stable message fragment.
 - If the error looks like a bug on valid input (connection error, parsing crash, unexpected None) → suggest `"expect_keys": [<known output fields for this tool>]` — check the tool's return type or other passing cases in `eval/pr_gate_cases.json` for reference
 - Strip `_review` from the final case before writing
 
@@ -191,14 +201,16 @@ Known output fields per tool (for `expect_keys` suggestions):
 
 For each case, I've inferred the missing assertion from the error signal:
 
-1. `regression_fetch_arxiv_a3f92c1`
+1. `capability_fetch_arxiv_a3f92c1`  (capability — fetch_arxiv needs the network)
    Tool: fetch_arxiv | Inputs: {"query": "INVALID999"}
    Error signal: "No paper found for ID INVALID999"
-   → Input looks invalid — suggesting `expect_error: true`
+   → Input looks invalid — suggesting `expect_error_contains: "No paper found"`,
+     so the case fails if fetch_arxiv ever breaks a different way
 
    Final case:
-   {"id": "regression_fetch_arxiv_a3f92c1", "type": "regression", "category": "retrieval",
-    "tool": "fetch_arxiv", "inputs": {"query": "INVALID999"}, "expect_error": true}
+   {"id": "capability_fetch_arxiv_a3f92c1", "type": "capability", "category": "retrieval",
+    "tool": "fetch_arxiv", "inputs": {"query": "INVALID999"},
+    "expect_error_contains": "No paper found"}
 
 Approve writing these to eval/pr_gate_cases.json? (edit any case before confirming)
 ```
