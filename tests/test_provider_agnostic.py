@@ -478,3 +478,53 @@ def test_configured_provider_still_applies_without_a_prefix(monkeypatch):
     spec = lr.get_model_spec("supervisor")
 
     assert spec.provider == "anthropic" and spec.base_url == "https://x"
+
+
+# --- config show must reveal where the request goes -----------------------------
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "spec_kwargs, expect_provider, expect_endpoint",
+    [
+        ({"model": "claude-sonnet-4-6", "provider": "anthropic"}, "anthropic", "provider default"),
+        ({"model": "openai:gpt-4o"}, "openai", "provider default"),          # from the prefix
+        ({"model": "gpt-4o"}, "openai", "provider default"),                  # inferred
+        ({"model": "claude-x", "provider": "openai", "base_url": "https://openrouter.ai/api/v1"},
+         "openai", "https://openrouter.ai/api/v1"),                           # routed
+        ({"model": "mystery-model-9000"}, "unknown", "provider default"),
+    ],
+)
+def test_config_show_reports_the_real_destination(spec_kwargs, expect_provider, expect_endpoint):
+    """A model name alone can't tell you where the request goes — this column can.
+
+    The Anthropic 404 (`model: openai:gpt-4o`) was invisible while the table showed only
+    the model. Provider + endpoint make a name/provider mismatch obvious.
+    """
+    from src.cli.commands.config import _routing
+    from src.llm_roles import ModelSpec
+
+    provider, endpoint = _routing(ModelSpec(**spec_kwargs))
+    assert expect_provider in provider
+    assert expect_endpoint in endpoint
+
+
+@pytest.mark.unit
+def test_config_show_prints_provider_and_endpoint_columns(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    import src.cli.app as appmod
+    from src.cli.app import app
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "model:\n"
+        "  default: anthropic/claude-sonnet-4.5\n"
+        "  provider: openai\n"
+        "  base_url: https://openrouter.ai/api/v1\n"
+    )
+    monkeypatch.setenv("PAPER2WIKI_CONFIG", str(cfg))
+    monkeypatch.setattr(appmod, "load_env", lambda *a, **k: None)
+
+    flat = " ".join(CliRunner().invoke(app, ["config", "show"]).output.split())
+    assert "Provider" in flat and "Endpoint" in flat
+    assert "openrouter.ai" in flat, "the endpoint must be visible, not just the model"

@@ -100,6 +100,10 @@ PAPER2WIKI_MODEL=             # Optional: base LLM for all roles, e.g. openai:gp
 
 ### Choosing your LLM
 
+> **Full guide: [`MODELS.md`](MODELS.md)** — copy-paste recipes for Anthropic, OpenAI,
+> Gemini, OpenRouter, Ollama (local and cloud) and the LiteLLM gateway, plus troubleshooting.
+> The essentials are below.
+
 **Pick one model, and everything uses it.** Set `model.default` in `config.yaml` and that
 provider's API key — it drives the supervisor, the subagents, and every background task.
 Any LangChain model string works, including the `provider:model` form:
