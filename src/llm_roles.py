@@ -125,6 +125,37 @@ def get_base_model() -> str:
     return _FALLBACK_MODEL
 
 
+def _builtin_providers() -> frozenset[str]:
+    """Provider names ``init_chat_model`` recognises as a ``provider:model`` prefix."""
+    try:
+        from langchain.chat_models.base import _BUILTIN_PROVIDERS
+
+        return frozenset(_BUILTIN_PROVIDERS)
+    except Exception:  # pragma: no cover - private name; fall back to the common ones
+        return frozenset({
+            "openai", "anthropic", "azure_openai", "google_genai", "google_vertexai",
+            "bedrock", "bedrock_converse", "cohere", "fireworks", "together", "mistralai",
+            "huggingface", "groq", "ollama", "deepseek", "xai", "perplexity",
+        })
+
+
+def _explicit_provider_prefix(model: str) -> str | None:
+    """The ``provider:`` prefix of a model string, when it names a real provider.
+
+    ``init_chat_model`` splits ``openai:gpt-4o`` into provider + model **only when no
+    ``model_provider`` is passed alongside**. So a configured ``model.provider`` silently
+    beat the prefix the user typed, and Anthropic was asked for a model literally named
+    ``openai:gpt-4o`` — a 404. Spotting the prefix here lets it win instead.
+
+    Returns None when there is no colon, or the part before it is not a known provider
+    (model tags like ``qwen3.5:397b`` must not be mistaken for one).
+    """
+    if ":" not in model:
+        return None
+    prefix = model.split(":", 1)[0]
+    return prefix if prefix in _builtin_providers() else None
+
+
 def get_model_spec(role: str) -> ModelSpec:
     """Resolve the full model spec for a task ``role`` (see module docstring)."""
     if role not in VALID_ROLES:
@@ -143,12 +174,21 @@ def get_model_spec(role: str) -> ModelSpec:
     provider = aux.get("provider") if aux.get("provider") not in _AUTO else base.get("provider")
     provider = provider if provider not in _AUTO else None
 
+    # An explicit `provider:model` prefix wins over a configured provider — being
+    # specific in the model string is the stronger signal. Leave provider unset so
+    # init_chat_model does the split itself, and drop base_url/api_key when they came
+    # from the *other* provider's config block, where they would not work anyway.
+    prefix = _explicit_provider_prefix(model)
+    switched = bool(prefix) and prefix != provider
+    if prefix:
+        provider = None
+
     timeout = aux.get("timeout")
     spec = ModelSpec(
         model=model,
         provider=provider,
-        base_url=_pick("base_url"),
-        api_key=_pick("api_key"),
+        base_url=None if switched else _pick("base_url"),
+        api_key=None if switched else _pick("api_key"),
         timeout=float(timeout) if timeout not in (None, "") else None,
         extra_body=dict(aux.get("extra_body") or {}),
     )

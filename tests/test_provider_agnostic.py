@@ -402,3 +402,79 @@ def test_config_show_reflects_config_yaml_without_any_flag(tmp_path, monkeypatch
 
     out = CliRunner().invoke(app, ["config", "show"]).output
     assert "model-from-the-file" in " ".join(out.split())
+
+
+# --- an explicit provider: prefix beats a configured provider -------------------
+
+@pytest.mark.unit
+def test_provider_prefix_beats_configured_provider(monkeypatch):
+    """`model.provider: anthropic` + `openai:gpt-4o` must not call Anthropic.
+
+    The live failure this pins:
+        NotFoundError: 404 {'type': 'not_found_error',
+                            'message': 'model: openai:gpt-4o'}
+    init_chat_model splits `provider:model` only when no model_provider is passed
+    alongside, so the configured provider silently won and Anthropic was asked for a
+    model named "openai:gpt-4o".
+    """
+    import src.llm_roles as lr
+
+    _set_config(monkeypatch, {"model": {"default": "claude-sonnet-4-6", "provider": "anthropic"}})
+    monkeypatch.setenv("PAPER2WIKI_MODEL", "openai:gpt-4o")
+
+    spec = lr.get_model_spec("supervisor")
+    assert spec.model == "openai:gpt-4o"
+    assert spec.provider is None, "must not pin anthropic; let init_chat_model split"
+
+
+@pytest.mark.unit
+def test_provider_prefix_actually_builds_the_right_client(monkeypatch):
+    """End of the chain: the built client is OpenAI's, not Anthropic's."""
+    import src.llm_roles as lr
+    from src.agents.llms import set_up_llms
+
+    _set_config(monkeypatch, {"model": {"default": "claude-sonnet-4-6", "provider": "anthropic"}})
+    monkeypatch.setenv("PAPER2WIKI_MODEL", "openai:gpt-4o")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    assert type(set_up_llms(lr.get_model_spec("supervisor"))).__name__ == "ChatOpenAI"
+
+
+@pytest.mark.unit
+def test_a_colon_in_a_model_tag_is_not_a_provider(monkeypatch):
+    """`qwen3.5:397b` is a model tag, not `provider:model` — the config provider stands."""
+    import src.llm_roles as lr
+
+    _set_config(monkeypatch, {"model": {"default": "qwen3.5:397b", "provider": "openai"}})
+    spec = lr.get_model_spec("supervisor")
+
+    assert spec.model == "qwen3.5:397b"
+    assert spec.provider == "openai", "a non-provider prefix must not clear the provider"
+
+
+@pytest.mark.unit
+def test_switching_provider_drops_the_other_providers_endpoint(monkeypatch):
+    """base_url/api_key belong to the configured provider; they can't follow you."""
+    import src.llm_roles as lr
+
+    _set_config(monkeypatch, {"model": {
+        "default": "claude-sonnet-4-6", "provider": "anthropic",
+        "base_url": "https://api.anthropic.com", "api_key": "sk-ant-xxx",
+    }})
+    monkeypatch.setenv("PAPER2WIKI_MODEL", "openai:gpt-4o")
+
+    spec = lr.get_model_spec("supervisor")
+    assert spec.base_url is None and spec.api_key is None
+
+
+@pytest.mark.unit
+def test_configured_provider_still_applies_without_a_prefix(monkeypatch):
+    """The fix must not disturb the ordinary case."""
+    import src.llm_roles as lr
+
+    _set_config(monkeypatch, {"model": {
+        "default": "claude-sonnet-4-6", "provider": "anthropic", "base_url": "https://x",
+    }})
+    spec = lr.get_model_spec("supervisor")
+
+    assert spec.provider == "anthropic" and spec.base_url == "https://x"
