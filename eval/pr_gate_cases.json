@@ -90,5 +90,21 @@
     "expect_keys": ["content", "url"],
     "requires_web_provider": true,
     "_note": "Capability (network, non-blocking) — content quality varies by provider. use_summarizer=false avoids LLM cost. Skipped if no provider key."
+  },
+  {
+    "id": "regression_fetch_arxiv_aaaaaaaa",
+    "type": "regression",
+    "category": "retrieval",
+    "tool": "fetch_arxiv",
+    "inputs": {"query": "1706.03762"},
+    "expect_keys": ["title", "pdf_path", "metadata"]
+  },
+  {
+    "id": "regression_fetch_arxiv_dddddddd",
+    "type": "regression",
+    "category": "boundary",
+    "tool": "fetch_arxiv",
+    "inputs": {"query": "INVALID999"},
+    "expect_error": true
   }
 ]
