@@ -353,3 +353,52 @@ def test_fetch_has_no_model_flag():
     result = CliRunner().invoke(app, ["fetch", "--help"])
     assert result.exit_code == 0
     assert "--model" not in result.output
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("flag", ["--model", "-m"])
+def test_model_flag_end_to_end_through_the_cli(tmp_path, monkeypatch, flag):
+    """Typer flag → apply_env → llm_roles → what `config show` prints.
+
+    The other tests call ``apply_env`` directly; this one goes through the real CLI with a
+    real config.yaml on disk, so the wiring in between is covered too — and it proves the
+    ``-m`` short form does the same thing, not merely that it appears in ``--help``.
+    """
+    from typer.testing import CliRunner
+
+    import src.cli.app as appmod
+    from src.cli.app import app
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "model:\n"
+        "  default: claude-sonnet-4-6\n"
+        "auxiliary:\n"
+        "  judge:\n"
+        "    model: pinned-by-config\n"
+    )
+    monkeypatch.setenv("PAPER2WIKI_CONFIG", str(cfg))
+    monkeypatch.setattr(appmod, "load_env", lambda *a, **k: None)  # don't read the real .env
+
+    out = CliRunner().invoke(app, ["config", "show", flag, "openai:gpt-4o"]).output
+    flat = " ".join(out.split())  # the table wraps; compare on collapsed whitespace
+
+    assert "openai:gpt-4o" in flat, "the flag never reached the resolver"
+    assert "pinned-by-config" in flat, "auxiliary.judge.model should have survived the flag"
+
+
+@pytest.mark.unit
+def test_config_show_reflects_config_yaml_without_any_flag(tmp_path, monkeypatch):
+    """Editing config.yaml alone changes what runs — no flag, no env var."""
+    from typer.testing import CliRunner
+
+    import src.cli.app as appmod
+    from src.cli.app import app
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("model:\n  default: model-from-the-file\n")
+    monkeypatch.setenv("PAPER2WIKI_CONFIG", str(cfg))
+    monkeypatch.setattr(appmod, "load_env", lambda *a, **k: None)
+
+    out = CliRunner().invoke(app, ["config", "show"]).output
+    assert "model-from-the-file" in " ".join(out.split())

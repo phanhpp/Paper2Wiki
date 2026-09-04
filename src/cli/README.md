@@ -17,33 +17,36 @@ What happens when you type `paper2wiki repl`:
    paper2wiki repl
          │
          ▼
-   app.py                  reads .env, then matches "repl"          (1)
+   app.py                            reads .env, matches "repl"     (1)
          │
          ▼
-   commands/chat.py        flags → env vars → key check             (2)
-         │                 prints the banner
-         │                 imports the agent — here, not at the top (3)
+   commands/chat.py                  flags → env vars → key check   (2)
+         │                           prints the banner
+         │                           imports the agent — here, not
+         │                           at the top of the file         (3)
          ▼
-   _runtime.py             opens the event loop                     (4)
+   _runtime.py  run_async()          opens the event loop, and      (4)
+         │                           owns everything below
+         ▼
+   agents/agent.py                   builds the agent — slow,       (5)
+     create_supervisor()             happens once
          │
          ▼
-   create_supervisor()     builds the agent — slow, happens once    (5)
+   ┌── one turn ────────────────────────────────────────────────┐
+   │                                                            │
+   │   agents/stream.py               the agent works, and      │
+   │     run_turn_stream_async()      calls Renderer methods    │  (6)
+   │             │                                              │
+   │             ▼                                              │
+   │   renderer.py  RichRenderer      draws them with Rich      │
+   │             │                                              │
+   │             ▼                                              │
+   │       your terminal                                        │
+   │                                                            │
+   └─────────────────  next prompt  ◄───────────────────────────┘
          │
          ▼
-   ┌── one turn ─────────────────────────────────────────┐
-   │                                                     │
-   │   run_turn_stream_async()   the agent works, and    │
-   │             │               calls Renderer methods  │  (6)
-   │             ▼                                       │
-   │   renderer.py               draws them with Rich    │
-   │             │                                       │
-   │             ▼                                       │
-   │      your terminal                                  │
-   │                                                     │
-   └──────────────  next prompt  ◄───────────────────────┘
-         │
-         ▼
-   run_async               closes both databases          (7)
+   back in run_async()                closes both databases     (7)
 ```
 
 1. **`app.py`** — the root callback loads `.env` first, so credentials exist before any
@@ -52,13 +55,15 @@ What happens when you type `paper2wiki repl`:
    flags into `os.environ`, which is what makes a flag beat `config.yaml`.
 3. **The import sits mid-function on purpose** — it must come *after* step 2, because the
    tool list is built at import time from those env vars. This is rule 1 below.
-4. **`_runtime.py`** — `run_async` owns the event loop from here to step 7.
+4. **`run_async`** (in `_runtime.py`) — opens the event loop and keeps it open for the
+   whole run. Steps 5, 6 and 7 all happen inside this one call.
 5. **`create_supervisor()`** — the slow step: LangGraph loads and, unless `--eval-mode`, a
    Daytona sandbox is provisioned. `repl` does this **once** and reuses the agent for every
    turn; `chat` does it per invocation, which is why repeated one-shots are slower.
 6. **The agent doesn't know it is in a terminal.** It calls `Renderer` methods;
    `RichRenderer` is what turns them into Rich output.
-7. **Both databases close**, in the right order, even if the run failed — rule 2 below.
+7. **Same `run_async` call, on the way out** — not a new step. When the work finishes (or
+   fails, or you press Ctrl-C) it closes both databases in the right order. Rule 2 below.
 
 **With Slack it is the same picture**, and only step 6 differs:
 
