@@ -1,19 +1,12 @@
 [
   {
-    "id": "wiki_check_runs",
-    "type": "regression",
-    "category": "health",
-    "tool": "quick_wiki_integrity_check",
-    "inputs": {},
-    "expect_keys": ["wiki-check"],
-    "_note": "Run wiki check on commited wiki/ and return 'wiki-check: OK'."
-  },
-  {
     "id": "web_extract_empty_urls",
     "type": "regression",
     "category": "boundary",
     "tool": "web_extract",
-    "inputs": {"urls": []},
+    "inputs": {
+      "urls": []
+    },
     "expect_empty": true,
     "_note": "Empty URL list returns [] immediately before any provider call. No API key needed."
   },
@@ -22,17 +15,29 @@
     "type": "regression",
     "category": "boundary",
     "tool": "web_extract",
-    "inputs": {"urls": ["http://localhost/secret"]},
-    "expect_keys": ["blocked"],
-    "_note": "SSRF check runs before any provider call. Returns ExtractResult(error='Blocked: ...') — 'blocked' appears in JSON output. No API key needed."
+    "inputs": {
+      "urls": [
+        "http://localhost/secret"
+      ]
+    },
+    "expect_keys": [
+      "blocked"
+    ],
+    "_note": "SSRF check runs before any provider call. Returns ExtractResult(error='Blocked: ...') \u2014 'blocked' appears in JSON output. No API key needed."
   },
   {
     "id": "web_extract_private_ip_blocked",
     "type": "regression",
     "category": "boundary",
     "tool": "web_extract",
-    "inputs": {"urls": ["http://192.168.1.1"]},
-    "expect_keys": ["blocked"],
+    "inputs": {
+      "urls": [
+        "http://192.168.1.1"
+      ]
+    },
+    "expect_keys": [
+      "blocked"
+    ],
     "_note": "Private IP range blocked by SSRF filter before any provider call. No API key needed."
   },
   {
@@ -40,17 +45,27 @@
     "type": "regression",
     "category": "boundary",
     "tool": "web_extract",
-    "inputs": {"urls": ["http://169.254.169.254/latest/meta-data/"]},
-    "expect_keys": ["blocked"],
-    "_note": "SSRF: cloud-metadata endpoint (link-local 169.254.x) — the classic attack target. Blocked before any provider call. No API key needed."
+    "inputs": {
+      "urls": [
+        "http://169.254.169.254/latest/meta-data/"
+      ]
+    },
+    "expect_keys": [
+      "blocked"
+    ],
+    "_note": "SSRF: cloud-metadata endpoint (link-local 169.254.x) \u2014 the classic attack target. Blocked before any provider call. No API key needed."
   },
   {
     "id": "sha256_basic",
     "type": "regression",
     "category": "hashing",
     "tool": "compute_sha256",
-    "inputs": {"text": "hello world"},
-    "expect_value": ["b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"],
+    "inputs": {
+      "text": "hello world"
+    },
+    "expect_value": [
+      "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+    ],
     "_note": "Pure deterministic digest. Exact SHA-256 of 'hello world'."
   },
   {
@@ -58,37 +73,65 @@
     "type": "regression",
     "category": "hashing",
     "tool": "compute_sha256",
-    "inputs": {"text": "\n\nhello world"},
-    "expect_value": ["b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"],
-    "_note": "Wiki raw-source convention: lstrip('\\n') is on by default, so leading newlines are stripped → SAME hash as 'hello world'. Guards the hash convention used for raw/ integrity."
+    "inputs": {
+      "text": "\n\nhello world"
+    },
+    "expect_value": [
+      "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+    ],
+    "_note": "Wiki raw-source convention: lstrip('\\n') is on by default, so leading newlines are stripped \u2192 SAME hash as 'hello world'. Guards the hash convention used for raw/ integrity."
   },
   {
     "id": "fetch_arxiv_valid_id",
     "type": "capability",
     "category": "retrieval",
     "tool": "fetch_arxiv",
-    "inputs": {"query": "1706.03762"},
-    "expect_keys_or": [["title", "pdf_path", "authors"], ["rate_limited"]],
-    "_note": "Capability (network, non-blocking) — passes on paper result or graceful rate_limited. arXiv direct, no provider key."
+    "inputs": {
+      "query": "1706.03762"
+    },
+    "expect_keys_or": [
+      [
+        "title",
+        "pdf_path",
+        "authors"
+      ],
+      [
+        "rate_limited"
+      ]
+    ],
+    "_note": "Capability (network, non-blocking) \u2014 passes on paper result or graceful rate_limited. arXiv direct, no provider key."
   },
   {
     "id": "web_search_returns_results",
     "type": "capability",
     "category": "retrieval",
     "tool": "web_search",
-    "inputs": {"query": "transformer architecture deep learning"},
-    "expect_keys": ["title", "url"],
+    "inputs": {
+      "query": "transformer architecture deep learning"
+    },
+    "expect_keys": [
+      "title",
+      "url"
+    ],
     "requires_web_provider": true,
-    "_note": "Capability (network, non-blocking) — needs FIRECRAWL/TAVILY/EXA key; skipped if none set."
+    "_note": "Capability (network, non-blocking) \u2014 needs FIRECRAWL/TAVILY/EXA key; skipped if none set."
   },
   {
     "id": "web_extract_arxiv_html",
     "type": "capability",
     "category": "retrieval",
     "tool": "web_extract",
-    "inputs": {"urls": ["https://arxiv.org/html/1706.03762"], "use_summarizer": false},
-    "expect_keys": ["content", "url"],
+    "inputs": {
+      "urls": [
+        "https://arxiv.org/html/1706.03762"
+      ],
+      "use_summarizer": false
+    },
+    "expect_keys": [
+      "content",
+      "url"
+    ],
     "requires_web_provider": true,
-    "_note": "Capability (network, non-blocking) — content quality varies by provider. use_summarizer=false avoids LLM cost. Skipped if no provider key."
+    "_note": "Capability (network, non-blocking) \u2014 content quality varies by provider. use_summarizer=false avoids LLM cost. Skipped if no provider key."
   }
 ]

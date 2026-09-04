@@ -325,7 +325,11 @@ uv run --env-file .env python eval/run_weekly_baselines.py
 ```
 
 **Known CI constraints:**
-- `wiki/` **is** committed (16 files) and acts as a test fixture — five test files read it, and the `wiki_check_runs` gate case runs the integrity check against it. Tests still skip gracefully when pages are absent, but the committed wiki is what they normally exercise
+- `wiki/` is **not** tracked and is **not** a test fixture. Every test builds its own
+  wiki under `tmp_path` — `tests/test_wiki_integrity_check.py` covers broken links,
+  invalid frontmatter and virtual paths that way, which is more than the old
+  `wiki_check_runs` gate case did (it only proved the check ran). Verified: hiding
+  `wiki/` entirely leaves the whole unit suite passing
 - `test_fetch_arxiv_downloads_paper` hits real arXiv network — marked `integration`, excluded from CI to avoid 429s
 
 **When adding a new tool**, add:

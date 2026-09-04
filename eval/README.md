@@ -345,7 +345,6 @@ rendered box on the PR page) via `$GITHUB_STEP_SUMMARY` — no need to open the 
 | `web_extract_localhost_blocked`   | request to `localhost` is refused                                                                                                                                                                                                              |
 | `web_extract_private_ip_blocked`  | request to a private range (`192.168.x`) is refused                                                                                                                                                                                            |
 | `web_extract_metadata_ip_blocked` | request to `169.254.169.254` is refused                                                                                                                                                                                                        |
-| `wiki_check_runs`                 | wiki integrity check runs on the committed wiki and returns OK                                                                                                                                                                                 |
 
 
 > **SSRF (Server-Side Request Forgery)** = tricking the server into making requests to addresses it

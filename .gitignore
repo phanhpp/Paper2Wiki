@@ -95,3 +95,7 @@ gateway/prometheus/master_key
 # Leading slash matters: a bare `connectors/` would also ignore src/connectors/
 # and tests/connectors/, silently excluding the code itself.
 /connectors/
+
+# The wiki is a user artifact, not repo content. Personal mode defaults here today
+# and moves to ~/any2wiki/ once packaged; code mode writes into the target repo.
+wiki/
