@@ -33,7 +33,7 @@ uv run pytest -m "not integration"  # skip tests needing external services
 python scripts/lint.py --wiki-dir wiki/
 
 # CLI (paper2wiki) — interactive REPL, one-shot chat, session browsing
-# Most reliable invocation (run from repo root; .env auto-loaded). See docs/cli.md.
+# Most reliable invocation (run from repo root; .env auto-loaded). See src/cli/README.md.
 uv run python -m src.cli.app repl                  # interactive chat
 uv run python -m src.cli.app chat "ingest <url>"   # one-shot
 uv run python -m src.cli.app serve                 # listen on Slack (Loop 3)
@@ -42,7 +42,8 @@ uv run python -m src.cli.app sessions ls           # browse sessions
 uv run python -m src.cli.app config show           # effective config
 ```
 
-> Flags (on `chat`/`repl`/`sessions resume`): `--thread-id/-t`, `--ingest-mode {fast|quality}`,
+> Flags (on `chat`/`repl`/`sessions resume`): `--thread-id/-t`, `--model/-m` (base model for
+> this run — level 3, so `auxiliary.<task>.model` still wins), `--ingest-mode {fast|quality}`,
 > `--wiki-path`, `--yes/-y` (auto-approve HITL), `--eval-mode` (skip Daytona),
 > `--no-save` (don't write to `sessions.db` — no title, no history; for testing), `--debug`.
 > REPL meta-commands: `/title <name>` (name the session), `/new`, `/help`, `/exit` (bare `quit`/`exit`/`bye`/`:q` and Ctrl-D also quit).
@@ -53,7 +54,7 @@ uv run python -m src.cli.app config show           # effective config
 > and CPython's `site` skips hidden `.pth` files. To fix, run
 > `chflags nohidden .venv/lib/python*/site-packages/__editable__.llm_wiki-*.pth`. The `-m` form
 > `uv run python -m src.cli.app …` sidesteps the `.pth` entirely and never hits this. Full details
-> in `docs/cli.md`.
+> in `src/cli/README.md`.
 
 Required `.env` vars: `ANTHROPIC_API_KEY`, `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT`, `DAYTONA_API_KEY` (Marp). Web ingest needs at least one of `FIRECRAWL_API_KEY`, `TAVILY_API_KEY`, `EXA_API_KEY`. Optional: `WIKI_PATH` (defaults to `./wiki`), `PAPER2WIKI_INGEST_MODE` (`fast` | `quality`). See `.env.example`.
 
@@ -79,7 +80,7 @@ The supervisor agent is constructed in `src/agents/agent.py:create_supervisor()`
 
 **LLMs** (`src/agents/llms.py`): models are built via the `set_up_llms(model, **kwargs)` factory. Known models (`MODEL_CONFIG`) use tuned settings (retries, timeout, max_tokens, effort); any other string (e.g. `openai:gpt-4o`) is passed straight to `init_chat_model` with generic defaults — so the app is **provider-agnostic**. A `HarnessProfile` for sonnet is registered (disables the general-purpose subagent, adds a "read the relevant skill first" system-prompt suffix).
 
-**Model selection is per-task** (`src/llm_roles.py:get_model_spec(role)` → a `ModelSpec`). The user picks **one base model** (`model.default` + that provider's API key); it drives the supervisor, subagents, and every auxiliary task. Each task can override via an `auxiliary.<task>` block carrying `provider`/`model`/`base_url`/`api_key`/`timeout`/`extra_body` (so one task can target a different provider/endpoint/key — e.g. via OpenRouter). Resolution: base = `PAPER2WIKI_MODEL` env > `model.default` (config.yaml) > Claude fallback; a task = `PAPER2WIKI_MODEL_<TASK>` env > `auxiliary.<task>.model` > base, with provider/base_url/api_key/timeout/extra_body from the task block (falling back to the `model:` block). Tasks: `supervisor`, `subagent`, `title`, `summarize`, `judge`, `web_summarize`. `set_up_llms` accepts a `ModelSpec` (or a bare model string) and strips Anthropic-only knobs (`effort`/`thinking`) for non-Anthropic providers. All auxiliary call sites go through `init_chat_model` — none use the raw `anthropic` SDK anymore; provider keys are read from env by LangChain unless `api_key` is set in config. Router features (fallbacks, credential pools) are intentionally **not** here — they belong to the LiteLLM gateway layer.
+**Model selection is per-task** (`src/llm_roles.py:get_model_spec(role)` → a `ModelSpec`). The user picks **one base model** (`model.default` + that provider's API key); it drives the supervisor, subagents, and every auxiliary task. Each task can override via an `auxiliary.<task>` block carrying `provider`/`model`/`base_url`/`api_key`/`timeout`/`extra_body` (so one task can target a different provider/endpoint/key — e.g. via OpenRouter). Resolution: base = `PAPER2WIKI_MODEL` env > `model.default` (config.yaml) > Claude fallback; a task = `PAPER2WIKI_MODEL_<TASK>` env > `auxiliary.<task>.model` > base, with provider/base_url/api_key from the task block falling back to the `model:` block — but `timeout` and `extra_body` are task-only and never inherit. Tasks: `supervisor`, `subagent`, `title`, `summarize`, `judge`, `web_summarize`. `set_up_llms` accepts a `ModelSpec` (or a bare model string) and strips Anthropic-only knobs (`effort`/`thinking`) for non-Anthropic providers. All auxiliary call sites go through `init_chat_model` — none use the raw `anthropic` SDK anymore; provider keys are read from env by LangChain unless `api_key` is set in config. Router features (fallbacks, credential pools) are intentionally **not** here — they belong to the LiteLLM gateway layer.
 
 > **Caveat:** the `HarnessProfile` is still keyed `anthropic:claude-sonnet-4-6`; if the base model is switched to a non-Anthropic provider it won't apply (the general-purpose subagent stays enabled, skill-first suffix is dropped). Dynamic per-provider registration is a TODO.
 
@@ -88,7 +89,7 @@ The supervisor agent is constructed in `src/agents/agent.py:create_supervisor()`
 - **`checkpoints.db`** — LangGraph `AsyncSqliteSaver`; stores graph state for interrupt/resume. Lazily initialized as a module-level singleton in `agent.py`.
 - **`sessions.db`** — clean message history + FTS5 full-text search. Schema defined in `src/sessions/sessions_db_setup.py`. Auto-initialized on import via `_sessions_conn` singleton. Use `session_manager.prune_sessions()` for manual cleanup (auto-pruning is intentionally off).
 
-**Pruning is coupled across both DBs by `thread_id`.** `sessions prune` deletes ended sessions from `sessions.db` *and* evicts their checkpoint state from `checkpoints.db` (via `agent.py:prune_checkpoints` → `adelete_thread`) in one invocation, driven by the ids `prune_sessions` returns. `prune_sessions` stays sync (blocking sqlite3); the async eviction's single `asyncio.run` boundary lives in the CLI `prune` command. Full-thread deletion only — never `aprune(keep_latest)` (DeltaChannel-unsafe). User guide in `src/sessions/README.md`; design rationale in `docs/pruning_design.md`.
+**Pruning is coupled across both DBs by `thread_id`.** `sessions prune` deletes ended sessions from `sessions.db` *and* evicts their checkpoint state from `checkpoints.db` (via `agent.py:prune_checkpoints` → `adelete_thread`) in one invocation, driven by the ids `prune_sessions` returns. `prune_sessions` stays sync (blocking sqlite3); the async eviction's single `asyncio.run` boundary lives in the CLI `prune` command. Full-thread deletion only — never `aprune(keep_latest)` (DeltaChannel-unsafe). User guide in `src/sessions/README.md`.
 
 ### Tools (`src/tools/`)
 
@@ -166,8 +167,7 @@ inferred on a full sweep, since a cursor-based run sees a window.
 
 `connectors/` is gitignored — dumps get large and eventually personal.
 
-Design rationale and what was taken from OpenWiki: `src/connectors/README.md` and
-`docs/openwiki/targets.md`.
+Design rationale and what was taken from OpenWiki: `src/connectors/README.md`.
 
 ### Slack front-end (`src/slack/`) — Loop 3
 
@@ -179,10 +179,10 @@ the honest cost of a laptop assistant.
 Slack is **optional**: `repl`/`chat`/`sessions`/`config` all work with no Slack tokens.
 Only `serve` requires `SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN` + `SLACK_CHANNEL_ID`, checked
 by `require_keys(..., slack=True)`. They're workspace-scoped and per-user, so every user
-creates their own app — walkthrough in `docs/slack_setup.md`; **the bot must be
+creates their own app — walkthrough in `README.md` → Slack; **the bot must be
 `/invite`d to the channel even when it's public**, or it silently receives nothing.
 
-Three design points (detail in `src/slack/README.md`, rationale in `docs/loop3_slack.md`):
+Three design points (detail in `src/slack/README.md`):
 - **No new schema.** `sessions.db`'s `id` *is* the LangGraph `thread_id`, so
   `thread_id_for()` derives `slack-{channel}-{thread_ts or message_ts}` — same Slack
   thread → same id → `checkpoints.db` resumes it.
@@ -316,5 +316,21 @@ uv run --env-file .env python eval/run_weekly_baselines.py
 - CLI: mid-stream Ctrl-O (capture keys during a turn) + open/close toggle — see "CLI front-end"
   (lightweight `loop.add_reader` in cbreak mode, or the full Textual TUI)
 - CLI: automated tests for interactive paths (spinner / smear / Ctrl-O) via `pexpect`/`pyte`
+- **CLI: `/model` — switch model mid-session.** `-m/--model` only applies at launch; changing
+  it currently means quitting and restarting. `/new` already rebuilds the agent, so the
+  mechanism exists: set `PAPER2WIKI_MODEL`, rebuild the supervisor, keep the same
+  `thread_id` so history survives. hermes-agent has this (`hermes_cli/model_switch.py`)
+  plus a `model_aliases:` config map for short names and tab-completion — worth copying
+  the alias idea only after `/model` itself works.
+- CLI: **enable autocompletion** — `sessions resume`/`rename` already pass
+  `autocompletion=_complete_session_ref` (`commands/sessions.py:304,346`) and
+  `--install-completion` is the documented way to turn completion on, but `app.py`'s
+  `add_completion=False` removes that flag, so neither works. Flip it to `True`, or drop
+  the completers.
+- **Rename `paper2wiki` → `any2wiki`** (49 files). Cosmetic docs first; then the console
+  script (`pyproject.toml:32`, `app.py:27`/`:52` — note the package name is a third name,
+  `llm-wiki`); then `PAPER2WIKI_*` env vars with a deprecation window; **`LANGSMITH_PROJECT`
+  last and separately** — renaming the project splits trace history and leaves
+  `detect_anomalies_async` without baselines until weekly CI repopulates them.
 - Consolidation agent + cron
 - RL

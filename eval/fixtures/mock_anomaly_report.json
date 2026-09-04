@@ -1,0 +1,92 @@
+{
+  "_comment": [
+    "Hand-built AnomalyReport for exercising step 4 of the trace-analysis skill",
+    "(create_datasets_from_anomaly_report) without needing a real production failure.",
+    "See eval/fixtures/README.md for how to use it.",
+    "",
+    "Designed so the filtering is visible in the result:",
+    "  span 1  hard_error  + run_type=tool  -> dataset AND a suggested pr_gate case",
+    "  span 2  hard_error  + run_type=llm   -> dataset ONLY (gate cases are tool-only)",
+    "  span 3  latency_spike + tool         -> dataset ONLY (not a hard error)",
+    "  span 4  hard_error, invalid input    -> should be inferred as expect_error: true",
+    "Expect exactly TWO suggested_cases: spans 1 and 4."
+  ],
+
+  "total_runs_analyzed": 42,
+  "anomalous_run_count": 4,
+
+  "anomalies": [
+    {
+      "trace_id": "019e3ead-268d-7df3-9b1f-3e5e4d2ac2f8",
+      "errors": ["hard_error"],
+      "signals": ["hard_error:<HTTPError 429: 'Too Many Requests'>"],
+      "failed_spans": [
+        {
+          "id": "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
+          "run_name": "fetch_arxiv",
+          "run_type": "tool",
+          "flow": "wiki-ingestion",
+          "context_name": null,
+          "inputs": {"query": "1706.03762"},
+          "outputs": {},
+          "errors": ["hard_error"],
+          "signals": ["hard_error:<HTTPError 429: 'Too Many Requests'> on a valid arXiv id"]
+        }
+      ]
+    },
+    {
+      "trace_id": "019e3ead-9f21-7c02-a4de-11b2c3d4e5f6",
+      "errors": ["hard_error"],
+      "signals": ["hard_error:overloaded_error"],
+      "failed_spans": [
+        {
+          "id": "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb",
+          "run_name": "ChatAnthropic",
+          "run_type": "llm",
+          "flow": null,
+          "context_name": null,
+          "inputs": {"messages": ["summarise this paper"]},
+          "outputs": {},
+          "errors": ["hard_error"],
+          "signals": ["hard_error:overloaded_error (529)"]
+        }
+      ]
+    },
+    {
+      "trace_id": "019e3ead-c4b7-7a55-9e01-77aa88bb99cc",
+      "errors": ["latency_spike"],
+      "signals": ["latency_spike:31.4s_vs_median_5.4s"],
+      "failed_spans": [
+        {
+          "id": "cccccccc-3333-4333-8333-cccccccccccc",
+          "run_name": "fetch_arxiv",
+          "run_type": "tool",
+          "flow": "wiki-ingestion",
+          "context_name": null,
+          "inputs": {"query": "2404.16130"},
+          "outputs": {"title": "A GraphRAG Approach to Query-Focused Summarization"},
+          "errors": ["latency_spike"],
+          "signals": ["latency_spike:31.4s_vs_median_5.4s"]
+        }
+      ]
+    },
+    {
+      "trace_id": "019e3ead-de44-7b18-83cf-0011223344ff",
+      "errors": ["hard_error"],
+      "signals": ["hard_error:No paper found for ID INVALID999"],
+      "failed_spans": [
+        {
+          "id": "dddddddd-4444-4444-8444-dddddddddddd",
+          "run_name": "fetch_arxiv",
+          "run_type": "tool",
+          "flow": "wiki-ingestion",
+          "context_name": null,
+          "inputs": {"query": "INVALID999"},
+          "outputs": {},
+          "errors": ["hard_error"],
+          "signals": ["hard_error:No paper found for ID INVALID999 — malformed arXiv id"]
+        }
+      ]
+    }
+  ]
+}

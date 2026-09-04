@@ -100,17 +100,68 @@ PAPER2WIKI_MODEL=             # Optional: base LLM for all roles, e.g. openai:gp
 
 ### Choosing your LLM
 
-Paper2Wiki is **provider-agnostic** — all models are resolved from `config.yaml` (no code change).
-Pick **one** base model and set that provider's API key; it drives the supervisor, subagents, and
-all auxiliary tasks (titling, trace summaries, eval judge, web summarizer). Set it via
-`PAPER2WIKI_MODEL` (env) or `model.default` in `config.yaml`, using any LangChain value incl.
-`provider:model` (`openai:gpt-4o`, `google_genai:gemini-2.0-flash`, `anthropic:claude-sonnet-4-6`).
+**Pick one model, and everything uses it.** Set `model.default` in `config.yaml` and that
+provider's API key — it drives the supervisor, the subagents, and every background task.
+Any LangChain model string works, including the `provider:model` form:
+`openai:gpt-4o`, `google_genai:gemini-2.0-flash`, `anthropic:claude-sonnet-4-6`.
 
-Override a single task under `auxiliary.<task>` (tasks: `supervisor`, `subagent`, `title`,
-`summarize`, `judge`, `web_summarize`) — each block takes `provider`/`model`/`base_url`/`api_key`/
-`timeout`/`extra_body`, so a task can use a different provider or an OpenAI-compatible gateway
-(e.g. OpenRouter) with its own key. Quick env override for one task:
-`PAPER2WIKI_MODEL_SUBAGENT=openai:gpt-4o-mini`. See `config.example.yaml`.
+```yaml
+# config.yaml
+model:
+  default: openai:gpt-4o
+```
+
+That's the whole setup. The rest of this section is for when you want one task to differ.
+
+#### Which model a task ends up using
+
+Five levels. **The first one that exists wins:**
+
+```
+Task-Specific Env Var  →  Task Config  →  Global Env Var  →  Base Config  →  Default Fallback
+```
+
+| Level | Where | Example | Applies to |
+|---|---|---|---|
+| **1 · Task-Specific Env Var** | `.env` | `PAPER2WIKI_MODEL_SUMMARIZE=openai:gpt-4o-mini` | one task |
+| **2 · Task Config** | `config.yaml` | `auxiliary.summarize.model: openai:gpt-4o-mini` | one task |
+| **3 · Global Env Var** | `.env` | `PAPER2WIKI_MODEL=openai:gpt-4o` | every task |
+| **4 · Base Config** | `config.yaml` | `model.default: openai:gpt-4o` | every task |
+| **5 · Default Fallback** | built in | `claude-sonnet-4-6` | every task |
+
+**`--model` / `-m` is level 3.** The flag writes `PAPER2WIKI_MODEL` for that one run, so it
+beats `model.default` but *not* a task's own `auxiliary.<task>.model`. Run
+`paper2wiki config show -m <model>` to see exactly which tasks it moved.
+
+The pattern behind the order: **task beats global, and env beats config.**
+
+So `PAPER2WIKI_MODEL_SUMMARIZE` (1) wins over `auxiliary.summarize.model` (2), which wins
+over `PAPER2WIKI_MODEL` (3), which wins over `model.default` (4). And if you set nothing at
+all, you get `claude-sonnet-4-6` (5).
+
+In practice: levels 4 and 3 are how you pick your model, and levels 2 and 1 are how you
+make one task differ — permanently in the file, or temporarily with an env var.
+
+The tasks you can name: `supervisor`, `subagent`, `title`, `summarize`, `judge`,
+`web_summarize`.
+
+#### Giving one task a different provider
+
+An `auxiliary.<task>` block can carry more than a model name, so a single task can go to a
+different provider, a different endpoint, or a different key:
+
+```yaml
+auxiliary:
+  summarize:
+    model: openai:gpt-4o-mini
+    base_url: https://openrouter.ai/api/v1   # any OpenAI-compatible gateway
+    api_key: sk-or-...                       # its own key
+    timeout: 60
+```
+
+`provider`, `base_url` and `api_key` fall back to the `model:` block if the task doesn't
+set them. **`timeout` and `extra_body` do not** — they apply only to the task that sets
+them. See `config.example.yaml`.
 
 ## Usage
 
@@ -140,8 +191,8 @@ You can interact with Paper2Wiki using natural language. Here are common pattern
 ## Using the CLI
 
 Paper2Wiki ships a terminal CLI (`paper2wiki`) for daily use: an interactive REPL, one-shot
-chat, session browsing, and config inspection. Run commands **from the repo root** — `.env`
-is auto-loaded.
+chat, a Slack listener, connector fetches, session browsing, and config inspection. Run
+commands **from the repo root** — `.env` is auto-loaded.
 
 ### Running it
 
@@ -150,6 +201,8 @@ The most reliable invocation (works regardless of your PATH or editable-install 
 ```bash
 uv run python -m src.cli.app repl                                  # interactive chat
 uv run python -m src.cli.app chat "ingest https://arxiv.org/abs/…" # one-shot, then exit
+uv run python -m src.cli.app serve                                 # listen on Slack (Loop 3)
+uv run python -m src.cli.app fetch git-repo                        # connector fetch, no LLM
 uv run python -m src.cli.app sessions ls                           # browse past sessions
 uv run python -m src.cli.app config show                           # show effective config
 ```
@@ -170,7 +223,8 @@ PATH — either `source .venv/bin/activate` or use `uv run paper2wiki …`.)
 |---|---|---|
 | `repl` | Interactive chat session (streaming, approvals, meta-commands) | yes |
 | `chat "<msg>"` | Run a single message and exit | yes |
-| `serve` | Listen on a Slack channel and run the agent on each message | yes |
+| `serve` | Listen on a Slack channel and run the agent on each message ([below](#slack-serve)) | yes |
+| `fetch [connector]` | Phase 1 of ingest — pull raw source data to `connectors/<name>/`. Omit the name to run every configured connector ([below](#connector-fetch-fetch)) | **no** |
 | `sessions ls [-n N]` | List recent sessions, newest first | no |
 | `sessions stats` | Catalog summary + how many you'd prune at each age threshold | no |
 | `sessions search "<query>"` | Full-text search message history | no |
@@ -180,20 +234,22 @@ PATH — either `source .venv/bin/activate` or use `uv run paper2wiki …`.)
 | `sessions prune-orphans [--apply] [--vacuum] [--older-than D] [--full]` | Evict checkpoints with no session row (dry run by default) | no |
 | `config show` | Print the effective config (ingest mode, wiki path, providers) | no |
 
-`sessions`/`config` don't load the agent stack, so they're fast; `repl`/`chat` build the
-supervisor (and, unless `--eval-mode`, a Daytona sandbox).
+`sessions`/`config`/`fetch` don't load the agent stack, so they're fast; `repl`/`chat`/`serve`
+build the supervisor (and, unless `--eval-mode`, a Daytona sandbox).
 
-### Common flags (on `chat` / `repl` / `sessions resume`)
+### Common flags
 
-| Flag | Purpose |
-|---|---|
-| `--thread-id` / `-t` | Resume / pin a specific thread |
-| `--ingest-mode {fast\|quality}` | Override ingest mode |
-| `--wiki-path` | Override the wiki directory |
-| `--yes` / `-y` | Auto-approve all approval prompts |
-| `--eval-mode` | Skip the Daytona sandbox (no Marp subagent) |
-| `--no-save` | Don't persist to `sessions.db` (throwaway turns; in-run approvals still work) |
-| `--debug` | Show diagnostic output |
+| Flag | Purpose | Available on |
+|---|---|---|
+| `--model` / `-m` | Override the **base** model for this run, e.g. `openai:gpt-4o` | `chat` `repl` `resume` `serve` `config show` |
+| `--ingest-mode {fast\|quality}` | Override ingest mode | `chat` `repl` `resume` `serve` `fetch` |
+| `--wiki-path` | Override the wiki directory | `chat` `repl` `resume` `serve` `fetch` |
+| `--debug` | Show diagnostic output (incl. startup timings) | `chat` `repl` `resume` `serve` `fetch` |
+| `--yes` / `-y` | Auto-approve all approval prompts | `chat` `repl` `resume` `serve` |
+| `--eval-mode` | Skip the Daytona sandbox (no Marp subagent) | `chat` `repl` `resume` `serve` |
+| `--thread-id` / `-t` | Resume / pin a specific thread | `chat` `repl` `resume` |
+| `--no-save` | Don't persist to `sessions.db` (throwaway turns; in-run approvals still work) | `chat` `repl` `resume` |
+| `--channel` | Slack channel id (else `$SLACK_CHANNEL_ID`) | `serve` |
 
 ### Inside the REPL
 
@@ -207,6 +263,68 @@ supervisor (and, unless `--eval-mode`, a Daytona sandbox).
   mid-stream.)*
 - **Meta-commands:** `/title <name>` · `/new` · `/help` · `/open` (alias `/last`) · `/exit`
   (bare `quit`/`exit`/`bye`/`:q` and Ctrl-D also quit).
+
+### Slack (`serve`)
+
+`serve` is the **same agent against the same wiki**, driven by Slack messages instead of the
+terminal (Loop 3). Same `create_supervisor()`, same `wiki/`, same `checkpoints.db` and
+`sessions.db` — only the front-end differs.
+
+```bash
+paper2wiki serve                          # listen on $SLACK_CHANNEL_ID
+paper2wiki serve --channel C0123456789    # override the channel
+paper2wiki serve --eval-mode              # no Daytona sandbox (no Marp subagent)
+paper2wiki serve -y                       # auto-approve — no approval buttons at all
+```
+
+**Setup is per-user.** Slack apps are workspace-scoped, so everyone creates their own —
+everyone creates their own. Three env vars, checked at startup:
+
+```bash
+SLACK_BOT_TOKEN=xoxb-...   # Bot User OAuth Token   (OAuth & Permissions page)
+SLACK_APP_TOKEN=xapp-...   # App-Level Token        (Basic Information page — different page)
+SLACK_CHANNEL_ID=C...      # the channel to listen on
+```
+
+> **The bot must be `/invite`d to the channel — even a public one.** Without it, `serve`
+> starts cleanly, connects, and silently receives nothing. This is the usual thing to get
+> wrong.
+
+**How it behaves:**
+
+- **Socket Mode** — the app dials *out* over a websocket, so there's no webhook, no public
+  URL, no ngrok. The cost is honest: it answers only while `serve` is running.
+- **A Slack thread is a session.** `thread_id_for()` derives `slack-{channel}-{thread_ts}`,
+  which *is* the `sessions.db` id and the LangGraph `thread_id` — so replying in a thread
+  resumes that conversation from `checkpoints.db`, exactly like `sessions resume`.
+- **Approvals are Block Kit buttons.** Approve / reject appear in-thread; reject-with-reason
+  opens a modal. `edit` and `respond` aren't offered (they need typed arguments) — use the
+  terminal for those.
+- **One turn at a time.** A single worker drains a queue, finishing each job before starting
+  the next: both SQLite DBs are single-writer, and Loop 2's snapshot diff would otherwise
+  blame one run for another's writes.
+- **Ctrl-C to stop.** It exits cleanly rather than dumping a traceback.
+
+Slack is **optional** — `repl`, `chat`, `fetch`, `sessions` and `config` all work with no
+Slack tokens set. Message flow and design: [`src/slack/README.md`](src/slack/README.md).
+
+### Connector fetch (`fetch`)
+
+Phase 1 of ingest, and the only command that never calls an LLM. It hits a source, writes
+the raw responses under `connectors/<name>/raw/`, and records every item in a manifest —
+then stops. Turning that into wiki pages is a separate agent run, which can be repeated for
+free because the raw data is already on disk.
+
+```bash
+paper2wiki fetch              # run every connector enabled in config.yaml
+paper2wiki fetch git-repo     # run one
+```
+
+Each run reports `N new · N unchanged · N gone`. Unchanged items are skipped by content
+hash, so a second run costs almost nothing. Connectors carry their own credentials (or
+none — `git-repo` needs nothing), so `fetch` doesn't require `ANTHROPIC_API_KEY` or
+`DAYTONA_API_KEY`. Enable one under `connectors:` in `config.yaml`; see
+[`src/connectors/README.md`](src/connectors/README.md).
 
 ### Pruning old sessions
 
@@ -305,11 +423,49 @@ Three operations:
 
 Trigger with: *"Analyze my recent traces"* or *"What went wrong in the last few runs?"*
 
-1. **Fetch** — `run_trace_report_async` retrieves recent traces from LangSmith (pass `error=True` to scope to failures only).
-2. **Summarize** — `summarize_traces_async` batches traces into pages and condenses them in parallel into structured summaries.
-3. **Cluster & detect** — the agent groups findings by pattern (skill deviations, tool errors, HITL rejections), validates each against git history to skip already-fixed issues, then runs `detect_anomalies_async` to produce ground-truth anomaly signals (`hard_error`, `latency_spike`, `token_blowout`, `step_count_spike`). Presents a ranked report and **waits for your confirmation** before proceeding.
-4. **Push to datasets** — `create_datasets_from_anomaly_report` pushes failing spans to scoped LangSmith datasets (used by the weekly CI regression suite). For tool hard errors, it also generates candidate `eval/pr_gate_cases.json` entries, presents them with inferred assertions (`expect_error` or `expect_keys`), and **waits for your approval** before writing. Approved cases are added to `eval/pr_gate_cases.json` in the same commit — so the fix PR also hardens the PR gate against that failure recurring.
-5. **Commit & PR** — commits all changes (skill patches, `AGENTS.md` updates, `eval/pr_gate_cases.json` additions), opens a PR, and appends a watermark to `trace_analysis_log.md`.
+Five steps. Two of them stop and wait for you.
+
+1. **Fetch** — `run_trace_report_async` pulls recent traces (`error=True` scopes to failures).
+2. **Summarize** — `summarize_traces_async` condenses them in parallel.
+3. **Cluster & detect** — group findings by pattern, then run `detect_anomalies_async`.
+   > **Waits for you** to acknowledge the ranked report.
+4. **Push to datasets** — failing spans go to LangSmith; tool hard errors also become draft
+   PR-gate cases with inferred assertions.
+   > **Waits for you** to approve before writing `eval/pr_gate_cases.json`.
+5. **Commit & PR** — skill / `AGENTS.md` patches plus the new gate cases, one PR, and a
+   watermark in `trace_analysis_log.md`.
+
+Two details worth knowing:
+
+- **Step 3 checks git history first** (`git log -n 20 -- <file>`) and strikes any finding a
+  recent commit already fixed — traces are always older than the code.
+- **Step 4 proposes the assertion; you decide it.** The tool hands back only the failing
+  inputs — no assertion at all. The skill reads the error message and suggests one:
+
+  | Error signal | Reading | Suggests |
+  |---|---|---|
+  | `No paper found for ID INVALID999` | the input was junk — it *should* fail | `expect_error: true` |
+  | `KeyError: 'pdf_path'` on `1706.03762` | a real paper, so this is a bug; once fixed it should return data | `expect_keys: ["title", "pdf_path", "metadata"]` |
+
+  You approve or correct it. Full field schema in
+  [`eval/README.md`](eval/README.md#pr-gate-case-schema).
+
+The fix and its gate case land in the **same PR** — and that case then runs on every PR
+thereafter, which is what makes the fix durable.
+
+### Two kinds of finding
+
+Step 3 produces two streams, and conflating them is the usual confusion:
+
+- **Qualitative** — from clustering the summaries: `skill_deviation`, `hitl_rejected`, tool
+  misuse. The model's *reading* of what went wrong → patches a `SKILL.md` or `AGENTS.md`.
+- **Quantitative** — from `detect_anomalies_async`, measured against `baselines.json`:
+  `hard_error`, `latency_spike`, `token_blowout`, `step_count_spike` → a LangSmith dataset
+  entry, and for **tool hard errors only**, a PR-gate case.
+
+**A qualitative finding changes a prompt; a quantitative one can become a test.** Only a
+hard error on a tool run is reproducible enough to block a merge — spikes aren't, and an
+llm-run error has no tool to re-call. Detail in [`eval/README.md`](eval/README.md).
 
 ---
 
@@ -353,15 +509,17 @@ llm_wiki/
 ├── src/agents/       # Supervisor & Daytona subagent logic (Loop 1)
 ├── src/middleware/   # WikiRubricMiddleware — in-run verification (Loop 2)
 ├── src/slack/        # Socket Mode front-end (Loop 3)
+├── src/connectors/   # Phase 1 of ingest — deterministic fetch, no LLM
 ├── src/tools/        # Ingest (Docling, arXiv), Trace, & Wiki tools
-├── src/cli/          # Terminal REPL / one-shot chat / session browsing
+├── src/cli/          # Terminal REPL / chat / serve / fetch / sessions
 ├── skills/           # Skill definitions (Markdown + logic)
 ├── wiki/             # The knowledge base
 └── marp-slides/      # Presentation outputs
 ```
 
-`src/middleware/` and `src/slack/` each carry their own `README.md` explaining the
-checks and the message flow respectively.
+`src/middleware/`, `src/slack/`, `src/cli/` and `src/connectors/` each carry their own
+`README.md` — the checks, the Slack message flow, the terminal front-end, and the fetch
+contract respectively.
 
 ### Tests & CI
 
@@ -409,8 +567,7 @@ LLM access — virtual keys + per-team budgets/RBAC, spend alerts, Prometheus me
 a prompt-injection guardrail, and a semantic response cache (Postgres + Redis). It's **not part of
 the published package** (lives outside `src/`); the app only talks to it over HTTP when
 `PAPER2WIKI_LLM_GATEWAY=litellm` is set, and never imports `litellm`. Setup, rationale, and the
-"lie to LangChain" routing trick are in [`gateway/README.md`](gateway/README.md) and
-`docs/litellm/`.
+"lie to LangChain" routing trick are in [`gateway/README.md`](gateway/README.md).
 
 ### Wiki Integrity (Linting)
 

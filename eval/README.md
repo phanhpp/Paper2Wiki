@@ -77,12 +77,12 @@ Regression tests measure performance consistency across application versions ove
 ## How CI and eval fit together (what runs when, and what's manual)
 
 
-| Trigger                                 | Runs                                                                                           | Automatic?               |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------ |
-| **Every PR / push**                     | `pytest -m unit` + `eval/run_gate.py` (Track 1)                                                | ✅ fully auto, no secrets |
-| **PR touching ingest/query/marp paths** | the matching golden eval (Track 2)                                                             | ✅ auto, path-conditional |
-| **Weekly schedule**                     | `run_weekly_baselines.py` — refresh `memories/baselines.json` only                             | ✅ auto                   |
-| **On-demand: "Analyze my traces"**      | `trace-analysis` skill → detect anomalies → **create datasets + draft pr_gate cases**          | ❌ **HITL**               |
+| Trigger                                 | Runs                                                                                  | Automatic?               |
+| --------------------------------------- | ------------------------------------------------------------------------------------- | ------------------------ |
+| **Every PR / push**                     | `pytest -m unit` + `eval/run_gate.py` (Track 1)                                       | ✅ fully auto, no secrets |
+| **PR touching ingest/query/marp paths** | the matching golden eval (Track 2)                                                    | ✅ auto, path-conditional |
+| **Weekly schedule**                     | `run_weekly_baselines.py` — refresh `memories/baselines.json` only                    | ✅ auto                   |
+| **On-demand: "Analyze my traces"**      | `trace-analysis` skill → detect anomalies → **create datasets + draft pr_gate cases** | ❌ **HITL**               |
 
 
 **The split that trips people up — two speeds:**
@@ -96,16 +96,18 @@ populates datasets or writes gate cases.
 **Precisely which part is enforced** (`agent.py:208` — `interrupt_on` covers `execute`,
 `write_file`, `edit_file`):
 
-| Step | Interrupt? |
-|---|---|
-| Push failed spans → LangSmith datasets | **no** — the skill asks by convention; nothing enforces it |
-| Append approved cases → `pr_gate_cases.json` | **yes** — it is a `write_file` |
+
+| Step                                         | Interrupt?                                                 |
+| -------------------------------------------- | ---------------------------------------------------------- |
+| Push failed spans → LangSmith datasets       | **no** — the skill asks by convention; nothing enforces it |
+| Append approved cases → `pr_gate_cases.json` | **yes** — it is a `write_file`                             |
+
 
 So the datasets are a *superset* of what reaches the gate.
 
 **Why there is no weekly replay.** There used to be a `pytest -m langsmith` job replaying
 hard_error examples from those datasets. It was removed as redundant: a hard error becomes durable
-coverage by being **promoted into `pr_gate_cases.json`**, which then runs on *every* PR — strictly
+coverage by being **promoted into** `pr_gate_cases.json`, which then runs on *every* PR — strictly
 more often than weekly. The only thing lost is the `recovery_quality` LLM judge ("did it fail
 *gracefully*"), which a deterministic gate can't express; that was judged not worth a second
 harness. The loop closes when the fix and its gate case land in the same PR.
@@ -115,6 +117,138 @@ exposed to the supervisor; never called by any CI script). See
 `src/tools/observability_eval_tools/README.md` "Who calls what".
 
 ---
+
+
+
+## What the trace-analysis skill actually does
+
+Five steps. Two of them stop and wait for you.
+
+```
+1 Fetch        run_trace_report_async — recent traces from LangSmith
+2 Summarize    summarize_traces_async — batched, condensed in parallel
+3 Cluster      group by pattern + detect_anomalies_async
+               ⏸  present the ranked report, WAIT for acknowledgement
+4 Datasets     push spans → LangSmith  ·  draft PR-gate cases
+               ⏸  approve before pr_gate_cases.json is written
+5 Commit       commit, open a PR, append to trace_analysis_log.md
+```
+
+
+
+### Two kinds of finding
+
+Step 3 produces two streams, and conflating them is the usual source of confusion about
+what can and can't become a test:
+
+- **Qualitative** — from clustering the summaries. The model's *reading* of what went
+  wrong; interpretive, and can be wrong.
+- **Quantitative** — from `detect_anomalies_async`, measured against
+  `memories/baselines.json` (3× the rolling median). Computed, not interpreted.
+
+The skill states the precedence itself: **"anomaly signals are ground truth, cluster
+observations are qualitative context."**
+
+| Finding | Kind | Fix | Durable test? |
+|---|---|---|---|
+| `skill_deviation` — e.g. sha256 on the wrong body | qualitative | patch the skill / `AGENTS.md` | no |
+| `hitl_rejected` — you turned a proposal down | qualitative | patch the prompt | no |
+| **`hard_error` on a `run_type == "tool"`** | quantitative | fix the code | **yes → `pr_gate_cases.json`** |
+| `hard_error` on an **llm** run | quantitative | reported | dataset only — no tool to re-call |
+| `latency_spike` / `token_blowout` / `step_count_spike` | quantitative | reported | dataset only — not reproducible on demand |
+
+**A qualitative finding changes a *prompt*; a quantitative one can become a *test*.** Only
+one of the five shapes reaches the gate, deliberately: a blocking case must be
+deterministic and re-runnable, and a latency spike is neither.
+
+### The git-history check, which is easy to miss
+
+Before proposing any fix, step 3 validates each finding against history:
+
+```bash
+git --no-pager log --oneline -n 20 -- <affected_file>
+git --no-pager diff HEAD~5 -- <affected_file>
+```
+
+Recently modified → the finding is struck from the report with a note (*"resolved in commit
+a3f92c1"*). This is what stops the skill re-proposing a fix that already landed, since
+traces are always older than the code.
+
+### Where the human actually sits
+
+Two pauses are described in the skill, but only one is **enforced** by the infrastructure
+(`interrupt_on` = `execute` / `write_file` / `edit_file`, `agent.py:208`):
+
+
+| Action                                                   | Enforced?                             |
+| -------------------------------------------------------- | ------------------------------------- |
+| Push spans → LangSmith datasets                          | **no** — the skill asks by convention |
+| Write `AGENTS.md`, a `SKILL.md`, or `pr_gate_cases.json` | **yes** — `write_file`                |
+| `git commit` / `git push`                                | **yes** — `execute`                   |
+
+
+---
+
+
+
+## PR-gate case schema
+
+What a case in `eval/pr_gate_cases.json` looks like, for anyone adding one by hand.
+
+
+| Field                   | Required | What it is                                                                               |
+| ----------------------- | -------- | ---------------------------------------------------------------------------------------- |
+| `id`                    | ✅        | Unique snake_case. Auto-generated ones use `regression_<tool>_<short_hash>`              |
+| `type`                  | ✅        | `regression` blocks the merge · `capability` is tracked but never blocks                 |
+| `category`              | ✅        | Groups cases for scoring: `retrieval`, `health`, `boundary`                              |
+| `tool`                  | ✅        | Exact registered tool name (matches `t.name` in `all_tools`)                             |
+| `inputs`                | ✅        | Dict passed to `tool.ainvoke(inputs)` — must be JSON-serializable                        |
+| `expect_keys`           | one of   | Strings that must appear in the serialized output. **The tool should succeed**           |
+| `expect_error`          | one of   | `true` — passes if the tool raises. **Invalid input that should fail gracefully**        |
+| `expect_error_contains` | one of   | Substring of the exception message (case-insensitive). Used for the SSRF/boundary guards |
+| `expect_empty`          | one of   | `true` — passes if the result is falsy. Empty-input edge cases                           |
+| `_review`               | ❌        | Human note on an auto-generated case — **strip it before merging**                       |
+
+
+**At least one** `expect_`* **is required to assert anything meaningful.** A case with none only
+checks that the tool didn't crash — valid, but weak.
+
+### Choosing the assertion
+
+An auto-generated case arrives with `_review` and **no** `expect_`*, because the tool can't
+know what "correct" means here. That depends entirely on whether the input was valid — and
+the same tool with the same crash means opposite things:
+
+
+| Error signal                           | Reading                                                               | Assertion                                        |
+| -------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------ |
+| `No paper found for ID INVALID999`     | the input was junk; failing is the *correct* behaviour                | `expect_error: true`                             |
+| `KeyError: 'pdf_path'` on `1706.03762` | a real paper — this is a software bug. Once fixed it must return data | `expect_keys: ["title", "pdf_path", "metadata"]` |
+
+
+The rule of thumb from the skill: an HTTP error, invalid id or malformed input points at
+**bad input** → `expect_error`. A connection error, parsing crash or unexpected `None` on
+input that should have worked points at a **bug** → `expect_keys`.
+
+Known output fields, for writing `expect_keys`:
+
+
+| Tool                         | Typical keys                    |
+| ---------------------------- | ------------------------------- |
+| `fetch_arxiv`                | `title`, `pdf_path`, `metadata` |
+| `parse_pdf_docling`          | `content`, `page_count`         |
+| `web_search`                 | `title`, `url`                  |
+| `web_extract`                | `content`, `url`                |
+| `quick_wiki_integrity_check` | `pages_checked`                 |
+
+
+**A network-caused hard error should usually be** `capability`**, not** `regression`**.** A 429 or a
+timeout will flake the blocking gate. Add it as `capability` and promote it later only if it
+turns out to be deterministic.
+
+---
+
+
 
 ## Track 1 gate logic — what blocks a PR (read this before touching thresholds)
 
@@ -153,25 +287,30 @@ rendered box on the PR page) via `$GITHUB_STEP_SUMMARY` — no need to open the 
 
 ---
 
+
+
 ## File map
 
 
-| File                               | Track | Purpose                                                                                 |
-| ---------------------------------- | ----- | --------------------------------------------------------------------------------------- |
-| `eval/pr_gate_cases.json`          | 1     | Deterministic tool test cases — regression + capability                                 |
-| `eval/results.json`                | 1     | **Output** of `run_gate.py`, rewritten every run. Not committed by CI, never read back. |
-| `eval/run_gate.py`                 | 1     | Runs pr_gate_cases.json, writes results.json, exits 1 on regression drop                |
-| `eval/golden_datasets/ingest.json` | 2     | 4 cases: 1 already-ingested, 1 full-ingest, 1 partial-ingest, 1 negative                |
-| `eval/golden_datasets/query.json`  | 2     | 3 cases: 2 positive, 1 negative                                                         |
-| `eval/golden_datasets/marp.json`   | 2     | 3 cases: all positive (tech/business/web-search)                                        |
-| `eval/push_golden_datasets.py`     | 2     | Syncs JSON → LangSmith (`--dataset {ingest,query,marp}`)                                |
-| `eval/golden_evaluators.py`        | 2     | Code evals + LLM judges for all 3 datasets                                              |
-| `eval/run_weekly_eval.py`          | 2     | Target fns + aevaluate wiring + gate logic                                              |
-| `eval/run_weekly_baselines.py`     | 3     | Fetch traces → compute `memories/baselines.json`                                        |
-| `memories/baselines.json`          | 3     | Per-run-name latency/token medians (3× threshold for anomaly detection)                 |
+| File                                     | Track | Purpose                                                                                 |
+| ---------------------------------------- | ----- | --------------------------------------------------------------------------------------- |
+| `eval/pr_gate_cases.json`                | 1     | Deterministic tool test cases — regression + capability                                 |
+| `eval/fixtures/mock_anomaly_report.json` | 3     | Hand-built AnomalyReport for exercising step 4 without a real failure                   |
+| `eval/results.json`                      | 1     | **Output** of `run_gate.py`, rewritten every run. Not committed by CI, never read back. |
+| `eval/run_gate.py`                       | 1     | Runs pr_gate_cases.json, writes results.json, exits 1 on regression drop                |
+| `eval/golden_datasets/ingest.json`       | 2     | 4 cases: 1 already-ingested, 1 full-ingest, 1 partial-ingest, 1 negative                |
+| `eval/golden_datasets/query.json`        | 2     | 3 cases: 2 positive, 1 negative                                                         |
+| `eval/golden_datasets/marp.json`         | 2     | 3 cases: all positive (tech/business/web-search)                                        |
+| `eval/push_golden_datasets.py`           | 2     | Syncs JSON → LangSmith (`--dataset {ingest,query,marp}`)                                |
+| `eval/golden_evaluators.py`              | 2     | Code evals + LLM judges for all 3 datasets                                              |
+| `eval/run_weekly_eval.py`                | 2     | Target fns + aevaluate wiring + gate logic                                              |
+| `eval/run_weekly_baselines.py`           | 3     | Fetch traces → compute `memories/baselines.json`                                        |
+| `memories/baselines.json`                | 3     | Per-run-name latency/token medians (3× threshold for anomaly detection)                 |
 
 
 ---
+
+
 
 ## Which tools belong in the gate (design principle)
 
@@ -191,19 +330,23 @@ rendered box on the PR page) via `$GITHUB_STEP_SUMMARY` — no need to open the 
 | `run_trace_report_async`, `create_datasets_from_anomaly_report` | ❌        | unit tests                 | LangSmith network + secrets                                         |
 
 
+
+
 ### Current gate cases (what each one checks)
 
 **Regression (blocking, deterministic, key-free):**
 
-| Case | Checks |
-|---|---|
-| `sha256_basic` | exact SHA-256 of `"hello world"` — the hashing logic is correct |
-| `sha256_strips_leading_newlines` | `"\n\nhello world"` hashes the **same** as `"hello world"` — confirms `lstrip('\n')` is applied (the wiki `raw/` convention: the body after `---` is hashed with leading newlines stripped, so the digest is stable regardless of blank lines) |
-| `web_extract_empty_urls` | empty URL list returns `[]` immediately, before any provider call |
-| `web_extract_localhost_blocked` | request to `localhost` is refused |
-| `web_extract_private_ip_blocked` | request to a private range (`192.168.x`) is refused |
-| `web_extract_metadata_ip_blocked` | request to `169.254.169.254` is refused |
-| `wiki_check_runs` | wiki integrity check runs on the committed wiki and returns OK |
+
+| Case                              | Checks                                                                                                                                                                                                                                         |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sha256_basic`                    | exact SHA-256 of `"hello world"` — the hashing logic is correct                                                                                                                                                                                |
+| `sha256_strips_leading_newlines`  | `"\n\nhello world"` hashes the **same** as `"hello world"` — confirms `lstrip('\n')` is applied (the wiki `raw/` convention: the body after `---` is hashed with leading newlines stripped, so the digest is stable regardless of blank lines) |
+| `web_extract_empty_urls`          | empty URL list returns `[]` immediately, before any provider call                                                                                                                                                                              |
+| `web_extract_localhost_blocked`   | request to `localhost` is refused                                                                                                                                                                                                              |
+| `web_extract_private_ip_blocked`  | request to a private range (`192.168.x`) is refused                                                                                                                                                                                            |
+| `web_extract_metadata_ip_blocked` | request to `169.254.169.254` is refused                                                                                                                                                                                                        |
+| `wiki_check_runs`                 | wiki integrity check runs on the committed wiki and returns OK                                                                                                                                                                                 |
+
 
 > **SSRF (Server-Side Request Forgery)** = tricking the server into making requests to addresses it
 > shouldn't — e.g. internal services (`localhost`, private IPs) or the **cloud metadata endpoint**
@@ -213,11 +356,15 @@ rendered box on the PR page) via `$GITHUB_STEP_SUMMARY` — no need to open the 
 
 **Capability (tracked, non-blocking — network/external):**
 
-| Case | Checks | Needs key |
-|---|---|---|
-| `fetch_arxiv_valid_id` | arXiv returns a paper (or a graceful `rate_limited`) | no (arXiv direct) |
-| `web_search_returns_results` | a search returns `title`/`url` results | yes |
-| `web_extract_arxiv_html` | extracting an arXiv HTML page returns `content` | yes |
+
+| Case                         | Checks                                               | Needs key         |
+| ---------------------------- | ---------------------------------------------------- | ----------------- |
+| `fetch_arxiv_valid_id`       | arXiv returns a paper (or a graceful `rate_limited`) | no (arXiv direct) |
+| `web_search_returns_results` | a search returns `title`/`url` results               | yes               |
+| `web_extract_arxiv_html`     | extracting an arXiv HTML page returns `content`      | yes               |
+
+
+
 
 ### Candidate additions (deterministic, fast — extend the *blocking* gate)
 
@@ -242,6 +389,8 @@ Keep adding deterministic cases to **regression**; only network/external behavio
 | 7    | Wire into weekly CI (path-conditional jobs)      | ✅ done             |
 | 8    | Judge calibration — 20 hand-labeled examples     | ❌ manual           |
 | 9    | Remove `--no-gate` once judge agreement > 80%    | ❌ post-calibration |
+
+
 
 
 ## Gate thresholds (active after calibration)
