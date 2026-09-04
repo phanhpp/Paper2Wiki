@@ -76,7 +76,7 @@ async def prune_checkpoints(thread_ids: list[str], *, vacuum: bool = False) -> N
     than ``aprune(strategy="keep_latest")``: keep_latest is **DeltaChannel-unsafe**
     — it can sever the parent chain so a surviving checkpoint silently
     reconstructs with empty channels (no error raised). Full deletion has no
-    chain to sever. See ``docs/prune.md`` and ``src/sessions/README.md``.
+    chain to sever. See ``src/sessions/README.md``.
 
     ``vacuum=True`` runs a single ``VACUUM`` after the deletes to return freed
     pages to the OS — ``DELETE`` (which is all ``adelete_thread`` does) only

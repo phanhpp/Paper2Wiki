@@ -4,7 +4,7 @@ A LiteLLM proxy (single container) fronting **managed** Postgres (Neon) + Redis 
 for learning multi-tenant RBAC, budgets, alerts, metrics, and semantic caching. **Not part of the
 published package** — it lives outside `src/` (excluded by the wheel's `include = ["src*"]`) and runs
 as a separate process. The app only *talks to it* over HTTP when `PAPER2WIKI_LLM_GATEWAY=litellm` is
-set; it never imports `litellm`. Full design + rationale: `[docs/litellm/plan.md](../docs/litellm/plan.md)`.
+set; it never imports `litellm`.
 
 ## Progress
 
@@ -192,7 +192,7 @@ choice, not a learning shortcut.
 ## Testing the semantic cache
 
 A custom callback (`cache_logger.py`, mounted into the container and registered in `config.yaml`'s
-`callbacks` — see `[docs/litellm/custom_callbacks.md](../docs/litellm/custom_callbacks.md)` for how
+`callbacks` — see the LiteLLM custom-callback docs for how
 that wiring works) prints one clear line per request — watch it live with `docker compose logs -f litellm`:
 
 ```

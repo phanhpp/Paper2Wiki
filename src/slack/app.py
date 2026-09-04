@@ -3,7 +3,7 @@
 Why Socket Mode: this runs on a laptop with no public URL, so Slack can't POST
 to us. Socket Mode inverts the direction — the app dials *out* over a websocket,
 so no webhook, no inbound port, no cron. (A deployed variant would use the
-Events API instead; see ``docs/loop3_slack.md``.)
+Events API instead.)
 
 Everything runs on **one event loop**, no threads::
 
@@ -246,7 +246,7 @@ def check_credentials(bot_token: str, app_token: str) -> str:
         raise RuntimeError(
             f"SLACK_BOT_TOKEN rejected by Slack ({exc.response.get('error')}). "
             "It should start 'xoxb-' and comes from OAuth & Permissions, after "
-            "installing the app. See docs/slack_setup.md."
+            "installing the app. See README.md → Slack."
         ) from exc
 
     # apps.connections.open is the only way to prove the app-level token works.
@@ -267,7 +267,7 @@ def check_credentials(bot_token: str, app_token: str) -> str:
         raise RuntimeError(
             f"SLACK_APP_TOKEN rejected by Slack ({error}). It should start "
             "'xapp-' and comes from Basic Information -> App-Level Tokens. "
-            "See docs/slack_setup.md."
+            "See README.md → Slack."
         ) from exc
 
     return resp.get("user", "the bot")

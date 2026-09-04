@@ -80,7 +80,7 @@ verification:
   enabled: true            # kill switch: false makes the middleware inert
   max_iterations: 2        # retries before giving up and surfacing the failure
 
-  # Query-path semantic checks (not yet implemented — see docs/loop_engineer/).
+  # Query-path semantic checks (not yet implemented).
   # Both thresholds are biased toward PASSING: a verification loop that cries
   # wolf on normal usage gets switched off, and then you have nothing.
   embedding_model: text-embedding-3-small

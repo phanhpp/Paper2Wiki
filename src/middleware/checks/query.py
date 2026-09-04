@@ -11,7 +11,7 @@ same standards as any other.
 
 The two semantic checks from the plan (are the pages read relevant to the
 question; does the wiki hold pages relevant to the question) need the embedding
-layer and are not implemented yet — see ``docs/loop_engineer/implement_plan.md``.
+layer and are not implemented yet.
 """
 
 from __future__ import annotations

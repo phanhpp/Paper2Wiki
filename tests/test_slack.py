@@ -7,7 +7,7 @@ verification off so Bolt never calls ``auth.test``.
 What these cover is the *logic* — thread-id derivation, token buffering, HITL
 decision shapes, the channel filter. What they cannot cover is whether your
 tokens are valid, your scopes are right, or the bot was invited to the channel;
-that needs a live run (see ``docs/loop3_slack.md`` → Verification).
+that needs a live run (see ``src/slack/README.md`` → Verification).
 """
 
 from __future__ import annotations

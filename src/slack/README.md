@@ -4,8 +4,8 @@ Message the bot in Slack and it runs **the same agent, against the same wiki**, 
 your terminal does. Same `create_supervisor()`, same `wiki/`, same `checkpoints.db`
 and `sessions.db`.
 
-Setup (Slack app, tokens, inviting the bot): `docs/slack_setup.md`.
-Design rationale and transport comparison: `docs/loop3_slack.md`.
+Setup (Slack app, tokens, inviting the bot): the root `README.md` →
+"Using the CLI" → "Slack (`serve`)".
 
 ## The libraries, first
 
@@ -220,5 +220,11 @@ overlap.
 testable: a test can deliver an event and assert it was queued without a turn firing.
 
 They **cannot** tell you whether your tokens are valid, your scopes are right, or the
-bot was invited to the channel. All three fail *silently*. That needs a live run —
-checklist in `docs/loop3_slack.md`.
+bot was invited to the channel. All three fail *silently*. That needs a live run:
+
+1. `paper2wiki serve` — it should print that it connected, not exit.
+2. Post in the channel. No reply at all usually means the bot was never `/invite`d,
+   even if the channel is public.
+3. Reply *in the thread* — the answer should carry the earlier turn's context, which
+   proves `thread_id_for()` resolved to the same session.
+4. Trigger a write so an approval appears, and click both buttons.

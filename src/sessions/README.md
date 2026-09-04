@@ -202,7 +202,7 @@ decoded from the time-ordered v6 `checkpoint_id`), guarding against evicting a t
 before its session row is written. It **refuses if `sessions.db` is empty** (everything would look
 orphaned). `--vacuum` is needed to shrink the file — `DELETE` only frees pages to SQLite's
 freelist; `VACUUM` returns them to the OS. See `agent.py:find_orphan_checkpoint_threads` /
-`prune_checkpoints` and `docs/pruning_design.md`.
+`prune_checkpoints`.
 
 ## Notes / gotchas
 

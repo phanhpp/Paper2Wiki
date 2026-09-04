@@ -14,7 +14,7 @@ What this adds:
 
 **401 and 403 are returned unretried, deliberately.** They are not transient, and
 a caller needs to *see* a 401 to trigger a token refresh (see the auth work in
-``docs/openwiki/targets.md``, items 14-15). Retrying them wastes attempts and can
+items 14-15). Retrying them wastes attempts and can
 lock accounts.
 """
 

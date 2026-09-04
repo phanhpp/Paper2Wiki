@@ -236,7 +236,7 @@ saved answer). These two catch *relevance*, which string comparison cannot.
 
 When building them: index `index.md` summaries only, not page content. Bias both thresholds toward
 passing — a checker that cries wolf on normal use gets switched off. See
-`docs/loop_engineer/implement_plan.md`.
+`src/middleware/__init__.py`.
 
 ## What the agent sees when a check fails
 
