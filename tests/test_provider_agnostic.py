@@ -499,12 +499,14 @@ def test_configured_provider_still_applies_without_a_prefix(monkeypatch):
 @pytest.mark.parametrize(
     "spec_kwargs, expect_provider, expect_endpoint",
     [
-        ({"model": "claude-sonnet-4-6", "provider": "anthropic"}, "anthropic", "provider default"),
-        ({"model": "openai:gpt-4o"}, "openai", "provider default"),          # from the prefix
-        ({"model": "gpt-4o"}, "openai", "provider default"),                  # inferred
+        # An em-dash endpoint means "the provider's own API" — anything else is a
+        # custom base_url, which is the case the column exists to make visible.
+        ({"model": "claude-sonnet-4-6", "provider": "anthropic"}, "anthropic", "—"),
+        ({"model": "openai:gpt-4o"}, "openai", "—"),                          # from the prefix
+        ({"model": "gpt-4o"}, "openai", "—"),                                 # inferred
         ({"model": "claude-x", "provider": "openai", "base_url": "https://openrouter.ai/api/v1"},
          "openai", "https://openrouter.ai/api/v1"),                           # routed
-        ({"model": "mystery-model-9000"}, "unknown", "provider default"),
+        ({"model": "mystery-model-9000"}, "unknown", "—"),
     ],
 )
 def test_config_show_reports_the_real_destination(spec_kwargs, expect_provider, expect_endpoint):

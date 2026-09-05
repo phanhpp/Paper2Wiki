@@ -34,6 +34,11 @@ PATH — either `source .venv/bin/activate` or use `uv run any2wiki …`.)
 
 | Command | What it does | Needs LLM? |
 |---|---|---|
+| `setup` | First-run wizard — provider, model, per-task models, API key ([below](#setup)) | no |
+| `keys list` | Which API keys are set, masked | no |
+| `keys set <NAME>` | Prompt for a key and write it to `.env` (never `config.yaml`) | no |
+| `config path` | Print the config file in use — one pipeable line | no |
+| `config set <key> <value>` | Set one value, e.g. `auxiliary.judge.model openai:gpt-4o-mini` | no |
 | `repl` | Interactive chat session (streaming, approvals, meta-commands) | yes |
 | `chat "<msg>"` | Run a single message and exit | yes |
 | `serve` | Listen on a Slack channel and run the agent on each message ([below](#slack-serve)) | yes |
@@ -63,6 +68,36 @@ build the supervisor (and, unless `--eval-mode`, a Daytona sandbox).
 | `--thread-id` / `-t` | Resume / pin a specific thread | `chat` `repl` `resume` |
 | `--no-save` | Don't persist to `sessions.db` (throwaway turns; in-run approvals still work) | `chat` `repl` `resume` |
 | `--channel` | Slack channel id (else `$SLACK_CHANNEL_ID`) | `serve` |
+
+## Setup
+
+```bash
+any2wiki setup                                   # interactive
+any2wiki setup --provider openai --model openai:gpt-4o --yes   # scripted
+```
+
+Asks four things: provider, base model, whether the five background tasks should use a
+cheaper model, and the API key. Writes `config.yaml` and — if you give it one — `.env`.
+
+**It refuses to overwrite an existing `config.yaml`** without `--force`, and **a missing
+API key is a warning, not a failure**: writing config now and adding the key later is a
+normal flow, and a run refuses with a clear message anyway.
+
+Afterwards:
+
+```bash
+any2wiki config show                             # what a run would use
+any2wiki config path                             # which file that came from
+any2wiki config set auxiliary.judge.model openai:gpt-4o-mini
+any2wiki keys list                               # what is set, masked
+```
+
+`config set` refuses anything secret-shaped (`*_API_KEY`, `*_TOKEN`) and points you at
+`keys set` — secrets belong in `.env`. It also rejects unknown tasks, so
+`auxiliary.judeg.model` fails instead of silently writing a key nothing reads.
+
+**If a change seems to do nothing**, check `config show`'s **From** column: an env var
+outranks `config.yaml`, and the footer names any that are overriding.
 
 ## Inside the REPL
 
