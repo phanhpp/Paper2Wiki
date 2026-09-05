@@ -1,9 +1,9 @@
-# The `paper2wiki` CLI
+# The `any2wiki` CLI
 
 Every command, flag and workflow. For choosing a model see [`MODELS.md`](MODELS.md); for
 how the package is built see [`src/cli/README.md`](src/cli/README.md).
 
-Paper2Wiki ships a terminal CLI (`paper2wiki`) for daily use: an interactive REPL, one-shot
+Any2Wiki ships a terminal CLI (`any2wiki`) for daily use: an interactive REPL, one-shot
 chat, a Slack listener, connector fetches, session browsing, and config inspection. Run
 commands **from the repo root** — `.env` is auto-loaded.
 
@@ -23,12 +23,12 @@ uv run python -m src.cli.app config show                           # show effect
 Optional alias so it reads like a real command:
 
 ```bash
-echo "alias paper2wiki='uv run python -m src.cli.app'" >> ~/.zshrc && source ~/.zshrc
-paper2wiki repl
+echo "alias any2wiki='uv run python -m src.cli.app'" >> ~/.zshrc && source ~/.zshrc
+any2wiki repl
 ```
 
-(A `paper2wiki` console script is also installed in the venv; it needs `.venv/bin` on your
-PATH — either `source .venv/bin/activate` or use `uv run paper2wiki …`.)
+(A `any2wiki` console script is also installed in the venv; it needs `.venv/bin` on your
+PATH — either `source .venv/bin/activate` or use `uv run any2wiki …`.)
 
 ## Commands
 
@@ -54,7 +54,7 @@ build the supervisor (and, unless `--eval-mode`, a Daytona sandbox).
 
 | Flag | Purpose | Available on |
 |---|---|---|
-| `--model` / `-m` | Override the **base** model for this run, e.g. `openai:gpt-4o` | `chat` `repl` `resume` `serve` `config show` |
+| `--model` / `-m` | Override the **base** model for this run, e.g. `openai:gpt-4o`. Does not move a task pinned in `config.yaml` — see [`MODELS.md`](MODELS.md) | `chat` `repl` `resume` `serve` `config show` |
 | `--ingest-mode {fast\|quality}` | Override ingest mode | `chat` `repl` `resume` `serve` `fetch` |
 | `--wiki-path` | Override the wiki directory | `chat` `repl` `resume` `serve` `fetch` |
 | `--debug` | Show diagnostic output (incl. startup timings) | `chat` `repl` `resume` `serve` `fetch` |
@@ -84,10 +84,10 @@ terminal (Loop 3). Same `create_supervisor()`, same `wiki/`, same `checkpoints.d
 `sessions.db` — only the front-end differs.
 
 ```bash
-paper2wiki serve                          # listen on $SLACK_CHANNEL_ID
-paper2wiki serve --channel C0123456789    # override the channel
-paper2wiki serve --eval-mode              # no Daytona sandbox (no Marp subagent)
-paper2wiki serve -y                       # auto-approve — no approval buttons at all
+any2wiki serve                          # listen on $SLACK_CHANNEL_ID
+any2wiki serve --channel C0123456789    # override the channel
+any2wiki serve --eval-mode              # no Daytona sandbox (no Marp subagent)
+any2wiki serve -y                       # auto-approve — no approval buttons at all
 ```
 
 **Setup is per-user.** Slack apps are workspace-scoped, so everyone creates their own.
@@ -129,8 +129,8 @@ then stops. Turning that into wiki pages is a separate agent run, which can be r
 free because the raw data is already on disk.
 
 ```bash
-paper2wiki fetch              # run every connector enabled in config.yaml
-paper2wiki fetch git-repo     # run one
+any2wiki fetch              # run every connector enabled in config.yaml
+any2wiki fetch git-repo     # run one
 ```
 
 Each run reports `N new · N unchanged · N gone`. Unchanged items are skipped by content
@@ -147,10 +147,10 @@ at each age threshold — then prune. **Pruning is manual and explicit** — one
 stores in lockstep:
 
 ```bash
-paper2wiki sessions stats                      # see totals + what each threshold would delete
-paper2wiki sessions prune                      # delete ended sessions older than 90 days
-paper2wiki sessions prune --older-than-days 30 # custom age threshold
-paper2wiki sessions prune -y                   # skip the confirmation prompt
+any2wiki sessions stats                      # see totals + what each threshold would delete
+any2wiki sessions prune                      # delete ended sessions older than 90 days
+any2wiki sessions prune --older-than-days 30 # custom age threshold
+any2wiki sessions prune -y                   # skip the confirmation prompt
 ```
 
 - **Preview before delete:** `prune` lists the date + title of every session it will remove and
@@ -171,11 +171,11 @@ predating `sessions.db`) leave **orphan** checkpoints that `prune` can't reach, 
 usually the bulk of `checkpoints.db`. Sweep them separately:
 
 ```bash
-paper2wiki sessions prune-orphans                      # dry run — lists orphans + each one's last-activity age
-paper2wiki sessions prune-orphans --full               # list every orphan (not just the first 20)
-paper2wiki sessions prune-orphans --older-than 1       # skip threads active in the last day
-paper2wiki sessions prune-orphans --apply              # actually evict them (via adelete_thread)
-paper2wiki sessions prune-orphans --apply --vacuum     # also shrink the file on disk
+any2wiki sessions prune-orphans                      # dry run — lists orphans + each one's last-activity age
+any2wiki sessions prune-orphans --full               # list every orphan (not just the first 20)
+any2wiki sessions prune-orphans --older-than 1       # skip threads active in the last day
+any2wiki sessions prune-orphans --apply              # actually evict them (via adelete_thread)
+any2wiki sessions prune-orphans --apply --vacuum     # also shrink the file on disk
 ```
 
 - **Dry run by default** — review the list (each orphan shows its last-activity age), then re-run
@@ -191,7 +191,7 @@ paper2wiki sessions prune-orphans --apply --vacuum     # also shrink the file on
 
 ## macOS note
 
-Occasionally (usually right after `uv sync`) the bare `paper2wiki` command fails with
+Occasionally (usually right after `uv sync`) the bare `any2wiki` command fails with
 `ModuleNotFoundError: No module named 'src'` — a uv editable-`.pth` hidden-flag quirk. Fix:
 `chflags nohidden .venv/lib/python*/site-packages/__editable__.llm_wiki-*.pth`. The
 `uv run python -m src.cli.app …` form sidesteps it entirely.

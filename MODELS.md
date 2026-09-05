@@ -6,11 +6,80 @@ anything.
 **The one command to know:**
 
 ```bash
-paper2wiki config show
+any2wiki config show
 ```
 
 It prints every task's model, provider and endpoint — resolved exactly the way a real run
 resolves them, with no API call. Use it after every change in this document.
+
+---
+
+## The six tasks
+
+**You do not have to set any of these.** One model runs all six. They exist so you *can*
+point a task somewhere cheaper or different.
+
+| Task | What it does | How often it runs |
+|---|---|---|
+| `supervisor` | the main agent — plans, calls tools, writes pages | constantly |
+| `subagent` | the Marp slide subagent | only when making slides |
+| `title` | names a session from its first message | once per session |
+| `summarize` | condenses traces — **needs structured output** | trace analysis only |
+| `judge` | scores eval runs — **needs structured output** | evals only |
+| `web_summarize` | condenses a scraped web page | per web fetch |
+
+### Setting them
+
+**One model for everything** — this is all most people need:
+
+```yaml
+# config.yaml
+model:
+  default: claude-sonnet-4-6
+```
+
+**A different model for one task** — add an `auxiliary` block. Only name the tasks you
+want to change; anything you leave out follows `model.default`:
+
+```yaml
+model:
+  default: claude-sonnet-4-6      # supervisor, and anything not listed below
+
+auxiliary:
+  title:
+    model: claude-haiku-4-5-20251001    # naming a session is trivial — use something cheap
+  summarize:
+    model: claude-haiku-4-5-20251001
+  judge:
+    model: openai:gpt-4o-mini           # a different provider entirely is fine
+    api_key: sk-...                     # and its own key, if you like
+```
+
+**For one run only**, without editing anything:
+
+```bash
+any2wiki chat "hi" -m openai:gpt-4o           # every task not pinned above
+ANY2WIKI_MODEL_JUDGE=openai:gpt-4o any2wiki config show   # one task
+```
+
+> **The shipped `config.yaml` already pins five tasks to `claude-haiku-4-5`** — cheap
+> models for cheap work. That is why `config show` shows haiku for everything except the
+> supervisor, and why `-m` appears to move only the supervisor: a task pinned in
+> `config.yaml` beats the flag. Delete those `auxiliary` entries if you want one model
+> everywhere.
+
+### Trying a new provider
+
+The two tasks marked **needs structured output** call `with_structured_output`, which the
+supervisor never uses. A provider can handle the supervisor perfectly and still fail those
+two, so a chat test does not cover them:
+
+```bash
+uv run --env-file .env python scripts/probe_roles.py openai:gpt-4o
+```
+
+One small call per task, forcing all six onto the model you name — pinned tasks included,
+which `-m` alone would not do. Omit the model to check your current config.
 
 ---
 
@@ -31,14 +100,14 @@ ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ```bash
-paper2wiki config show      # confirm before running anything
+any2wiki config show      # confirm before running anything
 ```
 
 ---
 
 ## Provider recipes
 
-Each block goes in `config.yaml`. After each one, run `paper2wiki config show` and check
+Each block goes in `config.yaml`. After each one, run `any2wiki config show` and check
 the **Provider** and **Endpoint** columns say what you expect.
 
 ### Anthropic
@@ -96,8 +165,8 @@ request goes to OpenRouter, not to Anthropic.
 Switch models within OpenRouter without editing the file:
 
 ```bash
-paper2wiki chat "hi" -m openai/gpt-4o
-paper2wiki chat "hi" -m google/gemini-2.5-flash
+any2wiki chat "hi" -m openai/gpt-4o
+any2wiki chat "hi" -m google/gemini-2.5-flash
 ```
 
 ### Ollama — local
@@ -142,7 +211,7 @@ If you run the optional proxy in `gateway/`, route through it with an env var in
 config:
 
 ```bash
-PAPER2WIKI_LLM_GATEWAY=litellm
+ANY2WIKI_LLM_GATEWAY=litellm
 LITELLM_BASE_URL=http://localhost:4000     # optional, this is the default
 LITELLM_API_KEY=sk-virtual-key-...
 ```
@@ -162,34 +231,34 @@ Task-Specific Env Var → Task Config → Global Env Var → Base Config → Def
 
 | Level | Where | Example | Applies to |
 |---|---|---|---|
-| **1 · Task-Specific Env Var** | `.env` | `PAPER2WIKI_MODEL_SUMMARIZE=openai:gpt-4o-mini` | one task |
+| **1 · Task-Specific Env Var** | `.env` | `ANY2WIKI_MODEL_SUMMARIZE=openai:gpt-4o-mini` | one task |
 | **2 · Task Config** | `config.yaml` | `auxiliary.summarize.model: openai:gpt-4o-mini` | one task |
-| **3 · Global Env Var** | `.env`, or `-m` | `PAPER2WIKI_MODEL=openai:gpt-4o` | every task |
+| **3 · Global Env Var** | `.env`, or `-m` | `ANY2WIKI_MODEL=openai:gpt-4o` | every task |
 | **4 · Base Config** | `config.yaml` | `model.default: openai:gpt-4o` | every task |
 | **5 · Default Fallback** | built in | `claude-sonnet-4-6` | every task |
 
 The pattern: **task beats global, and env beats config.**
 
-The six tasks: `supervisor`, `subagent`, `title`, `summarize`, `judge`, `web_summarize`.
+The six tasks are listed at the top of this document.
 
 ### The `-m` / `--model` flag
 
-`-m` writes `PAPER2WIKI_MODEL` for that one run, so it lands at **level 3**.
+`-m` writes `ANY2WIKI_MODEL` for that one run, so it lands at **level 3**.
 
 ```bash
-paper2wiki repl -m openai:gpt-4o
-paper2wiki chat "summarise this" -m openai:gpt-4o
-paper2wiki config show -m openai:gpt-4o        # preview only, no API call
-paper2wiki serve -m openai:gpt-4o
+any2wiki repl -m openai:gpt-4o
+any2wiki chat "summarise this" -m openai:gpt-4o
+any2wiki config show -m openai:gpt-4o        # preview only, no API call
+any2wiki serve -m openai:gpt-4o
 ```
 
-It must come **after** a command — `paper2wiki -m openai:gpt-4o` alone is an error.
+It must come **after** a command — `any2wiki -m openai:gpt-4o` alone is an error.
 
 **It does not override a task pinned in `config.yaml`.** With `auxiliary.judge.model` set,
 `-m` moves every other task and leaves `judge` alone:
 
 ```bash
-paper2wiki config show -m openai:gpt-4o
+any2wiki config show -m openai:gpt-4o
 #   supervisor  openai:gpt-4o              ← the flag
 #   judge       claude-haiku-4-5-20251001  ← auxiliary.judge.model won
 ```
@@ -199,7 +268,7 @@ cheap summarisation, vision — and one flag silently retargeting them would bre
 To change a pinned task too, use its own env var:
 
 ```bash
-PAPER2WIKI_MODEL_JUDGE=openai:gpt-4o paper2wiki config show -m openai:gpt-4o
+ANY2WIKI_MODEL_JUDGE=openai:gpt-4o any2wiki config show -m openai:gpt-4o
 ```
 
 **`-m` sets only the model, never the endpoint.** With OpenRouter configured, `-m` switches
@@ -246,12 +315,12 @@ Setting `model.timeout` does not give it to the tasks; only a task's own block d
 override before committing to it:
 
 ```bash
-paper2wiki config show                                  # what runs today
-paper2wiki config show -m openai:gpt-4o                 # what the flag would change
-PAPER2WIKI_CONFIG=/tmp/try.yaml paper2wiki config show  # try a whole config, safely
+any2wiki config show                                  # what runs today
+any2wiki config show -m openai:gpt-4o                 # what the flag would change
+ANY2WIKI_CONFIG=/tmp/try.yaml any2wiki config show  # try a whole config, safely
 ```
 
-`PAPER2WIKI_CONFIG` points at any file, so you can test a config without touching your real
+`ANY2WIKI_CONFIG` points at any file, so you can test a config without touching your real
 one:
 
 ```bash
@@ -262,7 +331,7 @@ model:
   provider: openai
   base_url: https://openrouter.ai/api/v1
 YAML
-PAPER2WIKI_CONFIG=$TMP/c.yaml paper2wiki config show
+ANY2WIKI_CONFIG=$TMP/c.yaml any2wiki config show
 ```
 
 Read the **Provider** and **Endpoint** columns, not just the model. `provider default`
@@ -281,7 +350,7 @@ about a model name that is obviously OpenAI's — meaning the provider was pinne
 Check the Provider column:
 
 ```bash
-paper2wiki config show
+any2wiki config show
 ```
 
 If Model and Provider disagree, one of them is wrong. An explicit `provider:` prefix in the
@@ -320,7 +389,7 @@ The model name matches no known provider and none was configured. Either use the
 ### A task ignores `-m`
 
 It has its own `auxiliary.<task>.model`. Expected — see the flag section above. Override it
-with `PAPER2WIKI_MODEL_<TASK>`, or remove the pin from `config.yaml`.
+with `ANY2WIKI_MODEL_<TASK>`, or remove the pin from `config.yaml`.
 
 ---
 
