@@ -11,10 +11,10 @@ defined in `[src/agents/renderer.py](../agents/renderer.py)`.
 
 ## How it fits together
 
-What happens when you type `paper2wiki repl`:
+What happens when you type `any2wiki repl`:
 
 ```
-   paper2wiki repl
+   any2wiki repl
          │
          ▼
    app.py                            reads .env, matches "repl"     (1)
@@ -104,7 +104,7 @@ runs `apply_env()` *first*, then imports the agent lazily:
 
 ```python
 setup_logging(debug)
-apply_env(ingest_mode, wiki_path)      # writes PAPER2WIKI_INGEST_MODE / WIKI_PATH
+apply_env(ingest_mode, wiki_path)      # writes ANY2WIKI_INGEST_MODE / WIKI_PATH
 require_keys(eval_mode)
 
 from src.agents.agent import create_supervisor   # ← only now
@@ -112,7 +112,7 @@ from src.agents.agent import create_supervisor   # ← only now
 
 Hoist that import to the top of the module and `--ingest-mode quality` silently stops
 registering `fetch_arxiv` and `parse_pdf_docling`. The same laziness is why
-`paper2wiki --help` is fast: it never touches the LangGraph import graph.
+`any2wiki --help` is fast: it never touches the LangGraph import graph.
 
 **2 · Every command that runs the agent goes through** `run_async`**.** Two databases have to
 be closed afterwards, and each closes differently: the checkpointer is async, so it has to
@@ -139,9 +139,9 @@ Three settings work this way:
 
 | flag             | sets                     | read by                                                   |
 | ---------------- | ------------------------ | --------------------------------------------------------- |
-| `--ingest-mode`  | `PAPER2WIKI_INGEST_MODE` | `src/ingest_mode.py` — decides which tools get registered |
+| `--ingest-mode`  | `ANY2WIKI_INGEST_MODE` | `src/ingest_mode.py` — decides which tools get registered |
 | `--wiki-path`    | `WIKI_PATH`              | the wiki tools                                            |
-| `--model` / `-m` | `PAPER2WIKI_MODEL`       | `src/llm_roles.py` — the **base** model for every task    |
+| `--model` / `-m` | `ANY2WIKI_MODEL`       | `src/llm_roles.py` — the **base** model for every task    |
 
 
 **One caveat on** `--model`**, and it is deliberate.** It sets the *base* model, so a task with
@@ -149,7 +149,7 @@ its own `auxiliary.<task>.model` in `config.yaml` keeps it. On a config that pin
 models for the side tasks, `--model` visibly changes only the supervisor::
 
 ```
-$ paper2wiki config show -m openai:gpt-4o
+$ any2wiki config show -m openai:gpt-4o
   Model · supervisor      openai:gpt-4o        ← the flag
   Model · judge           claude-haiku-4-5-…   ← auxiliary.judge.model wins
 ```

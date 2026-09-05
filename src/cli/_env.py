@@ -66,15 +66,15 @@ def apply_env(
         ingest_mode: --ingest-mode, decides which ingest tools get registered.
         wiki_path: --wiki-path, where the wiki lives.
         model: --model, the base model for every task. A task-specific env var
-            (``PAPER2WIKI_MODEL_<TASK>``) still wins over this — see
+            (``ANY2WIKI_MODEL_<TASK>``) still wins over this — see
             ``src/llm_roles.py``.
     """
     if ingest_mode is not None:
-        os.environ["PAPER2WIKI_INGEST_MODE"] = ingest_mode.value
+        os.environ["ANY2WIKI_INGEST_MODE"] = ingest_mode.value
     if wiki_path:
         os.environ["WIKI_PATH"] = wiki_path
     if model:
-        os.environ["PAPER2WIKI_MODEL"] = model
+        os.environ["ANY2WIKI_MODEL"] = model
 
 
 # Provider → the env var LangChain reads for it. Only providers we can name with
@@ -123,7 +123,7 @@ def _required_model_key() -> str | None:
     Two steps:
 
     1. Ask ``src/llm_roles.py`` which model is configured — that is whatever you put
-       in ``PAPER2WIKI_MODEL``, or in ``model.default`` in config.yaml.
+       in ``ANY2WIKI_MODEL``, or in ``model.default`` in config.yaml.
     2. Work out which company provides that model, and return the name of the env var
        they read. An OpenAI model needs ``OPENAI_API_KEY``, a Gemini model needs
        ``GOOGLE_API_KEY``, and so on.

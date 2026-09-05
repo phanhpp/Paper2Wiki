@@ -42,7 +42,7 @@ def run_async(coro: Awaitable[T]) -> T | None:
     Both close even if the run fails or you press Ctrl-C. Ctrl-C exits quietly rather
     than printing a traceback.
     """
-    # Imported lazily so `paper2wiki --help` (and env-setup in command bodies) don't pull
+    # Imported lazily so `any2wiki --help` (and env-setup in command bodies) don't pull
     # in the agent/tools import graph before flags have configured the environment.
     from src.agents.agent import close_checkpointer
     from src.sessions.sessions_db_setup import close_sessions_conn

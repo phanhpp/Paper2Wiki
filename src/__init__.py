@@ -1,2 +1,2 @@
-"""Top-level package for the Paper2Wiki codebase."""
+"""Top-level package for the Any2Wiki codebase."""
 

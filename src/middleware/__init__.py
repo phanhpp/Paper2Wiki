@@ -1,4 +1,4 @@
-"""Loop 2 — in-run verification middleware for Paper2Wiki.
+"""Loop 2 — in-run verification middleware for Any2Wiki.
 
 See ``README.md`` in this package for what is checked and how to add a check,
 for the design rationale.

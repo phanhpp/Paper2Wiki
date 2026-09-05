@@ -163,7 +163,7 @@ jobs:
       LANGSMITH_TRACING: "true"
       # Pin to fast mode — uses web_search/web_extract, no arXiv/Docling dependency.
       # At least one web provider key required; registry picks first available.
-      PAPER2WIKI_INGEST_MODE: fast
+      ANY2WIKI_INGEST_MODE: fast
       FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
       TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
       EXA_API_KEY: ${{ secrets.EXA_API_KEY }}

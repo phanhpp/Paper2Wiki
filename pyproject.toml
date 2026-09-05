@@ -1,7 +1,7 @@
 [project]
-name = "llm-wiki"
+name = "any2wiki"
 version = "0.1.0"
-description = "Paper2Wiki Deep Agent"
+description = "Any2Wiki Deep Agent"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -29,7 +29,7 @@ dependencies = [
 ]
 
 [project.scripts]
-paper2wiki = "src.cli.app:app"
+any2wiki = "src.cli.app:app"
 
 [build-system]
 requires = ["setuptools>=61"]

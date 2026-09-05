@@ -5,7 +5,7 @@ version: 0
 author: Hermes Agent - modified by Phanhpp
 license: MIT
 metadata:
-  Paper2Wiki:
+  Any2Wiki:
     tags: [wiki, knowledge-base, research, notes, markdown, rag-alternative]
     category: research
 ---

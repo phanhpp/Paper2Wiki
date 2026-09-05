@@ -1,9 +1,9 @@
-# Paper2Wiki Agent - Development guide
+# Any2Wiki Agent - Development guide
 
 ## Project Structure
 
 ```markdown
-llm_wiki/                         # Paper2Wiki — repository root
+llm_wiki/                         # Any2Wiki — repository root
 ├── memories/
 │   ├── AGENTS.md                 # long-lived agent guidance (this file)
 │   └── agents_md_template.md

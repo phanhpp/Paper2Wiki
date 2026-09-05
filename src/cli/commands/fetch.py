@@ -1,4 +1,4 @@
-"""``paper2wiki fetch`` — download raw source data. No LLM involved.
+"""``any2wiki fetch`` — download raw source data. No LLM involved.
 
 Ingest happens in two phases, and this is the first one: hit a source, write the raw
 responses to ``connectors/<name>/``, record each item in a manifest, stop. Turning that

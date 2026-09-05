@@ -1,4 +1,4 @@
-"""``paper2wiki repl`` and ``paper2wiki chat`` — the two ways to talk to the agent.
+"""``any2wiki repl`` and ``any2wiki chat`` — the two ways to talk to the agent.
 
 ``chat`` runs one message and exits. ``repl`` keeps a prompt open and streams turn after
 turn.
@@ -274,7 +274,7 @@ def chat(
     debug: Annotated[bool, typer.Option("--debug", help="Show diagnostic output.")] = False,
     no_save: Annotated[bool, typer.Option("--no-save", help="Don't persist to sessions.db (no title, no history).")] = False,
 ) -> None:
-    """Typer entry for ``paper2wiki chat MSG``: run one message and exit.
+    """Typer entry for ``any2wiki chat MSG``: run one message and exit.
 
     Only declares the flags and passes them to ``run_chat``. Kept separate so the
     flag definitions sit next to Typer and the logic stays easy to test on its own.
@@ -302,7 +302,7 @@ def repl(
     debug: Annotated[bool, typer.Option("--debug", help="Show diagnostic output.")] = False,
     no_save: Annotated[bool, typer.Option("--no-save", help="Don't persist to sessions.db (no title, no history).")] = False,
 ) -> None:
-    """Typer entry for ``paper2wiki repl``: start an interactive chat session.
+    """Typer entry for ``any2wiki repl``: start an interactive chat session.
 
     Only declares the flags and passes them to ``run_repl`` — see that function for
     how each turn is streamed.

@@ -2,7 +2,7 @@
 exa.py — Exa provider (search + extract).
 
 Third priority in the default walk. Exa is strong for academic/technical
-content which makes it relevant for Paper2Wiki.
+content which makes it relevant for Any2Wiki.
 
 We skip: _get_exa_client cache slot. Straight SDK calls.
 

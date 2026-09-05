@@ -2,7 +2,7 @@
 
 This package is the **human-facing catalog** of agent conversations: a clean record of every
 session's messages, plus full-text search, titling, and pruning. It powers the
-`paper2wiki sessions ...` CLI commands.
+`any2wiki sessions ...` CLI commands.
 
 ## Notes
 
@@ -148,7 +148,7 @@ reference to a `thread_id`:
 2. a **specific** lineage member (`"name #N"`) → that exact title;
 3. a **base** name → the most recent session across its lineage (`name` or `name #N`).
 
-`paper2wiki sessions resume <ref>` calls this and resumes via the resolved `thread_id`. Tab-completion
+`any2wiki sessions resume <ref>` calls this and resumes via the resolved `thread_id`. Tab-completion
 on the argument surfaces both ids (with the title as description) and titles. Resume still runs on the
 `thread_id` under the hood — the title is only an input alias.
 

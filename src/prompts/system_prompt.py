@@ -34,7 +34,7 @@ INGEST_MODE_PROMPT = get_ingest_mode_prompt(
 # SkillsMiddleware already inject skill-index into prompt
 # since backend use virtual mode, file operations are limited to the current directory
 PHASE_1_SUPERVISOR_PROMPT = f"""
-You are Paper2Wiki — an intelligent orchestration agent with these core capabilities:
+You are Any2Wiki — an intelligent orchestration agent with these core capabilities:
 
 1. LLM-Wiki: Knowledge Base Builder 
 Build and maintain a graph-structured knowledge base from academic papers.

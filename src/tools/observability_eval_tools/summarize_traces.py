@@ -25,7 +25,7 @@ def _get_structured_llm():
 
 
 _SYSTEM_PROMPT = (
-    "You are a concise technical analyst for a LLM agent system called Paper2Wiki. "
+    "You are a concise technical analyst for a LLM agent system called Any2Wiki. "
     "You receive formatted LangSmith trace logs and return structured JSON summaries. "
     "Emphasize any issues or anomalies in the traces. "
     "Return only valid JSON — no markdown fences, no preamble, no explanation."
@@ -72,7 +72,7 @@ def _build_messages(traces: dict[str, str], focus_query: str | None) -> str:
     and will automatically inject the TraceSummary model into prompt"""
     focus_line = f"Focus: {focus_query}" if focus_query else "General analysis."
     parts = [
-        f"Analyzing {len(traces)} traces from Paper2Wiki agent.",
+        f"Analyzing {len(traces)} traces from Any2Wiki agent.",
         focus_line,
         "",
     ]

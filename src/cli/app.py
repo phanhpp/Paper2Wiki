@@ -1,6 +1,6 @@
 """The entry point — where every command is registered.
 
-Running ``paper2wiki <command>`` (or ``python -m src.cli.app <command>``) starts here.
+Running ``any2wiki <command>`` (or ``python -m src.cli.app <command>``) starts here.
 This file only connects the commands to their names; each one is written in ``commands/``.
 
 Commands:
@@ -39,8 +39,8 @@ from src.cli.commands import slack as slack_cmd
 # way to enable it — but add_completion=False removes that flag, so neither can fire.
 # Flip this to True, or drop the completers.
 app = typer.Typer(
-    name="paper2wiki",
-    help="Paper2Wiki — a self-improving LLM knowledge base.",
+    name="any2wiki",
+    help="Any2Wiki — a self-improving LLM knowledge base.",
     no_args_is_help=True, # when no arguments are provided, show the help message
     add_completion=False,
     # On by default: suggesting mistyped command names
@@ -64,7 +64,7 @@ app.add_typer(config_cmd.app, name="config", help="Inspect ingest mode, wiki pat
 
 def main() -> None:
     """Module entry point (``python -m src.cli.app``)."""
-    app(prog_name="paper2wiki")
+    app(prog_name="any2wiki")
 
 
 if __name__ == "__main__":

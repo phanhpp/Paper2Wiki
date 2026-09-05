@@ -1,4 +1,4 @@
-"""``paper2wiki serve`` — answer Slack messages instead of terminal input (Loop 3).
+"""``any2wiki serve`` — answer Slack messages instead of terminal input (Loop 3).
 
 Same agent, same wiki, same databases as the REPL — only the front-end differs. A
 message starts a turn, a threaded reply continues that conversation, and approvals

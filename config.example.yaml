@@ -1,6 +1,6 @@
-# Paper2Wiki configuration
-# Place at: ~/.paper2wiki/config.yaml
-# Or set PAPER2WIKI_CONFIG=/path/to/config.yaml
+# Any2Wiki configuration
+# Place at: ~/.any2wiki/config.yaml
+# Or set ANY2WIKI_CONFIG=/path/to/config.yaml
 
 # ── LLMs ──────────────────────────────────────────────────────────────────────
 # Pick ONE base model (and set that provider's API key). It drives the supervisor,
@@ -13,8 +13,8 @@
 # GOOGLE_API_KEY / …) unless you set `api_key` explicitly below.
 #
 # Env overrides (no config file needed):
-#   PAPER2WIKI_MODEL=openai:gpt-4o              # base model for everything
-#   PAPER2WIKI_MODEL_SUBAGENT=openai:gpt-4o-mini  # one task only
+#   ANY2WIKI_MODEL=openai:gpt-4o              # base model for everything
+#   ANY2WIKI_MODEL_SUBAGENT=openai:gpt-4o-mini  # one task only
 model:
   default: claude-sonnet-4-6   # the user's chosen LLM (omit → falls back to Claude)
   provider: anthropic          # 'auto' or omit to infer from the model name
@@ -67,7 +67,7 @@ ingest:
   # "quality" = add fetch_arxiv + parse_pdf_docling for high-fidelity arXiv/PDF parsing
   # "fast"    = web tools only; no arXiv/Docling dependency
   # Default: fast
-  # Override without a config file: PAPER2WIKI_INGEST_MODE=fast (env var takes priority)
+  # Override without a config file: ANY2WIKI_INGEST_MODE=fast (env var takes priority)
   # Note: explicit user instructions in the prompt override this setting.
   mode: fast
 
@@ -89,7 +89,7 @@ verification:
     index_coverage: 0.60   # J2 — does the wiki cover this question? err HIGH
 
 # ── Connectors: phase 1 of ingest, deterministic and LLM-free ────────────────
-# `paper2wiki fetch <name>` hits a source, dumps the raw response under
+# `any2wiki fetch <name>` hits a source, dumps the raw response under
 # connectors/<name>/raw/, and records each item in manifest.json. Nothing is
 # written to the wiki here — synthesis is a separate agent run, which can be
 # repeated for free because the raw data is already local.

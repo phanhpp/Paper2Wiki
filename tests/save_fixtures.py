@@ -24,7 +24,7 @@ async def main() -> None:
     client = AsyncClient()
     runs = [
         run async for run in client.list_runs(
-            project_name="paper2wiki",
+            project_name="any2wiki",
             start_time=datetime.now(timezone.utc) - timedelta(days=7),
             limit=100,
         )

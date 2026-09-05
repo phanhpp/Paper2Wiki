@@ -20,7 +20,7 @@ Shared (all datasets that run the agent):
     trajectory_subsequence
                           Partial credit: mode-appropriate expected calls
                           (metadata["expected_trajectory"]) appear in order in outputs["trajectory"].
-                          Mode from PAPER2WIKI_INGEST_MODE > config > "fast".
+                          Mode from ANY2WIKI_INGEST_MODE > config > "fast".
                           Also emits trajectory_no_forbidden from metadata["forbidden_tools"].
     
 Ingest — code:

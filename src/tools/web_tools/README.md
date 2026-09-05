@@ -16,7 +16,7 @@ Agent calls web_search(query, limit, category) or web_extract(urls)
          │                      │
          ▼                      ▼
      registry.py — ProviderRegistry
-       1. config override  (~/.paper2wiki/config.yaml  web.search_backend / web.extract_backend)
+       1. config override  (~/.any2wiki/config.yaml  web.search_backend / web.extract_backend)
        2. shared backend   (config  web.backend)
        3. priority walk    firecrawl → tavily → exa  (first with valid API key wins)
           │
@@ -65,7 +65,7 @@ valid for the active provider.
 ## Provider selection
 
 ```yaml
-# ~/.paper2wiki/config.yaml
+# ~/.any2wiki/config.yaml
 web:
   backend: firecrawl          # default for both
   search_backend: exa         # override search only
@@ -107,7 +107,7 @@ A typical wiki ingest prompt already has context from prior pages. Feeding anoth
 raw extracted web content doesn't materially hurt the context window. The LLM call costs more
 than the context savings for small pages. 5k is ~1,000 tokens — the crossover point where
 summarization overhead starts to pay off. Configurable via `min_length_for_summary` in
-`~/.paper2wiki/config.yaml`.
+`~/.any2wiki/config.yaml`.
 
 **Why 500k as the chunk threshold?**
 Claude Haiku's context window is 200k tokens (~800k chars). Staying at 500k chars keeps a

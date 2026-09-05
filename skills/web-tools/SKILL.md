@@ -1,11 +1,11 @@
 ---
 name: web-tools
-description: "Web search and extraction for Paper2Wiki. Covers provider selection, call patterns, and response handling for Firecrawl, Tavily, and Exa."
+description: "Web search and extraction for Any2Wiki. Covers provider selection, call patterns, and response handling for Firecrawl, Tavily, and Exa."
 version: 0
 author: phanhpp
 license: MIT
 metadata:
-  Paper2Wiki:
+  Any2Wiki:
     tags: [web, search, extract, firecrawl, tavily, exa, ingest]
     category: ingest
 ---
@@ -38,7 +38,7 @@ pages = await web_extract(["https://arxiv.org/abs/1706.03762"])
 | Tavily     | 2nd      | ✓      | ✓       | `TAVILY_API_KEY` |
 | Exa        | 3rd      | ✓      | ✓       | `EXA_API_KEY` |
 
-Priority is the default walk order when no config override is set. Override per capability via `~/.paper2wiki/config.yaml`:
+Priority is the default walk order when no config override is set. Override per capability via `~/.any2wiki/config.yaml`:
 
 ```yaml
 web:
@@ -74,7 +74,7 @@ Failed URLs appear in `failed_results[].url` + `failed_results[].error`.
 **Search** — `client.search(query, num_results=N, contents={"highlights": True})`.  
 `highlights` must be requested explicitly — basic search returns no description.  
 Each result item: `.title`, `.url`, `.highlights` (list of excerpt strings).  
-Use `category="research paper"` to target academic content (relevant for Paper2Wiki).
+Use `category="research paper"` to target academic content (relevant for Any2Wiki).
 
 **Extract** — `client.get_contents(urls, text=True)`.  
 `text=True` is required — omitting it returns no content.  
@@ -109,4 +109,4 @@ Disable with `use_summarizer=False` in `web_extract()`.
 - **Exa search**: calling `client.search(query, num_results=N)` without `contents={"highlights": True}` returns results with empty descriptions.
 - **Exa extract**: calling `client.get_contents(urls)` without `text=True` returns results with empty content.
 - **Exa extract errors**: always check `result.statuses` — the endpoint returns HTTP 200 even on per-URL failures.
-- **Config file**: the registry silently falls back to env-var priority walk if `~/.paper2wiki/config.yaml` is missing. This is intentional.
+- **Config file**: the registry silently falls back to env-var priority walk if `~/.any2wiki/config.yaml` is missing. This is intentional.

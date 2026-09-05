@@ -1,6 +1,6 @@
 # src/agents/sessions_db_setup.py
 """
-SQLite setup for Paper2Wiki session storage.
+SQLite setup for Any2Wiki session storage.
 
 Separate from the LangGraph checkpointer (checkpoints.db).
 This database stores clean session metadata + message history

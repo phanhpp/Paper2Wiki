@@ -326,7 +326,7 @@ def _cli_main(argv: list[str] | None = None) -> None:
     import json
 
     p = argparse.ArgumentParser(
-        description="Run Paper2Wiki Docling wrapper (parse_pdf_docling): "
+        description="Run Any2Wiki Docling wrapper (parse_pdf_docling): "
         "referenced images + KaTeX-safe math + optional table PNGs.",
     )
     p.add_argument("pdf", help="Path to a PDF (cwd-relative or absolute)")

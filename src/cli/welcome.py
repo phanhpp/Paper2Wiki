@@ -45,7 +45,7 @@ def print_welcome(
     no_save: bool = False,
     eval_mode: bool = False,
 ) -> None:
-    """Print the Paper2Wiki welcome panel.
+    """Print the Any2Wiki welcome panel.
 
     The body reflects how the REPL actually works: you talk to the agent in plain
     language (ingest / query / self-improve), and ``/`` words are meta-commands.

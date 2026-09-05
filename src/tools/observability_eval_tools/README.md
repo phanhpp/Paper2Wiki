@@ -1,6 +1,6 @@
 # observability_eval_tools
 
-Self-improvement pipeline for Paper2Wiki. Fetches LangSmith traces, detects
+Self-improvement pipeline for Any2Wiki. Fetches LangSmith traces, detects
 anomalies, and maintains evaluation datasets that gate the weekly CI regression
 suite.
 

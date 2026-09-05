@@ -222,7 +222,7 @@ testable: a test can deliver an event and assert it was queued without a turn fi
 They **cannot** tell you whether your tokens are valid, your scopes are right, or the
 bot was invited to the channel. All three fail *silently*. That needs a live run:
 
-1. `paper2wiki serve` — it should print that it connected, not exit.
+1. `any2wiki serve` — it should print that it connected, not exit.
 2. Post in the channel. No reply at all usually means the bot was never `/invite`d,
    even if the channel is public.
 3. Reply *in the thread* — the answer should carry the earlier turn's context, which

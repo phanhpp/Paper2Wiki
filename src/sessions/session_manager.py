@@ -1,6 +1,6 @@
 # src/agents/session_manager.py
 """
-Session lifecycle management for Paper2Wiki.
+Session lifecycle management for Any2Wiki.
 
 Handles saving sessions to sessions.db after each flow completes,
 and manual pruning of old ended sessions.

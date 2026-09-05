@@ -281,13 +281,13 @@ async def test_run_trace_report_async_uses_langsmith_filters_and_metadata(
     monkeypatch.setattr("src.tools.observability_eval_tools.fetch_traces.AsyncClient", _FakeAsyncClient)
 
     report = await _run_trace_report_async(
-        project="paper2wiki-test",
+        project="any2wiki-test",
         days=3,
         limit=2,
         error=True,
     )
 
-    assert captured_kwargs["project_name"] == "paper2wiki-test"
+    assert captured_kwargs["project_name"] == "any2wiki-test"
     assert captured_kwargs["limit"] == 2
     assert captured_kwargs["error"] is True
     assert report.run_count == 2

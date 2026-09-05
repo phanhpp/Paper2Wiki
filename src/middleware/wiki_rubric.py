@@ -57,6 +57,8 @@ import logging
 import re
 from dataclasses import asdict, replace
 from pathlib import Path
+
+from src.paths import user_root
 from typing import Annotated, Any, Callable
 
 from langchain.agents.middleware import AgentMiddleware, AgentState, hook_config
@@ -72,7 +74,7 @@ from src.tools.utils import get_wiki_root
 
 logger = logging.getLogger(__name__)
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = user_root()
 # Decks are built in the Daytona sandbox and downloaded here, outside the wiki
 # (src/agents/daytona_agent.py:download_outputs), so it needs its own snapshot.
 ARTIFACTS_DIR = REPO_ROOT / "marp-slides"

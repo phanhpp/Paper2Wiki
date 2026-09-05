@@ -352,20 +352,20 @@ def _extract_marp_slide_path(trajectory: list[dict], final_message: str) -> str:
 # ---------------------------------------------------------------------------
 
 async def run_ingest(inputs: dict) -> dict:
-    """LangSmith target for paper2wiki-golden-ingest.
+    """LangSmith target for any2wiki-golden-ingest.
 
     Expects inputs["message"]. Returns trajectory, files_written, final_message,
     and wiki_content for ingest evaluators (faithfulness, page count, etc.).
     """
     if (
-        os.environ.get("PAPER2WIKI_USE_CACHED_PARTIAL_INGEST") == "1"
+        os.environ.get("ANY2WIKI_USE_CACHED_PARTIAL_INGEST") == "1"
         and "paper2web" in inputs.get("message", "").lower()
         and "partially ingested" in inputs.get("message", "").lower()
     ):
         print(f"Using cached partial-ingest output: {CACHED_PARTIAL_INGEST_OUTPUT}")
         return json.loads(CACHED_PARTIAL_INGEST_OUTPUT.read_text())
     if (
-        os.environ.get("PAPER2WIKI_USE_CACHED_FULL_INGEST") == "1"
+        os.environ.get("ANY2WIKI_USE_CACHED_FULL_INGEST") == "1"
         and "graphrag" in inputs.get("message", "").lower()
         and "query-focused summarization" in inputs.get("message", "").lower()
     ):
@@ -384,20 +384,20 @@ async def run_ingest(inputs: dict) -> dict:
 
 
 async def run_query(inputs: dict) -> dict:
-    """LangSmith target for paper2wiki-golden-query.
+    """LangSmith target for any2wiki-golden-query.
 
     Expects inputs["message"]. Read-only queries should not write wiki files;
     returns trajectory and final_message for grounding / correctness judges.
     """
     msg = inputs.get("message", "").lower()
     if (
-        os.environ.get("PAPER2WIKI_USE_CACHED_ATTENTION_CONTRIBUTION_QUERY") == "1"
+        os.environ.get("ANY2WIKI_USE_CACHED_ATTENTION_CONTRIBUTION_QUERY") == "1"
         and "key contributions of the attention" in msg
     ):
         print(f"Using cached attention contribution query output: {CACHED_ATTENTION_CONTRIBUTION_QUERY_OUTPUT}")
         return json.loads(CACHED_ATTENTION_CONTRIBUTION_QUERY_OUTPUT.read_text())
     if (
-        os.environ.get("PAPER2WIKI_USE_CACHED_TRANSFORMER_ARCHITECTURE_QUERY") == "1"
+        os.environ.get("ANY2WIKI_USE_CACHED_TRANSFORMER_ARCHITECTURE_QUERY") == "1"
         and "architecture of the transformer" in msg
     ):
         print(f"Using cached transformer architecture query output: {CACHED_TRANSFORMER_ARCHITECTURE_QUERY_OUTPUT}")
@@ -409,21 +409,21 @@ async def run_query(inputs: dict) -> dict:
 
 
 async def run_marp(inputs: dict) -> dict:
-    """LangSmith target for paper2wiki-golden-marp.
+    """LangSmith target for any2wiki-golden-marp.
 
     Expects inputs["message"]. Routes through the marp-slide-creator subagent
     (Daytona sandbox). Returns slide_path, slide_content, and trajectory.
     """
     msg = inputs.get("message", "").lower()
     if (
-        os.environ.get("PAPER2WIKI_USE_CACHED_PUG_MARP") == "1"
+        os.environ.get("ANY2WIKI_USE_CACHED_PUG_MARP") == "1"
         and "cute pug" in msg
     ):
         print(f"Using cached pug marp output: {CACHED_PUG_MARP_OUTPUT}")
         return json.loads(CACHED_PUG_MARP_OUTPUT.read_text())
     
     if (
-        os.environ.get("PAPER2WIKI_USE_CACHED_TRANSFORMER_BUSINESS_THEME_MARP") == "1"
+        os.environ.get("ANY2WIKI_USE_CACHED_TRANSFORMER_BUSINESS_THEME_MARP") == "1"
         and "transformer architecture" in msg
     ):
         print(f"Using cached transformer business theme marp output: {CACHED_TRANSFORMER_BUSINESS_THEME_MARP_OUTPUT}")
@@ -518,7 +518,7 @@ _ALL_INGEST_EVALUATORS = [
 
 DATASETS: dict[str, dict] = {
     "ingest": {
-        "dataset": "paper2wiki-golden-ingest",
+        "dataset": "any2wiki-golden-ingest",
         "target": run_ingest,
         "evaluators": [_gate(fn) for fn in _ALL_INGEST_EVALUATORS],
         "hard_gate_keys": {"no_crash"},
@@ -526,7 +526,7 @@ DATASETS: dict[str, dict] = {
         "num_repetitions": 1,
     },
     "query": {
-        "dataset": "paper2wiki-golden-query",
+        "dataset": "any2wiki-golden-query",
         "target": run_query,
         "evaluators": [_gate(fn) for fn in [
             no_crash, trajectory_subsequence,
@@ -537,7 +537,7 @@ DATASETS: dict[str, dict] = {
         "num_repetitions": 1,
     },
     "marp": {
-        "dataset": "paper2wiki-golden-marp",
+        "dataset": "any2wiki-golden-marp",
         "target": run_marp,
         "evaluators": [_gate(fn) for fn in [
             trajectory_subsequence, has_marp_frontmatter, has_lead_slide, has_content_slides,
@@ -673,24 +673,24 @@ def main() -> None:
 
     args = p.parse_args()
     if args.use_cached_all:
-        os.environ["PAPER2WIKI_USE_CACHED_PARTIAL_INGEST"] = "1"
-        os.environ["PAPER2WIKI_USE_CACHED_FULL_INGEST"] = "1"
-        os.environ["PAPER2WIKI_USE_CACHED_ATTENTION_CONTRIBUTION_QUERY"] = "1"
-        os.environ["PAPER2WIKI_USE_CACHED_TRANSFORMER_ARCHITECTURE_QUERY"] = "1"
-        os.environ["PAPER2WIKI_USE_CACHED_TRANSFORMER_BUSINESS_THEME_MARP"] = "1"
-        os.environ["PAPER2WIKI_USE_CACHED_PUG_MARP"] = "1"
+        os.environ["ANY2WIKI_USE_CACHED_PARTIAL_INGEST"] = "1"
+        os.environ["ANY2WIKI_USE_CACHED_FULL_INGEST"] = "1"
+        os.environ["ANY2WIKI_USE_CACHED_ATTENTION_CONTRIBUTION_QUERY"] = "1"
+        os.environ["ANY2WIKI_USE_CACHED_TRANSFORMER_ARCHITECTURE_QUERY"] = "1"
+        os.environ["ANY2WIKI_USE_CACHED_TRANSFORMER_BUSINESS_THEME_MARP"] = "1"
+        os.environ["ANY2WIKI_USE_CACHED_PUG_MARP"] = "1"
     if args.use_cached_partial_ingest:
-        os.environ["PAPER2WIKI_USE_CACHED_PARTIAL_INGEST"] = "1"
+        os.environ["ANY2WIKI_USE_CACHED_PARTIAL_INGEST"] = "1"
     if args.use_cached_full_ingest:
-        os.environ["PAPER2WIKI_USE_CACHED_FULL_INGEST"] = "1"
+        os.environ["ANY2WIKI_USE_CACHED_FULL_INGEST"] = "1"
     if args.use_cached_attention_query:
-        os.environ["PAPER2WIKI_USE_CACHED_ATTENTION_CONTRIBUTION_QUERY"] = "1"
+        os.environ["ANY2WIKI_USE_CACHED_ATTENTION_CONTRIBUTION_QUERY"] = "1"
     if args.use_cached_transformer_query:
-        os.environ["PAPER2WIKI_USE_CACHED_TRANSFORMER_ARCHITECTURE_QUERY"] = "1"
+        os.environ["ANY2WIKI_USE_CACHED_TRANSFORMER_ARCHITECTURE_QUERY"] = "1"
     if args.use_cached_transformer_business_theme_marp:
-        os.environ["PAPER2WIKI_USE_CACHED_TRANSFORMER_BUSINESS_THEME_MARP"] = "1"
+        os.environ["ANY2WIKI_USE_CACHED_TRANSFORMER_BUSINESS_THEME_MARP"] = "1"
     if args.use_cached_pug_marp:
-        os.environ["PAPER2WIKI_USE_CACHED_PUG_MARP"] = "1"
+        os.environ["ANY2WIKI_USE_CACHED_PUG_MARP"] = "1"
 
     if args.dataset == "marp" and not os.getenv("DAYTONA_API_KEY"):
         print("DAYTONA_API_KEY not set — skipping marp eval (tracking only)")

@@ -13,7 +13,7 @@ The point of the split: if the model writes a bad page, **re-synthesis is free**
 the raw data is already on disk, so nothing is re-fetched. Same rule `wiki/raw/`
 already follows.
 
-Run it: `paper2wiki fetch git-repo` (or `fetch` for everything configured).
+Run it: `any2wiki fetch git-repo` (or `fetch` for everything configured).
 
 ## The files
 

@@ -15,9 +15,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from src.paths import user_root
+
 from dotenv import load_dotenv
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+# .env is user data — see src/paths.py for why this is not derived from __file__.
+REPO_ROOT = user_root()
 
 
 def load_env(*, override: bool = False) -> None:

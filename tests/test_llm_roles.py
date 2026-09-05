@@ -6,11 +6,11 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
-    """Strip PAPER2WIKI_* and LITELLM_* env so tests are deterministic."""
+    """Strip ANY2WIKI_* and LITELLM_* env so tests are deterministic."""
     import os
 
     for k in list(os.environ):
-        if k.startswith("PAPER2WIKI_") or k.startswith("LITELLM_"):
+        if k.startswith("ANY2WIKI_") or k.startswith("LITELLM_"):
             monkeypatch.delenv(k, raising=False)
     yield
 
@@ -38,7 +38,7 @@ def test_base_model_precedence_env_over_config(monkeypatch):
     _set_config(monkeypatch, {"model": {"default": "config:model"}})
     assert lr.get_base_model() == "config:model"
 
-    monkeypatch.setenv("PAPER2WIKI_MODEL", "openai:gpt-4o")
+    monkeypatch.setenv("ANY2WIKI_MODEL", "openai:gpt-4o")
     assert lr.get_base_model() == "openai:gpt-4o"
 
 
@@ -57,7 +57,7 @@ def test_role_inherits_base_unless_overridden(monkeypatch):
     assert lr.get_model("subagent") == "openai:gpt-4o-mini"
     assert lr.get_model("title") == "openai:gpt-4o"
 
-    monkeypatch.setenv("PAPER2WIKI_MODEL_TITLE", "anthropic:claude-haiku-4-5")
+    monkeypatch.setenv("ANY2WIKI_MODEL_TITLE", "anthropic:claude-haiku-4-5")
     assert lr.get_model("title") == "anthropic:claude-haiku-4-5"
 
 
@@ -111,7 +111,7 @@ def test_get_model_rejects_unknown_role(monkeypatch):
 
 @pytest.mark.unit
 def test_gateway_off_leaves_spec_unrouted(monkeypatch):
-    """No PAPER2WIKI_LLM_GATEWAY → spec keeps its configured provider/base_url (direct path)."""
+    """No ANY2WIKI_LLM_GATEWAY → spec keeps its configured provider/base_url (direct path)."""
     import src.llm_roles as lr
 
     _set_config(monkeypatch, {"model": {"default": "claude-sonnet-4-6", "provider": "anthropic"}})
@@ -126,7 +126,7 @@ def test_gateway_on_routes_every_role_to_proxy(monkeypatch):
     import src.llm_roles as lr
 
     _set_config(monkeypatch, {"model": {"default": "claude-sonnet-4-6", "provider": "anthropic"}})
-    monkeypatch.setenv("PAPER2WIKI_LLM_GATEWAY", "litellm")
+    monkeypatch.setenv("ANY2WIKI_LLM_GATEWAY", "litellm")
     monkeypatch.setenv("LITELLM_BASE_URL", "http://localhost:4000")
     monkeypatch.setenv("LITELLM_API_KEY", "sk-virtual-tenant")
 
@@ -143,7 +143,7 @@ def test_gateway_defaults_base_url(monkeypatch):
     import src.llm_roles as lr
 
     _set_config(monkeypatch, {"model": {"default": "m"}})
-    monkeypatch.setenv("PAPER2WIKI_LLM_GATEWAY", "litellm")
+    monkeypatch.setenv("ANY2WIKI_LLM_GATEWAY", "litellm")
     assert lr.get_model_spec("title").base_url == lr._GATEWAY_DEFAULT_BASE_URL
 
 
@@ -153,7 +153,7 @@ def test_gateway_caches_only_idempotent_roles(monkeypatch):
     import src.llm_roles as lr
 
     _set_config(monkeypatch, {"model": {"default": "m"}})
-    monkeypatch.setenv("PAPER2WIKI_LLM_GATEWAY", "litellm")
+    monkeypatch.setenv("ANY2WIKI_LLM_GATEWAY", "litellm")
     monkeypatch.setenv("LITELLM_CACHE_NAMESPACE", "tenant-1")
 
     for role in ("web_summarize", "summarize", "title", "judge"):
@@ -170,7 +170,7 @@ def test_gateway_cache_without_namespace(monkeypatch):
     import src.llm_roles as lr
 
     _set_config(monkeypatch, {"model": {"default": "m"}})
-    monkeypatch.setenv("PAPER2WIKI_LLM_GATEWAY", "litellm")
+    monkeypatch.setenv("ANY2WIKI_LLM_GATEWAY", "litellm")
 
     assert lr.get_model_spec("summarize").extra_body["cache"] == {"use-cache": True}
 
@@ -248,7 +248,7 @@ def test_resolves_from_real_config_file(tmp_path, monkeypatch):
         "web:\n"
         "  backend: firecrawl\n"
     )
-    monkeypatch.setenv("PAPER2WIKI_CONFIG", str(cfg))
+    monkeypatch.setenv("ANY2WIKI_CONFIG", str(cfg))
 
     assert lr.get_base_model() == "claude-sonnet-4-6"
     spec = lr.get_model_spec("title")
@@ -291,12 +291,12 @@ def test_model_precedence_full_chain(monkeypatch):
     _set_config(monkeypatch, cfg)
 
     # 1. task env var beats everything
-    monkeypatch.setenv("PAPER2WIKI_MODEL_SUMMARIZE", "level1-task-env-var")
-    monkeypatch.setenv("PAPER2WIKI_MODEL", "level3-global-env-var")
+    monkeypatch.setenv("ANY2WIKI_MODEL_SUMMARIZE", "level1-task-env-var")
+    monkeypatch.setenv("ANY2WIKI_MODEL", "level3-global-env-var")
     assert lr.get_model_spec("summarize").model == "level1-task-env-var"
 
     # 2. drop it → the task's config block
-    monkeypatch.delenv("PAPER2WIKI_MODEL_SUMMARIZE")
+    monkeypatch.delenv("ANY2WIKI_MODEL_SUMMARIZE")
     assert lr.get_model_spec("summarize").model == "level2-task-config"
 
     # 3. drop that → the global env var
@@ -304,7 +304,7 @@ def test_model_precedence_full_chain(monkeypatch):
     assert lr.get_model_spec("summarize").model == "level3-global-env-var"
 
     # 4. drop that → model.default
-    monkeypatch.delenv("PAPER2WIKI_MODEL")
+    monkeypatch.delenv("ANY2WIKI_MODEL")
     assert lr.get_model_spec("summarize").model == "level4-base-config"
 
     # 5. nothing configured → the built-in fallback

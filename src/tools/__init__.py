@@ -1,4 +1,4 @@
-"""Tooling utilities used by Paper2Wiki agents."""
+"""Tooling utilities used by Any2Wiki agents."""
 
 from src.ingest_mode import get_ingest_mode
 from src.tools.hash_tools import compute_sha256

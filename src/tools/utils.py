@@ -12,6 +12,8 @@ import re
 from difflib import SequenceMatcher
 from pathlib import Path
 
+from src.paths import user_root
+
 
 def norm_title(s: str) -> str:
     """Normalize a paper title or query for fuzzy comparison."""
@@ -51,8 +53,13 @@ def title_score(query: str, candidate_title: str) -> float:
 
 
 def get_repo_root() -> Path:
-    """Return the repository root (this file lives under `src/tools/`)."""
-    return Path(__file__).resolve().parents[2]
+    """Root for user data — the wiki, and anything else the user owns.
+
+    Kept under this name because callers read it as "where our files are", but it is
+    `user_root()`: the repo when cloned, `~/.any2wiki` when installed. Never `__file__`,
+    which would put user data inside site-packages.
+    """
+    return user_root()
 
 
 def get_wiki_root() -> Path:

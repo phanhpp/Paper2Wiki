@@ -233,7 +233,7 @@ def test_apply_env_sets_ingest_mode_read_by_get_ingest_mode(monkeypatch):
     from src.cli._env import IngestMode, apply_env
     from src.ingest_mode import get_ingest_mode
 
-    monkeypatch.delenv("PAPER2WIKI_INGEST_MODE", raising=False)
+    monkeypatch.delenv("ANY2WIKI_INGEST_MODE", raising=False)
     apply_env(IngestMode.quality, None)
     assert get_ingest_mode() == "quality"
 
@@ -255,11 +255,11 @@ def test_apply_env_none_is_noop(monkeypatch):
     """Passing None for both flags leaves existing env vars untouched."""
     from src.cli._env import apply_env
 
-    monkeypatch.setenv("PAPER2WIKI_INGEST_MODE", "fast")
+    monkeypatch.setenv("ANY2WIKI_INGEST_MODE", "fast")
     apply_env(None, None)
     import os
 
-    assert os.environ["PAPER2WIKI_INGEST_MODE"] == "fast"
+    assert os.environ["ANY2WIKI_INGEST_MODE"] == "fast"
 
 
 @pytest.mark.unit

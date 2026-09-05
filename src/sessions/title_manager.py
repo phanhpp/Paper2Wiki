@@ -1,6 +1,6 @@
 # src/sessions/title_manager.py
 """
-Title management for Paper2Wiki sessions.
+Title management for Any2Wiki sessions.
 
 Handles auto-generation, sanitization, uniqueness enforcement, and
 lineage numbering for session titles. Mirrors Hermes's title system.

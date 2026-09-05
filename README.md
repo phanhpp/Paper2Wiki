@@ -1,4 +1,4 @@
-# Paper2Wiki: A Self-Improving Research Assistant
+# Any2Wiki: A Self-Improving Research Assistant
 
 A research assistant that transforms research papers into durable artifacts — wiki pages, slide decks, and code. Powered by the [Deep Agents SDK](https://github.com/langchain-ai/deepagents), it can refine its own skills and logic on-demand by analyzing its execution traces.
 
@@ -16,7 +16,7 @@ A research assistant that transforms research papers into durable artifacts — 
 
 ## Architecture
 
-Paper2Wiki uses a supervisor-subagent architecture powered by the [Deep Agents SDK](https://github.com/langchain-ai/deepagents).
+Any2Wiki uses a supervisor-subagent architecture powered by the [Deep Agents SDK](https://github.com/langchain-ai/deepagents).
 
 ```text
 Supervisor Agent (Local)
@@ -35,7 +35,7 @@ Supervisor Agent (Local)
 
 ## Context Management (Automatic Compaction)
 
-Long ingests and trace analyses can generate huge tool outputs and long histories. Paper2Wiki
+Long ingests and trace analyses can generate huge tool outputs and long histories. Any2Wiki
 relies on the **Deep Agents SDK's built-in context management** — we add **no** summarization
 middleware, so the framework defaults do the work automatically. The agent doesn't "know" it
 happened; its working memory just stays clean.
@@ -73,14 +73,14 @@ the stateless defaults above are sufficient for current workloads.
 
 ```bash
 # 1. Clone
-git clone https://github.com/phanhpp/paper2wiki
-cd paper2wiki
+git clone https://github.com/phanhpp/any2wiki
+cd any2wiki
 
 # 2. Create venv and install deps from pyproject.toml + uv.lock
 uv sync
 
 # 3. (Optional) Jupyter kernel for notebooks
-uv run python -m ipykernel install --user --name=paper2wiki
+uv run python -m ipykernel install --user --name=any2wiki
 
 # 4. Copy and fill env file
 cp .env.example .env
@@ -95,7 +95,7 @@ LANGSMITH_TRACING=true        # Required for self-improvement
 LANGSMITH_PROJECT=paper2wiki
 DAYTONA_API_KEY=...           # Required for Marp slides
 WIKI_PATH=./wiki              # Optional: custom wiki location
-PAPER2WIKI_MODEL=             # Optional: base LLM for all roles, e.g. openai:gpt-4o (default: claude-sonnet-4-6)
+ANY2WIKI_MODEL=             # Optional: base LLM for all roles, e.g. openai:gpt-4o (default: claude-sonnet-4-6)
 ```
 
 ### Choosing your LLM
@@ -127,20 +127,20 @@ Task-Specific Env Var  →  Task Config  →  Global Env Var  →  Base Config  
 
 | Level | Where | Example | Applies to |
 |---|---|---|---|
-| **1 · Task-Specific Env Var** | `.env` | `PAPER2WIKI_MODEL_SUMMARIZE=openai:gpt-4o-mini` | one task |
+| **1 · Task-Specific Env Var** | `.env` | `ANY2WIKI_MODEL_SUMMARIZE=openai:gpt-4o-mini` | one task |
 | **2 · Task Config** | `config.yaml` | `auxiliary.summarize.model: openai:gpt-4o-mini` | one task |
-| **3 · Global Env Var** | `.env` | `PAPER2WIKI_MODEL=openai:gpt-4o` | every task |
+| **3 · Global Env Var** | `.env` | `ANY2WIKI_MODEL=openai:gpt-4o` | every task |
 | **4 · Base Config** | `config.yaml` | `model.default: openai:gpt-4o` | every task |
 | **5 · Default Fallback** | built in | `claude-sonnet-4-6` | every task |
 
-**`--model` / `-m` is level 3.** The flag writes `PAPER2WIKI_MODEL` for that one run, so it
+**`--model` / `-m` is level 3.** The flag writes `ANY2WIKI_MODEL` for that one run, so it
 beats `model.default` but *not* a task's own `auxiliary.<task>.model`. Run
-`paper2wiki config show -m <model>` to see exactly which tasks it moved.
+`any2wiki config show -m <model>` to see exactly which tasks it moved.
 
 The pattern behind the order: **task beats global, and env beats config.**
 
-So `PAPER2WIKI_MODEL_SUMMARIZE` (1) wins over `auxiliary.summarize.model` (2), which wins
-over `PAPER2WIKI_MODEL` (3), which wins over `model.default` (4). And if you set nothing at
+So `ANY2WIKI_MODEL_SUMMARIZE` (1) wins over `auxiliary.summarize.model` (2), which wins
+over `ANY2WIKI_MODEL` (3), which wins over `model.default` (4). And if you set nothing at
 all, you get `claude-sonnet-4-6` (5).
 
 In practice: levels 4 and 3 are how you pick your model, and levels 2 and 1 are how you
@@ -169,7 +169,7 @@ them. See `config.example.yaml`.
 
 ## Usage
 
-You can interact with Paper2Wiki using natural language. Here are common patterns:
+You can interact with Any2Wiki using natural language. Here are common patterns:
 
 ### 1. Ingesting Papers
 - "Ingest this paper: https://arxiv.org/abs/2312.00752"
@@ -197,7 +197,7 @@ You can interact with Paper2Wiki using natural language. Here are common pattern
 **Full reference: [`CLI.md`](CLI.md)** — every flag, the Slack setup, connector fetches and
 session pruning.
 
-Paper2Wiki ships a terminal CLI (`paper2wiki`). Run it from the repo root; `.env` is loaded
+Any2Wiki ships a terminal CLI (`any2wiki`). Run it from the repo root; `.env` is loaded
 automatically.
 
 ```bash
@@ -221,7 +221,7 @@ command takes which, are in [`CLI.md`](CLI.md#common-flags).
 Handy alias:
 
 ```bash
-echo "alias paper2wiki='uv run python -m src.cli.app'" >> ~/.zshrc && source ~/.zshrc
+echo "alias any2wiki='uv run python -m src.cli.app'" >> ~/.zshrc && source ~/.zshrc
 ```
 
 ---
@@ -326,13 +326,13 @@ The agent uses a dedicated subagent in a Daytona sandbox to create presentations
 
 ## Loop Engineering
 
-Paper2Wiki is built as a worked example of [loop engineering](https://www.langchain.com/blog/the-art-of-loop-engineering) — stacking feedback and execution loops *around* the model instead of relying on the model alone. Each loop catches what the tighter loop inside it cannot.
+Any2Wiki is built as a worked example of [loop engineering](https://www.langchain.com/blog/the-art-of-loop-engineering) — stacking feedback and execution loops *around* the model instead of relying on the model alone. Each loop catches what the tighter loop inside it cannot.
 
-| Loop | Goal | How Paper2Wiki implements it |
+| Loop | Goal | How Any2Wiki implements it |
 |---|---|---|
 | **1 · Agent** | automate the work | Supervisor + Daytona marp subagent (Deep Agents SDK); skill-driven tools for ingest, query, slides, and trace analysis. HITL on every `write_file` / `edit_file` / `execute`. |
 | **2 · Verification** | correctness | `WikiRubricMiddleware` (`src/middleware/`) classifies each run as ingest / query / marp from a **filesystem diff** — catching writes made through the shell, which tool-call scanning misses — then runs 16 deterministic checks (frontmatter, wikilink resolution, `index.md` + `log.md`, graph nodes/edges, source hashes). On failure it sends the agent back with the specific gaps, capped at `max_iterations`, then surfaces the verdict. **No LLM, so the loop is free.** |
-| **3 · Event-driven** | run without being asked | `paper2wiki serve` — a Slack front-end over Socket Mode (outbound websocket, so no public URL or webhook). A message starts a turn, a threaded reply resumes it, approvals are Block Kit buttons. Same agent, same wiki as the terminal — it reuses the `Renderer` protocol, so the agent and persistence layers are untouched. |
+| **3 · Event-driven** | run without being asked | `any2wiki serve` — a Slack front-end over Socket Mode (outbound websocket, so no public URL or webhook). A message starts a turn, a threaded reply resumes it, approvals are Block Kit buttons. Same agent, same wiki as the terminal — it reuses the `Renderer` protocol, so the agent and persistence layers are untouched. |
 | **4 · Hill-climbing** | improve the harness | Weekly CI refreshes anomaly baselines from live traces; the `trace-analysis` skill turns detected failures into versioned LangSmith datasets and candidate PR-gate cases, HITL-approved. A production bug lands its regression test in the same PR as its fix — and that case then runs on every PR thereafter. |
 
 **Human oversight is a primitive at every level**, not an escape hatch: tool approvals in Loops 1 and 3, the retry cap surfacing to the user in Loop 2, and mandatory approval before any harness change is committed in Loop 4.
@@ -407,7 +407,7 @@ Track 3 — Anomaly Replay Loop (weekly + HITL only)
 LLM access — virtual keys + per-team budgets/RBAC, spend alerts, Prometheus metrics, fallbacks,
 a prompt-injection guardrail, and a semantic response cache (Postgres + Redis). It's **not part of
 the published package** (lives outside `src/`); the app only talks to it over HTTP when
-`PAPER2WIKI_LLM_GATEWAY=litellm` is set, and never imports `litellm`. Setup, rationale, and the
+`ANY2WIKI_LLM_GATEWAY=litellm` is set, and never imports `litellm`. Setup, rationale, and the
 "lie to LangChain" routing trick are in [`gateway/README.md`](gateway/README.md).
 
 ### Wiki Integrity (Linting)

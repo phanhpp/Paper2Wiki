@@ -3,7 +3,7 @@
 A LiteLLM proxy (single container) fronting **managed** Postgres (Neon) + Redis Stack (Redis Cloud),
 for learning multi-tenant RBAC, budgets, alerts, metrics, and semantic caching. **Not part of the
 published package** — it lives outside `src/` (excluded by the wheel's `include = ["src*"]`) and runs
-as a separate process. The app only *talks to it* over HTTP when `PAPER2WIKI_LLM_GATEWAY=litellm` is
+as a separate process. The app only *talks to it* over HTTP when `ANY2WIKI_LLM_GATEWAY=litellm` is
 set; it never imports `litellm`.
 
 ## Progress
@@ -175,7 +175,7 @@ curl -X POST 'http://0.0.0.0:4000/chat/completions' \
 Or
 
 ```bash
-PAPER2WIKI_LLM_GATEWAY=litellm LITELLM_API_KEY=<virtual-key> \
+ANY2WIKI_LLM_GATEWAY=litellm LITELLM_API_KEY=<virtual-key> \
   uv run python -m src.cli.app chat 'hi in 3 words'
 ```
 
@@ -263,7 +263,7 @@ toward a larger-window model.
 
 Heuristic pre-call check that **rejects** prompt-injection attempts before they reach the model.
 Net-new defense (the app's `PIIMiddleware` only redacts PII; it doesn't detect injection) — and
-Paper2Wiki ingests untrusted web/paper text, a real injection vector.
+Any2Wiki ingests untrusted web/paper text, a real injection vector.
 
 ```bash
 curl -s http://localhost:4000/v1/chat/completions \

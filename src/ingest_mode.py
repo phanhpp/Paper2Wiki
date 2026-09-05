@@ -9,7 +9,7 @@ VALID_INGEST_MODES = {"quality", "fast"}
 
 def get_ingest_mode() -> str:
     """Return active ingest mode: env var > config file > default ``fast``."""
-    mode = os.environ.get("PAPER2WIKI_INGEST_MODE", "").strip().lower()
+    mode = os.environ.get("ANY2WIKI_INGEST_MODE", "").strip().lower()
     if mode not in VALID_INGEST_MODES:
         try:
             from src.tools.web_tools.registry import load_config_file

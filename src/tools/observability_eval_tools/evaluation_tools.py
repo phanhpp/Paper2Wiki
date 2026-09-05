@@ -450,9 +450,9 @@ async def run_evaluate(
 
     The caller supplies ``target`` — the callable invoked on each example's inputs.
     Choose based on the dataset scope:
-    - Flow-scoped dataset  (``paper2wiki_{flow}``)        → ``agent.ainvoke``
-    - Tool-scoped dataset  (``paper2wiki_{flow}_{name}``) → ``tool.ainvoke``
-    - LLM-scoped dataset   (``paper2wiki_{flow}_llm``)    → ``llm.ainvoke``
+    - Flow-scoped dataset  (``any2wiki_{flow}``)        → ``agent.ainvoke``
+    - Tool-scoped dataset  (``any2wiki_{flow}_{name}``) → ``tool.ainvoke``
+    - LLM-scoped dataset   (``any2wiki_{flow}_llm``)    → ``llm.ainvoke``
 
     After the returned ExperimentResults settles, call ``apply_composite_scores``
     to write an ``overall_health`` weighted score per run.

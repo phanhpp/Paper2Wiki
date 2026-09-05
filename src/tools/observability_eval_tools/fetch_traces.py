@@ -39,6 +39,8 @@ import json
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from src.paths import user_root
 from typing import Any, Optional
 from pydantic import BaseModel, model_validator
 from langsmith import AsyncClient
@@ -46,7 +48,9 @@ from langchain.tools import tool
 import asyncio
 from src.tools.utils import TRACE_ANALYSIS_TOOLS
 
-TRACE_OFFLOAD_DIR = Path(__file__).resolve().parent / "trace_offloads"
+# Under user_root(), not __file__: this used to resolve *inside* the package
+# (src/tools/observability_eval_tools/trace_offloads), which an install replaces.
+TRACE_OFFLOAD_DIR = user_root() / "trace_offloads"
 _TOOL_CONTENT_TRUNCATE_THRESHOLD = 700 # threshold overwhich we truncate tool content
 _MAX_TRACE_CHARS = 50_000 # max chars of trace text to keep
 # Auto-offload when total formatted trace text exceeds this threshold.
@@ -485,7 +489,7 @@ async def run_trace_report_async(
     days: int = 7,
     limit: int = 100,
 ) -> TraceReport:
-    """Fetch recent LangSmith traces for Paper2Wiki agent analysis.
+    """Fetch recent LangSmith traces for Any2Wiki agent analysis.
 
     Offloading is automatic: if total trace text exceeds the threshold, traces
     are written to ``src/tools/trace_offloads/{project}_{YYYYmmdd_HHMMSS}.traces.json``

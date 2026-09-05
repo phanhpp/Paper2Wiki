@@ -21,9 +21,9 @@ import typer
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
-    """Strip PAPER2WIKI_*/LITELLM_* and every provider key, so nothing leaks in."""
+    """Strip ANY2WIKI_*/LITELLM_* and every provider key, so nothing leaks in."""
     for k in list(os.environ):
-        if k.startswith(("PAPER2WIKI_", "LITELLM_")) or k.endswith("_API_KEY"):
+        if k.startswith(("ANY2WIKI_", "LITELLM_")) or k.endswith("_API_KEY"):
             monkeypatch.delenv(k, raising=False)
     yield
 
@@ -81,7 +81,7 @@ def test_litellm_gateway_demands_no_provider_key(monkeypatch):
     from src.cli._env import _required_model_key
 
     _set_config(monkeypatch, {"model": {"default": "claude-sonnet-4-6"}})
-    monkeypatch.setenv("PAPER2WIKI_LLM_GATEWAY", "litellm")
+    monkeypatch.setenv("ANY2WIKI_LLM_GATEWAY", "litellm")
     assert _required_model_key() is None
 
 
@@ -255,7 +255,7 @@ def test_apply_env_sets_the_global_model_var(monkeypatch):
     from src.cli._env import apply_env
 
     apply_env(None, None, "openai:gpt-4o")
-    assert os.environ["PAPER2WIKI_MODEL"] == "openai:gpt-4o"
+    assert os.environ["ANY2WIKI_MODEL"] == "openai:gpt-4o"
 
 
 @pytest.mark.unit
@@ -263,9 +263,9 @@ def test_apply_env_without_model_leaves_env_untouched(monkeypatch):
     """Omitting the flag must not clobber a model set in .env."""
     from src.cli._env import apply_env
 
-    monkeypatch.setenv("PAPER2WIKI_MODEL", "from-dotenv")
+    monkeypatch.setenv("ANY2WIKI_MODEL", "from-dotenv")
     apply_env(None, None, None)
-    assert os.environ["PAPER2WIKI_MODEL"] == "from-dotenv"
+    assert os.environ["ANY2WIKI_MODEL"] == "from-dotenv"
 
 
 @pytest.mark.unit
@@ -308,7 +308,7 @@ def test_task_env_var_still_beats_the_model_flag(monkeypatch):
     from src.cli._env import apply_env
 
     _set_config(monkeypatch, {"model": {"default": "claude-sonnet-4-6"}})
-    monkeypatch.setenv("PAPER2WIKI_MODEL_JUDGE", "level1-wins")
+    monkeypatch.setenv("ANY2WIKI_MODEL_JUDGE", "level1-wins")
     apply_env(None, None, "openai:gpt-4o")
 
     assert lr.get_model_spec("judge").model == "level1-wins"
@@ -390,7 +390,7 @@ def test_model_flag_end_to_end_through_the_cli(tmp_path, monkeypatch, flag):
         "  judge:\n"
         "    model: pinned-by-config\n"
     )
-    monkeypatch.setenv("PAPER2WIKI_CONFIG", str(cfg))
+    monkeypatch.setenv("ANY2WIKI_CONFIG", str(cfg))
     monkeypatch.setattr(appmod, "load_env", lambda *a, **k: None)  # don't read the real .env
 
     out = CliRunner().invoke(app, ["config", "show", flag, "openai:gpt-4o"]).output
@@ -410,7 +410,7 @@ def test_config_show_reflects_config_yaml_without_any_flag(tmp_path, monkeypatch
 
     cfg = tmp_path / "config.yaml"
     cfg.write_text("model:\n  default: model-from-the-file\n")
-    monkeypatch.setenv("PAPER2WIKI_CONFIG", str(cfg))
+    monkeypatch.setenv("ANY2WIKI_CONFIG", str(cfg))
     monkeypatch.setattr(appmod, "load_env", lambda *a, **k: None)
 
     out = CliRunner().invoke(app, ["config", "show"]).output
@@ -433,7 +433,7 @@ def test_provider_prefix_beats_configured_provider(monkeypatch):
     import src.llm_roles as lr
 
     _set_config(monkeypatch, {"model": {"default": "claude-sonnet-4-6", "provider": "anthropic"}})
-    monkeypatch.setenv("PAPER2WIKI_MODEL", "openai:gpt-4o")
+    monkeypatch.setenv("ANY2WIKI_MODEL", "openai:gpt-4o")
 
     spec = lr.get_model_spec("supervisor")
     assert spec.model == "openai:gpt-4o"
@@ -447,7 +447,7 @@ def test_provider_prefix_actually_builds_the_right_client(monkeypatch):
     from src.agents.llms import set_up_llms
 
     _set_config(monkeypatch, {"model": {"default": "claude-sonnet-4-6", "provider": "anthropic"}})
-    monkeypatch.setenv("PAPER2WIKI_MODEL", "openai:gpt-4o")
+    monkeypatch.setenv("ANY2WIKI_MODEL", "openai:gpt-4o")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
     assert type(set_up_llms(lr.get_model_spec("supervisor"))).__name__ == "ChatOpenAI"
@@ -474,7 +474,7 @@ def test_switching_provider_drops_the_other_providers_endpoint(monkeypatch):
         "default": "claude-sonnet-4-6", "provider": "anthropic",
         "base_url": "https://api.anthropic.com", "api_key": "sk-ant-xxx",
     }})
-    monkeypatch.setenv("PAPER2WIKI_MODEL", "openai:gpt-4o")
+    monkeypatch.setenv("ANY2WIKI_MODEL", "openai:gpt-4o")
 
     spec = lr.get_model_spec("supervisor")
     assert spec.base_url is None and spec.api_key is None
@@ -535,7 +535,7 @@ def test_config_show_prints_provider_and_endpoint_columns(tmp_path, monkeypatch)
         "  provider: openai\n"
         "  base_url: https://openrouter.ai/api/v1\n"
     )
-    monkeypatch.setenv("PAPER2WIKI_CONFIG", str(cfg))
+    monkeypatch.setenv("ANY2WIKI_CONFIG", str(cfg))
     monkeypatch.setattr(appmod, "load_env", lambda *a, **k: None)
 
     flat = " ".join(CliRunner().invoke(app, ["config", "show"]).output.split())

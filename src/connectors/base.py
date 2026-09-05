@@ -30,13 +30,15 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+
+from src.paths import user_root
 from typing import Any, Iterator, Protocol, runtime_checkable
 
 from src.tools.hash_tools import compute_sha256
 
 logger = logging.getLogger(__name__)
 
-CONNECTORS_DIR = Path(__file__).resolve().parents[2] / "connectors"
+CONNECTORS_DIR = user_root() / "connectors"
 MANIFEST_VERSION = 1
 
 

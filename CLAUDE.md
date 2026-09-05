@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Paper2Wiki** — a self-improving LLM knowledge base implementing the [Karpathy LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f). Users ingest research papers and an agent builds/maintains a structured, interlinked wiki that compounds knowledge over time. Built on the Deep Agents SDK (LangGraph-based).
+**Any2Wiki** — a self-improving LLM knowledge base implementing the [Karpathy LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f). Users ingest research papers and an agent builds/maintains a structured, interlinked wiki that compounds knowledge over time. Built on the Deep Agents SDK (LangGraph-based).
 
 ## Setup & Commands
 
@@ -17,7 +17,7 @@ source .venv/bin/activate
 uv sync
 
 # Register Jupyter kernel
-uv run python -m ipykernel install --user --name=paper2wiki
+uv run python -m ipykernel install --user --name=any2wiki
 
 # Run all tests
 uv run pytest
@@ -32,7 +32,7 @@ uv run pytest -m "not integration"  # skip tests needing external services
 # Wiki health check (once scripts/lint.py exists)
 python scripts/lint.py --wiki-dir wiki/
 
-# CLI (paper2wiki) — interactive REPL, one-shot chat, session browsing
+# CLI (any2wiki) — interactive REPL, one-shot chat, session browsing
 # Most reliable invocation (run from repo root; .env auto-loaded). See src/cli/README.md.
 uv run python -m src.cli.app repl                  # interactive chat
 uv run python -m src.cli.app chat "ingest <url>"   # one-shot
@@ -48,7 +48,7 @@ uv run python -m src.cli.app config show           # effective config
 > `--no-save` (don't write to `sessions.db` — no title, no history; for testing), `--debug`.
 > REPL meta-commands: `/title <name>` (name the session), `/new`, `/help`, `/exit` (bare `quit`/`exit`/`bye`/`:q` and Ctrl-D also quit).
 > `sessions resume <id|title>` and `sessions rename <id|title> <new>` accept a thread ID or title.
-> **macOS caveat (occasional):** the bare `paper2wiki` console command (via `uv run paper2wiki`
+> **macOS caveat (occasional):** the bare `any2wiki` console command (via `uv run any2wiki`
 > or an activated venv) normally works. Occasionally — usually right after a `uv sync` — it fails
 > with `ModuleNotFoundError: No module named 'src'`: uv has flagged the editable `.pth` `UF_HIDDEN`
 > and CPython's `site` skips hidden `.pth` files. To fix, run
@@ -56,7 +56,7 @@ uv run python -m src.cli.app config show           # effective config
 > `uv run python -m src.cli.app …` sidesteps the `.pth` entirely and never hits this. Full details
 > in `src/cli/README.md`.
 
-Required `.env` vars: `ANTHROPIC_API_KEY`, `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT`, `DAYTONA_API_KEY` (Marp). Web ingest needs at least one of `FIRECRAWL_API_KEY`, `TAVILY_API_KEY`, `EXA_API_KEY`. Optional: `WIKI_PATH` (defaults to `./wiki`), `PAPER2WIKI_INGEST_MODE` (`fast` | `quality`). See `.env.example`.
+Required `.env` vars: `ANTHROPIC_API_KEY`, `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT`, `DAYTONA_API_KEY` (Marp). Web ingest needs at least one of `FIRECRAWL_API_KEY`, `TAVILY_API_KEY`, `EXA_API_KEY`. Optional: `WIKI_PATH` (defaults to `./wiki`), `ANY2WIKI_INGEST_MODE` (`fast` | `quality`). See `.env.example`.
 
 **`.env` has one reader: `src/env.py:load_env()`.** Call it from entry points only —
 the CLI callback, eval script `__main__` blocks, a notebook's first cell. Never at module
@@ -105,7 +105,7 @@ real shell already in the repo root, where those do not exist. The agent used to
 
 **LLMs** (`src/agents/llms.py`): models are built via the `set_up_llms(model, **kwargs)` factory. Known models (`MODEL_CONFIG`) use tuned settings (retries, timeout, max_tokens, effort); any other string (e.g. `openai:gpt-4o`) is passed straight to `init_chat_model` with generic defaults — so the app is **provider-agnostic**. A `HarnessProfile` for sonnet is registered (disables the general-purpose subagent, adds a "read the relevant skill first" system-prompt suffix).
 
-**Model selection is per-task** (`src/llm_roles.py:get_model_spec(role)` → a `ModelSpec`). The user picks **one base model** (`model.default` + that provider's API key); it drives the supervisor, subagents, and every auxiliary task. Each task can override via an `auxiliary.<task>` block carrying `provider`/`model`/`base_url`/`api_key`/`timeout`/`extra_body` (so one task can target a different provider/endpoint/key — e.g. via OpenRouter). Resolution: base = `PAPER2WIKI_MODEL` env > `model.default` (config.yaml) > Claude fallback; a task = `PAPER2WIKI_MODEL_<TASK>` env > `auxiliary.<task>.model` > base, with provider/base_url/api_key from the task block falling back to the `model:` block — but `timeout` and `extra_body` are task-only and never inherit. Tasks: `supervisor`, `subagent`, `title`, `summarize`, `judge`, `web_summarize`. `set_up_llms` accepts a `ModelSpec` (or a bare model string) and strips Anthropic-only knobs (`effort`/`thinking`) for non-Anthropic providers. All auxiliary call sites go through `init_chat_model` — none use the raw `anthropic` SDK anymore; provider keys are read from env by LangChain unless `api_key` is set in config. Router features (fallbacks, credential pools) are intentionally **not** here — they belong to the LiteLLM gateway layer.
+**Model selection is per-task** (`src/llm_roles.py:get_model_spec(role)` → a `ModelSpec`). The user picks **one base model** (`model.default` + that provider's API key); it drives the supervisor, subagents, and every auxiliary task. Each task can override via an `auxiliary.<task>` block carrying `provider`/`model`/`base_url`/`api_key`/`timeout`/`extra_body` (so one task can target a different provider/endpoint/key — e.g. via OpenRouter). Resolution: base = `ANY2WIKI_MODEL` env > `model.default` (config.yaml) > Claude fallback; a task = `ANY2WIKI_MODEL_<TASK>` env > `auxiliary.<task>.model` > base, with provider/base_url/api_key from the task block falling back to the `model:` block — but `timeout` and `extra_body` are task-only and never inherit. Tasks: `supervisor`, `subagent`, `title`, `summarize`, `judge`, `web_summarize`. `set_up_llms` accepts a `ModelSpec` (or a bare model string) and strips Anthropic-only knobs (`effort`/`thinking`) for non-Anthropic providers. All auxiliary call sites go through `init_chat_model` — none use the raw `anthropic` SDK anymore; provider keys are read from env by LangChain unless `api_key` is set in config. Router features (fallbacks, credential pools) are intentionally **not** here — they belong to the LiteLLM gateway layer.
 
 > **Caveat:** the `HarnessProfile` is still keyed `anthropic:claude-sonnet-4-6`; if the base model is switched to a non-Anthropic provider it won't apply (the general-purpose subagent stays enabled, skill-first suffix is dropped). Dynamic per-provider registration is a TODO.
 
@@ -122,7 +122,7 @@ real shell already in the repo root, where those do not exist. The agent used to
 
 All tools exposed to the supervisor are aggregated in `src/tools/__init__.py:all_tools`, built by `_build_tools()`. Adding a new tool: implement it under `src/tools/` and add it to the `_build_tools()` return list.
 
-**Ingest mode** (`src/ingest_mode.py:get_ingest_mode()`, resolved as env `PAPER2WIKI_INGEST_MODE` > config file > default `fast`) gates which ingest tools are registered:
+**Ingest mode** (`src/ingest_mode.py:get_ingest_mode()`, resolved as env `ANY2WIKI_INGEST_MODE` > config file > default `fast`) gates which ingest tools are registered:
 - `fast` (default) — web tools only (`web_search`, `web_extract`).
 - `quality` — also registers `fetch_arxiv` and `parse_pdf_docling`.
 
@@ -198,7 +198,7 @@ Design rationale and what was taken from OpenWiki: `src/connectors/README.md`.
 
 ### Slack front-end (`src/slack/`) — Loop 3
 
-`paper2wiki serve` runs the same agent, same wiki, driven by Slack messages instead of
+`any2wiki serve` runs the same agent, same wiki, driven by Slack messages instead of
 the terminal. **Socket Mode** (the app dials out over a websocket), so there's no
 webhook, no public URL and no cron — it answers only while `serve` is running, which is
 the honest cost of a laptop assistant.
@@ -354,7 +354,7 @@ uv run --env-file .env python eval/run_weekly_baselines.py
 - CLI: automated tests for interactive paths (spinner / smear / Ctrl-O) via `pexpect`/`pyte`
 - **CLI: `/model` — switch model mid-session.** `-m/--model` only applies at launch; changing
   it currently means quitting and restarting. `/new` already rebuilds the agent, so the
-  mechanism exists: set `PAPER2WIKI_MODEL`, rebuild the supervisor, keep the same
+  mechanism exists: set `ANY2WIKI_MODEL`, rebuild the supervisor, keep the same
   `thread_id` so history survives. hermes-agent has this (`hermes_cli/model_switch.py`)
   plus a `model_aliases:` config map for short names and tab-completion — worth copying
   the alias idea only after `/model` itself works.
@@ -363,10 +363,5 @@ uv run --env-file .env python eval/run_weekly_baselines.py
   `--install-completion` is the documented way to turn completion on, but `app.py`'s
   `add_completion=False` removes that flag, so neither works. Flip it to `True`, or drop
   the completers.
-- **Rename `paper2wiki` → `any2wiki`** (49 files). Cosmetic docs first; then the console
-  script (`pyproject.toml:32`, `app.py:27`/`:52` — note the package name is a third name,
-  `llm-wiki`); then `PAPER2WIKI_*` env vars with a deprecation window; **`LANGSMITH_PROJECT`
-  last and separately** — renaming the project splits trace history and leaves
-  `detect_anomalies_async` without baselines until weekly CI repopulates them.
 - Consolidation agent + cron
 - RL

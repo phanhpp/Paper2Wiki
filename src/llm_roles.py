@@ -30,9 +30,9 @@ Five levels. The **first one that exists wins**, i.e. priority order::
 
     level                     lives in      example                      applies to
     ------------------------  ------------  ---------------------------  ----------
-    1. Task-Specific Env Var  .env          PAPER2WIKI_MODEL_SUMMARIZE   one task
+    1. Task-Specific Env Var  .env          ANY2WIKI_MODEL_SUMMARIZE   one task
     2. Task Config            config.yaml   auxiliary.summarize.model    one task
-    3. Global Env Var         .env          PAPER2WIKI_MODEL             every task
+    3. Global Env Var         .env          ANY2WIKI_MODEL             every task
     4. Base Config            config.yaml   model.default                every task
     5. Default Fallback       built in      _FALLBACK_MODEL              every task
 
@@ -78,7 +78,7 @@ from dataclasses import dataclass, field
 VALID_ROLES = frozenset({"supervisor", "subagent", "title", "summarize", "judge", "web_summarize"})
 
 # Zero-config fallback only — used when the user configures nothing. Requires an
-# Anthropic key; real deployments set model.default / PAPER2WIKI_MODEL instead.
+# Anthropic key; real deployments set model.default / ANY2WIKI_MODEL instead.
 _FALLBACK_MODEL = "claude-sonnet-4-6"
 
 _AUTO = {None, "", "auto"}
@@ -116,7 +116,7 @@ def _aux_block(role: str) -> dict:
 
 def get_base_model() -> str:
     """The user's chosen LLM string — the default for every task."""
-    env = os.environ.get("PAPER2WIKI_MODEL", "").strip()
+    env = os.environ.get("ANY2WIKI_MODEL", "").strip()
     if env:
         return env
     default = _model_block().get("default")
@@ -164,7 +164,7 @@ def get_model_spec(role: str) -> ModelSpec:
     base, aux = _model_block(), _aux_block(role)
 
     # model name: per-role env > aux.model > base model
-    env_role = os.environ.get(f"PAPER2WIKI_MODEL_{role.upper()}", "").strip()
+    env_role = os.environ.get(f"ANY2WIKI_MODEL_{role.upper()}", "").strip()
     model = env_role or str(aux.get("model") or "").strip() or get_base_model()
 
     def _pick(key):  # task value, else base value, else None
@@ -204,7 +204,7 @@ _CACHEABLE_ROLES = frozenset({"web_summarize", "summarize", "title", "judge"})
 
 
 def _apply_gateway(spec: ModelSpec, role: str) -> ModelSpec:
-    """Route a spec through the LiteLLM proxy when ``PAPER2WIKI_LLM_GATEWAY=litellm``.
+    """Route a spec through the LiteLLM proxy when ``ANY2WIKI_LLM_GATEWAY=litellm``.
 
     The "lie to LangChain" trick: force ``provider=openai`` + ``base_url=<proxy>`` so the request
     becomes a generic OpenAI-shaped call to the proxy (which then authenticates, meters, caps,
@@ -218,7 +218,7 @@ def _apply_gateway(spec: ModelSpec, role: str) -> ModelSpec:
 
     Flag off (default) → returns the spec untouched (today's direct-to-provider behavior).
     """
-    if os.environ.get("PAPER2WIKI_LLM_GATEWAY", "").strip().lower() != "litellm":
+    if os.environ.get("ANY2WIKI_LLM_GATEWAY", "").strip().lower() != "litellm":
         return spec
 
     extra_body = dict(spec.extra_body or {})

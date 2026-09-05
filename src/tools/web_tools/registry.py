@@ -9,8 +9,8 @@ without touching code:
   2. Shared default           — web.backend in config.yaml
   3. Priority walk            — first of [firecrawl, tavily, exa] with valid credentials
 
-Config file: ~/.paper2wiki/config.yaml  (copy from config.example.yaml in repo root)
-Override path via: PAPER2WIKI_CONFIG=/path/to/config.yaml
+Config file: ~/.any2wiki/config.yaml  (copy from config.example.yaml in repo root)
+Override path via: ANY2WIKI_CONFIG=/path/to/config.yaml
 
 Example config.yaml:
     web:
@@ -28,6 +28,8 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+
+from src.paths import config_path
 from typing import Any
 
 from src.tools.web_tools.types import SearchProvider
@@ -40,13 +42,18 @@ DEFAULT_PRIORITY = ["firecrawl", "tavily", "exa"]
 
 
 def _find_config_path() -> Path | None:
-    """Locate config file. Check env var first, then default location."""
-    env_path = os.getenv("PAPER2WIKI_CONFIG", "").strip()
+    """Locate config.yaml: ``ANY2WIKI_CONFIG`` first, else wherever the writers put it.
+
+    The default comes from ``src.paths.config_path()`` rather than being spelled out
+    here, so the reader and the commands that write it (``setup``, ``config set``)
+    cannot drift apart — they previously named different directories.
+    """
+    env_path = os.getenv("ANY2WIKI_CONFIG", "").strip()
     if env_path:
         p = Path(env_path)
         return p if p.exists() else None
 
-    default = Path.home() / ".paper2wiki" / "config.yaml"
+    default = config_path()
     return default if default.exists() else None
 
 

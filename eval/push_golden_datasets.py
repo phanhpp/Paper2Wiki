@@ -7,9 +7,9 @@ Upsert strategy — preserves experiment history:
     delete removed cases, skip unchanged cases.
 
 Datasets pushed:
-    paper2wiki-golden-ingest   ← eval/golden_datasets/ingest.json
-    paper2wiki-golden-query    ← eval/golden_datasets/query.json
-    paper2wiki-golden-marp     ← eval/golden_datasets/marp.json
+    any2wiki-golden-ingest   ← eval/golden_datasets/ingest.json
+    any2wiki-golden-query    ← eval/golden_datasets/query.json
+    any2wiki-golden-marp     ← eval/golden_datasets/marp.json
 
 Usage:
     uv run --env-file .env python eval/push_golden_datasets.py
@@ -36,9 +36,9 @@ from langsmith import Client
 GOLDEN_DIR = Path(__file__).parent / "golden_datasets"
 
 DATASETS: list[tuple[str, Path]] = [
-    ("paper2wiki-golden-ingest", GOLDEN_DIR / "ingest.json"),
-    ("paper2wiki-golden-query",  GOLDEN_DIR / "query.json"),
-    ("paper2wiki-golden-marp",   GOLDEN_DIR / "marp.json"),
+    ("any2wiki-golden-ingest", GOLDEN_DIR / "ingest.json"),
+    ("any2wiki-golden-query",  GOLDEN_DIR / "query.json"),
+    ("any2wiki-golden-marp",   GOLDEN_DIR / "marp.json"),
 ]
 
 

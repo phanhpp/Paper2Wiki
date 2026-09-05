@@ -1,4 +1,4 @@
-"""``paper2wiki sessions ...`` — browse, search and clean up past conversations.
+"""``any2wiki sessions ...`` — browse, search and clean up past conversations.
 
 Every past chat is saved in ``sessions.db`` (readable history, full-text searchable) and
 in ``checkpoints.db`` (the resumable graph state). The two are linked by ``thread_id``.

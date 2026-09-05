@@ -1,4 +1,4 @@
-"""``paper2wiki config show`` — print the settings actually in effect.
+"""``any2wiki config show`` — print the settings actually in effect.
 
 Answers "what will this run actually do?" without starting the agent, and without
 spending anything: which model each task resolved to, **which provider and endpoint it

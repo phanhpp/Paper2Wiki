@@ -151,7 +151,7 @@ def main() -> None:
 
 
     print("\nUse any KEY above as that user:")
-    print("  PAPER2WIKI_LLM_GATEWAY=litellm LITELLM_API_KEY=<key> \\")
+    print("  ANY2WIKI_LLM_GATEWAY=litellm LITELLM_API_KEY=<key> \\")
     print("    uv run python -m src.cli.app chat 'hi in 3 words'")
     print("\nNote: re-running creates NEW teams (team_alias is not deduped). Delete stale ones in :4000/ui.")
 
