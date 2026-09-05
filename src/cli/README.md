@@ -215,5 +215,5 @@ neither can toggle closed: they launch `less`, so press `q`.
 way to turn completion on — but `app.py` sets `add_completion=False`, which removes
 that flag. Either flip it to `True` or drop the completer.
 - **Interactive paths have no automated tests** (spinner, smear, Ctrl-O) — verified by hand
-only. Everything else is covered by `tests/test_cli.py` under `pytest -m unit`.
+only. Everything else is covered by `tests/cli/test_cli.py` under `pytest -m unit`.
 

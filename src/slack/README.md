@@ -212,7 +212,7 @@ kick off a real ingest.
 
 ## Tests
 
-`tests/test_slack.py` — 25 unit tests, no network, no workspace: thread-id derivation,
+`tests/slack/test_slack.py` — 25 unit tests, no network, no workspace: thread-id derivation,
 token buffering, HITL decision shapes, the channel filter, and that queued turns don't
 overlap.
 

@@ -1,7 +1,7 @@
 """One-shot script to fetch raw LangSmith runs and save them as a JSON fixture.
 
 Run manually when you need to refresh the fixture:
-    uv run --env-file .env python -m tests.save_fixtures
+    uv run --env-file .env python -m tests.scripts.save_fixtures
 
 Requires LANGSMITH_API_KEY to be set. The fixture is intentionally committed
 so tests can run offline without hitting the API.

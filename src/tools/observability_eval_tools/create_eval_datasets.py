@@ -36,7 +36,7 @@ _TOOL_EVAL_CATEGORY: dict[str, str] = {
 # an HTTP 429, and would have flaked on exactly the error that created it.)
 #
 # **Every tool in ``src/tools/__init__.py:all_tools`` must appear here.**
-# ``tests/test_eval_case_generation.py`` fails when one is missing — a comment asking
+# ``tests/tools/test_eval_case_generation.py`` fails when one is missing — a comment asking
 # you to remember would not be a reminder.
 _TOOL_EXECUTION: dict[str, str] = {
     # local — no network, no API key; reproducible in the secret-free gate

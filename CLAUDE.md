@@ -23,7 +23,7 @@ uv run python -m ipykernel install --user --name=any2wiki
 uv run pytest
 
 # Run a single test file
-uv run pytest tests/test_arxiv_tool.py
+uv run pytest tests/tools/test_arxiv_tool.py
 
 # Run tests by marker (unit, integration, smoke, slow)
 uv run pytest -m unit
@@ -94,7 +94,7 @@ detected mid-stream, which prompted **twice for one tool call** — `values` re-
 whole state each super-step, so the interrupt just resolved reappeared on resume. **Do not
 "fix" a repeat by deduplicating on `Interrupt.id`**: it is
 `xxh3_128_hexdigest(checkpoint_ns)` — a hash of the *node position*, not the interrupt's unique ID — so if
-two genuine approvals at the same node, they will share the exact same Interrupt.id. Ignoring matching IDs would bypass the second interrupt object and automatically approve the action without asking you. Pinned by `tests/test_stream_interrupts.py`. This bug hit Slack too; both
+two genuine approvals at the same node, they will share the exact same Interrupt.id. Ignoring matching IDs would bypass the second interrupt object and automatically approve the action without asking you. Pinned by `tests/agents/test_stream_interrupts.py`. This bug hit Slack too; both
 front-ends share `run_turn_stream_async`.
 
 **File tools and `execute` use different path spaces.** `virtual_mode=True` makes
@@ -236,7 +236,7 @@ first `on_token` swaps it for a live Markdown block → `on_turn_end` commits th
 results route to `on_tool_result` (collapsed preview, full text stashed), **not** to the
 Markdown stream. HITL interrupts route to `handle_interrupts`.
 
-**Verified by unit tests** (`pytest -m unit`; `tests/test_cli.py`, `tests/test_stream_persist.py`):
+**Verified by unit tests** (`pytest -m unit`; `tests/cli/test_cli.py`, `tests/agents/test_stream_persist.py`):
 - HITL decisions: approve / reject (with & without reason) / edit (JSON + Python-dict + invalid
   fallback) / **respond** / yolo / auto-approve short-circuit; `choices_for` filters to the
   tool's `allowed_decisions`. Decision shapes match `langchain ... human_in_the_loop`.
@@ -326,7 +326,7 @@ uv run --env-file .env python eval/run_weekly_baselines.py
 
 **Known CI constraints:**
 - `wiki/` is **not** tracked and is **not** a test fixture. Every test builds its own
-  wiki under `tmp_path` — `tests/test_wiki_integrity_check.py` covers broken links,
+  wiki under `tmp_path` — `tests/tools/test_wiki_integrity_check.py` covers broken links,
   invalid frontmatter and virtual paths that way, which is more than the old
   `wiki_check_runs` gate case did (it only proved the check ran). Verified: hiding
   `wiki/` entirely leaves the whole unit suite passing
@@ -339,7 +339,7 @@ uv run --env-file .env python eval/run_weekly_baselines.py
    — `local` (no network, no API key), `web` (needs a search-provider key) or `network`.
    It decides whether a failure of that tool can become a *blocking* gate case; only
    `local` may, since regression cases are scored at 1.00 and anything that flakes would
-   block every PR. `tests/test_eval_case_generation.py` fails until you classify it.
+   block every PR. `tests/tools/test_eval_case_generation.py` fails until you classify it.
 
 ## Pending Cleanup
 

@@ -2,7 +2,7 @@
 
 Does not print message bodies — only counts and a few IDs — so safe for large fixtures.
 
-    uv run python tests/inspect_fixture_message_shapes.py
+    uv run python tests/scripts/inspect_fixture_message_shapes.py
 """
 from __future__ import annotations
 
