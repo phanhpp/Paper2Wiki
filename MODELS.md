@@ -19,14 +19,18 @@ resolves them, with no API call. Use it after every change in this document.
 **You do not have to set any of these.** One model runs all six. They exist so you *can*
 point a task somewhere cheaper or different.
 
-| Task | What it does | How often it runs |
-|---|---|---|
-| `supervisor` | the main agent — plans, calls tools, writes pages | constantly |
-| `subagent` | the Marp slide subagent | only when making slides |
-| `title` | names a session from its first message | once per session |
-| `summarize` | condenses traces — **needs structured output** | trace analysis only |
-| `judge` | scores eval runs — **needs structured output** | evals only |
-| `web_summarize` | condenses a scraped web page | per web fetch |
+
+| Task            | What it does                                      | How often it runs       |
+| --------------- | ------------------------------------------------- | ----------------------- |
+| `supervisor`    | the main agent — plans, calls tools, writes pages | constantly              |
+| `subagent`      | the Marp slide subagent                           | only when making slides |
+| `title`         | names a session from its first message            | once per session        |
+| `summarize`     | condenses traces — **needs structured output**    | trace analysis only     |
+| `judge`         | scores eval runs — **needs structured output**    | evals only              |
+| `web_summarize` | condenses a scraped web page                      | per web fetch           |
+
+
+
 
 ### Setting them
 
@@ -62,11 +66,13 @@ any2wiki chat "hi" -m openai:gpt-4o           # every task not pinned above
 ANY2WIKI_MODEL_JUDGE=openai:gpt-4o any2wiki config show   # one task
 ```
 
-> **The shipped `config.yaml` already pins five tasks to `claude-haiku-4-5`** — cheap
+> **The shipped** `config.yaml` **already pins five tasks to** `claude-haiku-4-5` — cheap
 > models for cheap work. That is why `config show` shows haiku for everything except the
 > supervisor, and why `-m` appears to move only the supervisor: a task pinned in
 > `config.yaml` beats the flag. Delete those `auxiliary` entries if you want one model
 > everywhere.
+
+
 
 ### Trying a new provider
 
@@ -82,6 +88,8 @@ One small call per task, forcing all six onto the model you name — pinned task
 which `-m` alone would not do. Omit the model to check your current config.
 
 ---
+
+
 
 ## Quick start
 
@@ -105,6 +113,8 @@ any2wiki config show      # confirm before running anything
 
 ---
 
+
+
 ## Provider recipes
 
 Each block goes in `config.yaml`. After each one, run `any2wiki config show` and check
@@ -116,9 +126,12 @@ the **Provider** and **Endpoint** columns say what you expect.
 model:
   default: claude-sonnet-4-6
 ```
+
 ```bash
 ANTHROPIC_API_KEY=sk-ant-...
 ```
+
+
 
 ### OpenAI
 
@@ -126,9 +139,12 @@ ANTHROPIC_API_KEY=sk-ant-...
 model:
   default: openai:gpt-4o
 ```
+
 ```bash
 OPENAI_API_KEY=sk-...
 ```
+
+
 
 ### Google Gemini
 
@@ -136,12 +152,12 @@ OPENAI_API_KEY=sk-...
 model:
   default: google_genai:gemini-3.5-flash-lite
 ```
+
 ```bash
 GOOGLE_API_KEY=...
 ```
 
-**Model names retire.** `gemini-2.0-flash` was in this document until it started returning
-`404 … is not found for API version v1beta`. List what your key can actually reach:
+To check what your key can actually reach, run:
 
 ```bash
 uv run --env-file .env python -c "
@@ -151,6 +167,8 @@ d = json.load(urllib.request.urlopen(
 print(*sorted(m['name'].replace('models/','') for m in d['models']
               if 'generateContent' in m.get('supportedGenerationMethods',[])), sep='\n')"
 ```
+
+
 
 ### OpenRouter — one key, most models
 
@@ -180,6 +198,8 @@ Switch models within OpenRouter without editing the file:
 any2wiki chat "hi" -m openai/gpt-4o
 any2wiki chat "hi" -m google/gemini-2.5-flash
 ```
+
+
 
 ### Ollama — local
 
@@ -217,6 +237,8 @@ model:
 > provider name, so it is left alone — see *Troubleshooting* below for when a colon **is**
 > treated as a provider.
 
+
+
 ### LiteLLM gateway
 
 If you run the optional proxy in `gateway/`, route through it with an env var instead of
@@ -233,6 +255,8 @@ fallbacks. See `gateway/README.md`.
 
 ---
 
+
+
 ## Which model a task ends up using
 
 Five levels. **The first one that exists wins:**
@@ -241,13 +265,15 @@ Five levels. **The first one that exists wins:**
 Task-Specific Env Var → Task Config → Global Env Var → Base Config → Default Fallback
 ```
 
-| Level | Where | Example | Applies to |
-|---|---|---|---|
-| **1 · Task-Specific Env Var** | `.env` | `ANY2WIKI_MODEL_SUMMARIZE=openai:gpt-4o-mini` | one task |
-| **2 · Task Config** | `config.yaml` | `auxiliary.summarize.model: openai:gpt-4o-mini` | one task |
-| **3 · Global Env Var** | `.env`, or `-m` | `ANY2WIKI_MODEL=openai:gpt-4o` | every task |
-| **4 · Base Config** | `config.yaml` | `model.default: openai:gpt-4o` | every task |
-| **5 · Default Fallback** | built in | `claude-sonnet-4-6` | every task |
+
+| Level                         | Where           | Example                                         | Applies to |
+| ----------------------------- | --------------- | ----------------------------------------------- | ---------- |
+| **1 · Task-Specific Env Var** | `.env`          | `ANY2WIKI_MODEL_SUMMARIZE=openai:gpt-4o-mini`   | one task   |
+| **2 · Task Config**           | `config.yaml`   | `auxiliary.summarize.model: openai:gpt-4o-mini` | one task   |
+| **3 · Global Env Var**        | `.env`, or `-m` | `ANY2WIKI_MODEL=openai:gpt-4o`                  | every task |
+| **4 · Base Config**           | `config.yaml`   | `model.default: openai:gpt-4o`                  | every task |
+| **5 · Default Fallback**      | built in        | `claude-sonnet-4-6`                             | every task |
+
 
 The pattern: **task beats global, and env beats config.**
 
@@ -266,7 +292,7 @@ any2wiki serve -m openai:gpt-4o
 
 It must come **after** a command — `any2wiki -m openai:gpt-4o` alone is an error.
 
-**It does not override a task pinned in `config.yaml`.** With `auxiliary.judge.model` set,
+**It does not override a task pinned in** `config.yaml`**.** With `auxiliary.judge.model` set,
 `-m` moves every other task and leaves `judge` alone:
 
 ```bash
@@ -283,10 +309,12 @@ To change a pinned task too, use its own env var:
 ANY2WIKI_MODEL_JUDGE=openai:gpt-4o any2wiki config show -m openai:gpt-4o
 ```
 
-**`-m` sets only the model, never the endpoint.** With OpenRouter configured, `-m` switches
+`-m` **sets only the model, never the endpoint.** With OpenRouter configured, `-m` switches
 models *within* OpenRouter. To change endpoint, edit `config.yaml`.
 
 ---
+
+
 
 ## Per-task models
 
@@ -308,18 +336,22 @@ auxiliary:
 
 Which fields inherit from the `model:` block when a task omits them:
 
-| field | inherits? |
-|---|---|
-| `model` | yes |
-| `provider` | yes |
-| `base_url` | yes |
-| `api_key` | yes |
-| `timeout` | **no** — task-only |
+
+| field        | inherits?          |
+| ------------ | ------------------ |
+| `model`      | yes                |
+| `provider`   | yes                |
+| `base_url`   | yes                |
+| `api_key`    | yes                |
+| `timeout`    | **no** — task-only |
 | `extra_body` | **no** — task-only |
+
 
 Setting `model.timeout` does not give it to the tasks; only a task's own block does.
 
 ---
+
+
 
 ## Checking without spending anything
 
@@ -351,7 +383,11 @@ means the provider's own API; anything else is where your requests are really go
 
 ---
 
+
+
 ## Troubleshooting
+
+
 
 ### `404 not_found_error — model: openai:gpt-4o`
 
@@ -374,13 +410,17 @@ providers.
 
 The provider's key is missing from `.env`. Which key depends on the model, not on Anthropic:
 
-| model looks like | needs |
-|---|---|
-| `claude-…`, `anthropic:…` | `ANTHROPIC_API_KEY` |
-| `gpt-…`, `openai:…` | `OPENAI_API_KEY` |
-| `gemini-…`, `google_genai:…` | `GOOGLE_API_KEY` |
-| `groq:…` | `GROQ_API_KEY` |
-| anything with a `base_url` | that endpoint's key, in `api_key:` |
+
+| model looks like             | needs                              |
+| ---------------------------- | ---------------------------------- |
+| `claude-…`, `anthropic:…`    | `ANTHROPIC_API_KEY`                |
+| `gpt-…`, `openai:…`          | `OPENAI_API_KEY`                   |
+| `gemini-…`, `google_genai:…` | `GOOGLE_API_KEY`                   |
+| `groq:…`                     | `GROQ_API_KEY`                     |
+| anything with a `base_url`   | that endpoint's key, in `api_key:` |
+
+
+
 
 ### `insufficient_quota` / `credit_balance_exhausted`
 
@@ -405,9 +445,12 @@ with `ANY2WIKI_MODEL_<TASK>`, or remove the pin from `config.yaml`.
 
 ---
 
+
+
 ## Related
 
 - `README.md` → **Using the CLI** — every command and flag
 - `config.example.yaml` — every option, commented
 - `gateway/README.md` — the optional LiteLLM proxy
 - `src/llm_roles.py` — the resolver, if you want the exact rules in code
+
