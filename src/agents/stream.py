@@ -14,21 +14,13 @@ from src.agents.renderer import Renderer, DefaultRenderer
 from src.sessions.sessions_db_setup import get_sessions_conn
 from src.sessions.session_manager import save_session
 from src.sessions.title_manager import maybe_auto_title
+from src.text import as_text as _as_text
+
+#: How long a finishing turn waits for the auto-title call before giving up.
+_TITLE_WAIT_SECONDS = 10.0
 
 
-def _as_text(content) -> str:
-    """Flatten a message's content (str, or a list of text/dict blocks) to plain text."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, dict):
-                parts.append(block.get("text") or block.get("content") or str(block))
-            else:
-                parts.append(str(block))
-        return "\n".join(parts)
-    return str(content)
+
 
 # Todo: resolve flow_type by tools involved
 def _save_session(conn, thread_id, messages, started_at, flow_type="ingest", auto_title=True):
@@ -46,7 +38,13 @@ def _save_session(conn, thread_id, messages, started_at, flow_type="ingest", aut
         flow_type=flow_type,
     )
     if auto_title:
-        maybe_auto_title(conn, session_id, messages)
+        thread = maybe_auto_title(conn, session_id, messages)
+        # Wait briefly. The titling thread is a daemon, so a one-shot `chat` would
+        # otherwise exit and kill it mid-call, leaving every such session "untitled" —
+        # only the REPL, which stays alive for the next prompt, ever got a title.
+        # Bounded so a slow or failing provider delays exit by seconds, not forever.
+        if thread is not None:
+            thread.join(timeout=_TITLE_WAIT_SECONDS)
 
 
 async def run_turn_stream_async(

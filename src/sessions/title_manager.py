@@ -18,6 +18,7 @@ import logging
 from typing import Optional
 from src.agents.llms import set_up_llms
 from src.llm_roles import get_model_spec
+from src.text import as_text
 
 logger = logging.getLogger(__name__)
 
@@ -232,8 +233,8 @@ def _generate_title(
     Returns:
         Generated title string, or None if generation fails or returns empty.
     """
-    user_snippet = (user_msg or "")[:500]
-    assistant_snippet = (assistant_msg or "")[:500]
+    user_snippet = as_text(user_msg)[:500]
+    assistant_snippet = as_text(assistant_msg)[:500]
 
     llm = set_up_llms(get_model_spec("title"))
 
@@ -242,8 +243,9 @@ def _generate_title(
         {"role": "user", "content": f"User: {user_snippet}\n\nAssistant: {assistant_snippet}"}
     ])
 
-    title = (response.content or "").strip().strip('"\'')
-    print("Session title: ", title)
+    # as_text, not .strip(): Gemini returns a list of blocks where Anthropic
+    # returns a string, and the difference used to raise here.
+    title = as_text(response.content).strip().strip('"\'')
     # Strip common LLM output prefixes
     if title.lower().startswith("title:"):
         title = title[6:].strip()
@@ -256,11 +258,16 @@ def _generate_title(
 
 
 def maybe_auto_title(
-    conn, 
-    session_id: str, 
-    messages: list, 
-) -> None:
-    """Fire-and-forget: generate and set a session title in a background thread.
+    conn,
+    session_id: str,
+    messages: list,
+) -> "threading.Thread | None":
+    """Generate and set a session title in a background thread.
+
+    Returns the thread so a short-lived caller can wait for it. The REPL does not need
+    to — it stays alive for the next prompt — but a one-shot ``chat`` exits immediately,
+    and a daemon thread dies with the process, so every one-shot session was left
+    ``untitled``. See ``stream.py:_save_session``.
 
     Only runs if:
     - Both a user message and an assistant message exist in the session
@@ -273,13 +280,16 @@ def maybe_auto_title(
         conn:       sqlite3.Connection to sessions.db.
         session_id: ID of the session to title.
         messages:   Final message list from agent state (LangChain message objects).
+
+    Returns:
+        The started thread, or None when there is nothing to title.
     """
     # Extract first human and first ai message
     user_msg = next((m.content for m in messages if m.type == "human"), None)
     assistant_msg = next((m.content for m in messages if m.type == "ai"), None)
 
     if not user_msg or not assistant_msg:
-        return  # nothing to title
+        return None  # nothing to title
 
     def _run():
         try:
@@ -300,3 +310,4 @@ def maybe_auto_title(
 
     thread = threading.Thread(target=_run, daemon=True, name="auto-title")
     thread.start()
+    return thread

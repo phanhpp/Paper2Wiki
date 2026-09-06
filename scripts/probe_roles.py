@@ -23,11 +23,11 @@ MODEL = sys.argv[1] if len(sys.argv) > 1 else None
 if MODEL:
     import os
 
-    os.environ["PAPER2WIKI_MODEL"] = MODEL
+    os.environ["ANY2WIKI_MODEL"] = MODEL
     # Level 1 beats auxiliary.<task>.model in config.yaml, which otherwise pins haiku
     # and would silently keep testing Anthropic.
     for role in ("SUPERVISOR", "SUBAGENT", "TITLE", "SUMMARIZE", "JUDGE", "WEB_SUMMARIZE"):
-        os.environ[f"PAPER2WIKI_MODEL_{role}"] = MODEL
+        os.environ[f"ANY2WIKI_MODEL_{role}"] = MODEL
 
 from src.agents.llms import set_up_llms          # noqa: E402
 from src.llm_roles import VALID_ROLES, get_model_spec  # noqa: E402
@@ -67,6 +67,17 @@ def probe(role: str) -> tuple[str, str]:
 
 
 print(f"\nProbing roles with: {MODEL or '(config.yaml defaults)'}\n")
+
+# Fail loudly if the override did not take. This script once set `PAPER2WIKI_MODEL_*`
+# after the rename to ANY2WIKI_*, so nothing read it — and it happily reported
+# "All roles OK" for a provider it had never contacted.
+if MODEL:
+    wrong = [r for r in sorted(VALID_ROLES) if get_model_spec(r).model != MODEL]
+    if wrong:
+        print(f"  override did not reach: {', '.join(wrong)}")
+        print(f"  every role must resolve to {MODEL!r} — the probe would test the wrong "
+              "model and still pass")
+        sys.exit(2)
 worst = 0
 for role in sorted(VALID_ROLES):
     status, detail = probe(role)

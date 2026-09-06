@@ -30,7 +30,7 @@ app_console = Console()
 _SUGGESTED: dict[str, list[str]] = {
     "anthropic": ["claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
     "openai": ["openai:gpt-4o", "openai:gpt-4o-mini"],
-    "google_genai": ["google_genai:gemini-2.0-flash"],
+    "google_genai": ["google_genai:gemini-3.5-flash-lite"],
     "groq": ["groq:llama-3.3-70b-versatile"],
     "deepseek": ["deepseek:deepseek-chat"],
 }
@@ -39,7 +39,7 @@ _SUGGESTED: dict[str, list[str]] = {
 _CHEAP: dict[str, str] = {
     "anthropic": "claude-haiku-4-5-20251001",
     "openai": "openai:gpt-4o-mini",
-    "google_genai": "google_genai:gemini-2.0-flash",
+    "google_genai": "google_genai:gemini-3.5-flash-lite",
 }
 
 _SIDE_TASKS = ("subagent", "title", "summarize", "judge", "web_summarize")

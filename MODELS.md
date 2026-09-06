@@ -134,10 +134,22 @@ OPENAI_API_KEY=sk-...
 
 ```yaml
 model:
-  default: google_genai:gemini-2.0-flash
+  default: google_genai:gemini-3.5-flash-lite
 ```
 ```bash
 GOOGLE_API_KEY=...
+```
+
+**Model names retire.** `gemini-2.0-flash` was in this document until it started returning
+`404 … is not found for API version v1beta`. List what your key can actually reach:
+
+```bash
+uv run --env-file .env python -c "
+import os, urllib.request, json
+d = json.load(urllib.request.urlopen(
+    f\"https://generativelanguage.googleapis.com/v1beta/models?key={os.environ['GOOGLE_API_KEY']}\"))
+print(*sorted(m['name'].replace('models/','') for m in d['models']
+              if 'generateContent' in m.get('supportedGenerationMethods',[])), sep='\n')"
 ```
 
 ### OpenRouter — one key, most models
