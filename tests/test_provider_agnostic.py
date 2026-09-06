@@ -543,3 +543,69 @@ def test_config_show_prints_provider_and_endpoint_columns(tmp_path, monkeypatch)
     flat = " ".join(CliRunner().invoke(app, ["config", "show"]).output.split())
     assert "Provider" in flat and "Endpoint" in flat
     assert "openrouter.ai" in flat, "the endpoint must be visible, not just the model"
+
+
+# --- message content shape: str on one provider, a block list on another --------
+#
+# Providers disagree on ``AIMessage.content``. langchain-anthropic collapses a *single*
+# un-cited text block to a plain ``str`` (chat_models.py: ``len(content) == 1 and
+# content[0]["type"] == "text"``) and leaves everything else a list, so both shapes
+# arrive from the same provider depending on whether the turn called a tool. Any code
+# that assumes one shape works on one path and breaks on the other — which is how
+# session auto-titling died the first time it met a block list.
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "content, expected",
+    [
+        ("plain string", "plain string"),
+        ([{"type": "text", "text": "block"}], "block"),
+        ([{"text": "no type key"}], "no type key"),
+        ([{"type": "text", "text": "a"}, {"type": "text", "text": "b"}], "a\nb"),
+        (["bare string in a list"], "bare string in a list"),
+        (None, ""),
+        ([], ""),
+    ],
+)
+def test_as_text_flattens_every_provider_shape(content, expected):
+    from src.text import as_text
+
+    assert as_text(content) == expected
+
+
+@pytest.mark.unit
+def test_as_text_never_raises_on_an_unknown_shape():
+    """The fallback matters more than the output: this runs inside a titling thread
+    whose only error path is a swallowed warning and an untitled session."""
+    from src.text import as_text
+
+    assert as_text(object()) != ""          # stringified, not crashed
+    assert as_text([{"unknown": 1}]) != ""
+
+
+@pytest.mark.unit
+def test_summarizer_reads_a_block_list_rather_than_returning_empty(monkeypatch):
+    """Pins that the summarizer goes through ``as_text``.
+
+    An empty read here is not a visible error: ``_call_llm`` treats it as an empty
+    summary, retries twice, returns ``None``, and the caller keeps the *raw* page — the
+    token blowout the summarizer exists to prevent, with only a log line to show for it.
+    """
+    import asyncio
+
+    import src.tools.web_tools.summarizer as sm
+
+    class _Resp:
+        content = [{"type": "text", "text": "the summary"}]
+
+    class _Model:
+        def bind(self, **_):
+            return self
+
+        async def ainvoke(self, _messages):
+            return _Resp()
+
+    monkeypatch.setattr(sm, "_get_model", lambda: _Model())
+
+    assert asyncio.run(sm._call_llm("system", "content", 100)) == "the summary"

@@ -27,6 +27,7 @@ from typing import Any
 
 from src.agents.llms import set_up_llms
 from src.llm_roles import get_model_spec
+from src.text import as_text
 
 logger = logging.getLogger(__name__)
 
@@ -118,10 +119,11 @@ async def _call_llm(
                 {"role": "system", "content": system},
                 {"role": "user", "content": content},
             ])
-            # content is a str (most providers) or a list of blocks (coerce to text).
-            text = resp.content
-            if isinstance(text, list):
-                text = "".join(b.get("text", "") for b in text if isinstance(b, dict))
+            # content is a str (most providers) or a list of blocks. Use the shared
+            # normaliser rather than a local copy — the same flattening handles tool
+            # results and session titles, and a fourth private version is how the
+            # titling bug survived unnoticed in one of them.
+            text = as_text(resp.content)
             if text:
                 return text
 
