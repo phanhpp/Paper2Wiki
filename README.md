@@ -1,6 +1,6 @@
 # Any2Wiki: A Self-Improving Research Assistant
 
-A research assistant that transforms research papers into durable artifacts — wiki pages, slide decks, and code. Powered by the [Deep Agents SDK](https://github.com/langchain-ai/deepagents), it can refine its own skills and logic on-demand by analyzing its execution traces.
+A self-improving research assistant that turns any source — papers, repos, web pages — into durable artifacts: wiki pages, slide decks, and code. Built on the [Deep Agents SDK](https://github.com/langchain-ai/deepagents) as a worked example of **loop engineering**: four stacked feedback loops with human approval at every level, a **three-track eval harness** that turns production failures into regression tests, and trace analysis that lets the agent patch its own skills.
 
 ---
 
@@ -102,12 +102,10 @@ ANY2WIKI_MODEL=             # Optional: base LLM for all roles, e.g. openai:gpt-
 
 > **Full guide: [`MODELS.md`](MODELS.md)** — copy-paste recipes for Anthropic, OpenAI,
 > Gemini, OpenRouter, Ollama (local and cloud) and the LiteLLM gateway, plus troubleshooting.
-> The essentials are below.
 
 **Pick one model, and everything uses it.** Set `model.default` in `config.yaml` and that
 provider's API key — it drives the supervisor, the subagents, and every background task.
-Any LangChain model string works, including the `provider:model` form:
-`openai:gpt-4o`, `google_genai:gemini-2.0-flash`, `anthropic:claude-sonnet-4-6`.
+Any LangChain model string works, including the `provider:model` form.
 
 ```yaml
 # config.yaml
@@ -115,44 +113,10 @@ model:
   default: openai:gpt-4o
 ```
 
-That's the whole setup. The rest of this section is for when you want one task to differ.
+That's the whole setup.
 
-#### Which model a task ends up using
-
-Five levels. **The first one that exists wins:**
-
-```
-Task-Specific Env Var  →  Task Config  →  Global Env Var  →  Base Config  →  Default Fallback
-```
-
-| Level | Where | Example | Applies to |
-|---|---|---|---|
-| **1 · Task-Specific Env Var** | `.env` | `ANY2WIKI_MODEL_SUMMARIZE=openai:gpt-4o-mini` | one task |
-| **2 · Task Config** | `config.yaml` | `auxiliary.summarize.model: openai:gpt-4o-mini` | one task |
-| **3 · Global Env Var** | `.env` | `ANY2WIKI_MODEL=openai:gpt-4o` | every task |
-| **4 · Base Config** | `config.yaml` | `model.default: openai:gpt-4o` | every task |
-| **5 · Default Fallback** | built in | `claude-sonnet-4-6` | every task |
-
-**`--model` / `-m` is level 3.** The flag writes `ANY2WIKI_MODEL` for that one run, so it
-beats `model.default` but *not* a task's own `auxiliary.<task>.model`. Run
-`any2wiki config show -m <model>` to see exactly which tasks it moved.
-
-The pattern behind the order: **task beats global, and env beats config.**
-
-So `ANY2WIKI_MODEL_SUMMARIZE` (1) wins over `auxiliary.summarize.model` (2), which wins
-over `ANY2WIKI_MODEL` (3), which wins over `model.default` (4). And if you set nothing at
-all, you get `claude-sonnet-4-6` (5).
-
-In practice: levels 4 and 3 are how you pick your model, and levels 2 and 1 are how you
-make one task differ — permanently in the file, or temporarily with an env var.
-
-The tasks you can name: `supervisor`, `subagent`, `title`, `summarize`, `judge`,
-`web_summarize`.
-
-#### Giving one task a different provider
-
-An `auxiliary.<task>` block can carry more than a model name, so a single task can go to a
-different provider, a different endpoint, or a different key:
+**To make one task differ**, give it an `auxiliary.<task>` block — it can carry its own
+provider, endpoint and key, so a single task can run somewhere else entirely:
 
 ```yaml
 auxiliary:
@@ -160,12 +124,19 @@ auxiliary:
     model: openai:gpt-4o-mini
     base_url: https://openrouter.ai/api/v1   # any OpenAI-compatible gateway
     api_key: sk-or-...                       # its own key
-    timeout: 60
 ```
 
-`provider`, `base_url` and `api_key` fall back to the `model:` block if the task doesn't
-set them. **`timeout` and `extra_body` do not** — they apply only to the task that sets
-them. See `config.example.yaml`.
+Tasks: `supervisor`, `subagent`, `title`, `summarize`, `judge`, `web_summarize`.
+
+**When several are set, the first that exists wins:**
+
+```
+ANY2WIKI_MODEL_<TASK> → auxiliary.<task>.model → ANY2WIKI_MODEL → model.default → claude-sonnet-4-6
+```
+
+**Task beats global, env beats config.** The catch: `-m/--model` writes `ANY2WIKI_MODEL`,
+which is *weaker* than a task pinned in `config.yaml` — so `-m` may move fewer tasks than
+you expect. Run `any2wiki config show -m <model>` to see which ones it actually moved.
 
 ## Usage
 
