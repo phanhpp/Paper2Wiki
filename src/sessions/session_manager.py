@@ -22,7 +22,7 @@ import logging
 from datetime import datetime
 from sqlite3 import Connection
 from typing import Optional
-from src.agents.llms import MODEL_CONFIG
+from src.llm_roles import get_model_spec
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +108,7 @@ def save_session(
         thread_id:  LangGraph thread ID for this flow (stored for reference).
         flow_type:  Flow identifier. default is "query".
         messages:   Final message list from agent state (LangChain message objects).
-        model:      Optional explicit model name; defaults to Haiku.
+        model:      Optional explicit model name; defaults to the resolved `supervisor` model.
         started_at: Unix timestamp when the flow started.
 
     Returns:
@@ -116,7 +116,12 @@ def save_session(
     """
 
     now = int(time.time())
-    resolved_model = model or MODEL_CONFIG["claude-haiku-4-5-20251001"]["model"]
+    # Fall back to the model the supervisor actually resolved to, not a constant. This
+    # used to be a hard-coded haiku string and no caller passed `model=`, so every row
+    # in `sessions.db` claimed haiku — including sonnet and Gemini runs. `sessions ls`
+    # could not answer "which provider ran this?", the one question you ask it after
+    # switching providers.
+    resolved_model = model or get_model_spec("supervisor").model
 
     conn.execute("""
         INSERT OR IGNORE INTO sessions(id, source, model, started_at, ended_at, status)
